@@ -8,6 +8,8 @@ readme = "README.md"
 [features]
 default = ["router", "store", "widgets"]
 async = []
+diagnostics = []
+diagnostics-serde = ["diagnostics", "dep:serde"]
 router = []
 store = []
 theme = []
@@ -15,4 +17,5 @@ tokio = ["async", "dep:tokio"]
 widgets = ["theme"]
 
 [dependencies]
+serde = { version = "1", optional = true, features = ["derive"] }
 tokio = { version = "1", optional = true, features = ["rt"] }

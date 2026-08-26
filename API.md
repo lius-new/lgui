@@ -73,8 +73,7 @@ typed store and invalidates its component only when the selected value changes. 
 notifications before the next frame are batched by the component update queue. Mutation code does
 not declare string paths, and an unselected field cannot refresh the component.
 
-Diagnostics, widgets, platform, and renderer features are added only when their implementations
-cross into this crate.
+Platform and renderer features are added only when their implementations cross into this crate.
 
 ## Router
 
@@ -128,3 +127,21 @@ Default widget styles resolve the nearest `ThemeContext` during element renderin
 `.style(...)` overrides those tokens. `ThemeTokens` separates semantic colors, spacing, and
 typography from application theme schemas, so applications map their own palette into this small
 public contract.
+
+## Diagnostics
+
+The optional `diagnostics` feature provides backend-neutral frame metrics, snapshots, bounded
+collection, recent-sample queries, and provider/sink contracts. Renderers and platform adapters
+produce `FrameSample` values without exposing their native handles through the public model:
+
+```rust,ignore
+let mut frames = FrameCollector::new(120);
+frames.record(sample);
+
+let snapshot = frames.snapshot();
+let recent = frames.query(DiagnosticsQuery::recent(30));
+```
+
+Enable `diagnostics-serde` when an application needs to serialize metric value types. HUDs,
+operating-system resource sampling, tree inspection, debug commands, and application cache
+operations remain application concerns.

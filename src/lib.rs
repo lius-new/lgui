@@ -1,6 +1,8 @@
 #![deny(unsafe_code)]
 
 pub mod core;
+#[cfg(feature = "diagnostics")]
+pub mod diagnostics;
 pub mod frame;
 pub mod host;
 pub mod prelude;

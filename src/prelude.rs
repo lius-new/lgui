@@ -2,6 +2,11 @@ pub use crate::core::{
     component, context_provider, group, Element, ElementKey, RenderCx, RootComponent, State,
     StateSetter, UiRect,
 };
+#[cfg(feature = "diagnostics")]
+pub use crate::diagnostics::{
+    DiagnosticPresentMode, DiagnosticsProvider, DiagnosticsSink, FrameCollector,
+    FrameDiagnosticsSnapshot, FramePresentMetrics, FrameRenderMetrics, FrameSample,
+};
 #[cfg(feature = "router")]
 pub use crate::router::{
     Back, Navigate, Replace, RouteAction, RouteChange, RouteSubscriptionToken, Router,

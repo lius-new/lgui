@@ -46,6 +46,12 @@ The `widgets` feature contains only controlled, Store-agnostic controls. Widget 
 tokens from Context at element render time; explicit styles remain available. Application theme
 catalogs, persistence, branded palette fields, and business callbacks stay in the application.
 
+The `diagnostics` feature owns backend-neutral frame metric values, snapshots, bounded collection,
+recent-sample queries, and provider/sink contracts. `diagnostics-serde` adds serialization for
+metric value types without making serialization part of the portable core. Platform resource
+sampling, HUD rendering, tree inspection, debug commands, `AppRuntime`, and cache mutation remain
+in the application adapter.
+
 ## Forbidden Dependencies
 
 The `core`, `frame`, `host`, and `session` modules must not depend on:
