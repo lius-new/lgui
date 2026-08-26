@@ -3,19 +3,30 @@ use std::{cell::RefCell, mem::size_of, sync::Arc};
 use windows::{
     core::{Error, Result, PCWSTR},
     Win32::{
-        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
-        Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, UpdateWindow, HDC, PAINTSTRUCT},
+        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Graphics::Gdi::{
+            BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, HDC, PAINTSTRUCT,
+        },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+            Input::{
+                Ime::{
+                    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, GCS_COMPSTR,
+                    GCS_RESULTSTR,
+                },
+                KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
+            },
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
                 GetMessageW, LoadCursorW, PostQuitMessage, RegisterClassExW, SetWindowPos,
                 ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
                 MINMAXINFO, MSG, SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WM_CHAR,
-                WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_KEYDOWN,
-                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SIZE, WNDCLASSEXW,
-                WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_OVERLAPPEDWINDOW, WS_SYSMENU,
+                WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO,
+                WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE,
+                WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_OVERLAPPEDWINDOW,
+                WS_SYSMENU,
             },
         },
     },
@@ -31,7 +42,9 @@ use crate::{
     session::UiSession,
 };
 
-use super::{DpiContext, GdiRenderer};
+use super::DpiContext;
+#[cfg(feature = "renderer-gdi")]
+use super::GdiRenderer;
 
 const WINDOW_CLASS: &str = "LguiApplicationWindow";
 
@@ -50,12 +63,14 @@ pub trait Win32RendererFactory: Send + Sync + 'static {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GdiRendererFactory;
 
+#[cfg(feature = "renderer-gdi")]
 impl Win32RendererFactory for GdiRendererFactory {
     fn create(&self, _hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
         Ok(Box::new(GdiRenderer::default()))
     }
 }
 
+#[cfg(feature = "renderer-gdi")]
 impl Win32Renderer for GdiRenderer {
     fn draw(&mut self, _hwnd: HWND, target: HDC, scene: &crate::core::Scene, viewport: UiRect) {
         self.clear(target, viewport);
@@ -75,6 +90,7 @@ impl Win32Application {
     }
 }
 
+#[cfg(feature = "renderer-gdi")]
 impl Default for Win32Application {
     fn default() -> Self {
         Self::with_renderer(GdiRendererFactory)
@@ -250,11 +266,50 @@ extern "system" fn window_proc(
             );
             LRESULT(0)
         }
+        WM_MOUSEWHEEL => {
+            let mut point = POINT {
+                x: lparam.0 as i16 as i32,
+                y: (lparam.0 >> 16) as i16 as i32,
+            };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut point);
+            }
+            dispatch_input(
+                hwnd,
+                InputEvent::Wheel {
+                    point: logical_point(hwnd, Point::new(point.x, point.y)),
+                    delta_y: ((wparam.0 >> 16) as i16 as i32) / 120,
+                },
+            );
+            LRESULT(0)
+        }
         WM_CHAR => {
             if let Some(character) = char::from_u32(wparam.0 as u32) {
                 dispatch_input(hwnd, InputEvent::TextInput(character.to_string()));
             }
             LRESULT(0)
+        }
+        WM_IME_STARTCOMPOSITION => {
+            dispatch_input(hwnd, InputEvent::ImeStart);
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+        WM_IME_COMPOSITION => {
+            let flags = lparam.0 as u32;
+            if flags & GCS_RESULTSTR.0 != 0 {
+                if let Some(text) = read_ime_string(hwnd, GCS_RESULTSTR) {
+                    dispatch_input(hwnd, InputEvent::ImeCommit(text));
+                }
+            } else if flags & GCS_COMPSTR.0 != 0 {
+                dispatch_input(
+                    hwnd,
+                    InputEvent::ImeUpdate(read_ime_string(hwnd, GCS_COMPSTR).unwrap_or_default()),
+                );
+            }
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+        WM_IME_ENDCOMPOSITION => {
+            dispatch_input(hwnd, InputEvent::ImeEnd);
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_KEYDOWN => {
             if let Some(key) = key_code(wparam.0) {
@@ -262,7 +317,7 @@ extern "system" fn window_proc(
                     hwnd,
                     InputEvent::KeyDown {
                         key,
-                        modifiers: KeyModifiers::default(),
+                        modifiers: key_modifiers(),
                     },
                 );
             }
@@ -361,6 +416,46 @@ fn key_code(value: usize) -> Option<KeyCode> {
         0x43 => Some(KeyCode::C),
         0x56 => Some(KeyCode::V),
         _ => None,
+    }
+}
+
+fn key_modifiers() -> KeyModifiers {
+    KeyModifiers {
+        ctrl: unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0,
+        shift: unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0,
+    }
+}
+
+fn read_ime_string(
+    hwnd: HWND,
+    kind: windows::Win32::UI::Input::Ime::IME_COMPOSITION_STRING,
+) -> Option<String> {
+    unsafe {
+        let context = ImmGetContext(hwnd);
+        if context.is_invalid() {
+            return None;
+        }
+        let byte_len = ImmGetCompositionStringW(context, kind, None, 0);
+        if byte_len < 0 {
+            let _ = ImmReleaseContext(hwnd, context);
+            return None;
+        }
+        let mut units = vec![0_u16; byte_len as usize / size_of::<u16>()];
+        if byte_len > 0 {
+            let copied = ImmGetCompositionStringW(
+                context,
+                kind,
+                Some(units.as_mut_ptr().cast()),
+                byte_len as u32,
+            );
+            if copied < 0 {
+                let _ = ImmReleaseContext(hwnd, context);
+                return None;
+            }
+            units.truncate(copied as usize / size_of::<u16>());
+        }
+        let _ = ImmReleaseContext(hwnd, context);
+        Some(String::from_utf16_lossy(&units))
     }
 }
 

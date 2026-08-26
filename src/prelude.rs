@@ -1,6 +1,13 @@
 pub use crate::application::{
     AppView, Application, ApplicationBackend, ApplicationHandle, WindowOptions,
 };
+#[cfg(feature = "svg")]
+pub use crate::assets::SvgRenderer;
+#[cfg(feature = "images")]
+pub use crate::assets::{
+    AssetBytes, AssetError, AssetResolver, CustomPaintProvider, ImageData, ImageLoader,
+    RenderResources,
+};
 pub use crate::core::{
     component, context_provider, group, Align, Axis, Color, EdgeInsets, Element, ElementKey,
     RenderCx, RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiRect,
@@ -13,7 +20,8 @@ pub use crate::diagnostics::{
 };
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
-    Clipboard, ClipboardError, ClipboardHandle, InputSink, WakeHandle,
+    Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationService,
+    TrayMenuItem, TrayService, WakeHandle,
 };
 pub use crate::renderer::{
     PresentMode, PresentRequest, PresentStats, PresenterPlugin, PresenterPluginHost, RenderBackend,

@@ -1,6 +1,8 @@
 #![deny(unsafe_code)]
 
 pub mod application;
+#[cfg(feature = "images")]
+pub mod assets;
 pub mod core;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;

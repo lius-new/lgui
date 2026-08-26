@@ -38,6 +38,67 @@ pub trait Clipboard: Send + Sync + 'static {
 
 pub type ClipboardHandle = Arc<dyn Clipboard>;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notification {
+    pub title: String,
+    pub body: String,
+}
+
+impl Notification {
+    pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            body: body.into(),
+        }
+    }
+}
+
+pub trait NotificationService: Send + Sync + 'static {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn show(&self, notification: &Notification) -> Result<(), Self::Error>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrayMenuItem<Command> {
+    pub label: String,
+    pub command: Command,
+    pub enabled: bool,
+    pub checked: bool,
+}
+
+impl<Command> TrayMenuItem<Command> {
+    pub fn new(label: impl Into<String>, command: Command) -> Self {
+        Self {
+            label: label.into(),
+            command,
+            enabled: true,
+            checked: false,
+        }
+    }
+
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = checked;
+        self
+    }
+}
+
+pub trait TrayService<Command>: Send + Sync + 'static
+where
+    Command: Clone + Send + Sync + 'static,
+{
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn install(&self, tooltip: &str, menu: &[TrayMenuItem<Command>]) -> Result<(), Self::Error>;
+    fn update_menu(&self, menu: &[TrayMenuItem<Command>]) -> Result<(), Self::Error>;
+    fn remove(&self);
+}
+
 #[derive(Clone)]
 pub struct WakeHandle {
     wake: UiWake,
