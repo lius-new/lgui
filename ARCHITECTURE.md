@@ -23,9 +23,9 @@ surface remains as a migration compatibility API for Liuguang callers.
 
 Application-specific behavior is attached to `UiEventContext` through traits defined in the
 application crate. The GUI crate exposes only propagation, scheduling flags, application context
-access, and an opaque host-command slot. A small set of `#[doc(hidden)]` component-builder methods
-remains public while widgets still live in the application crate; they return to crate-private
-visibility when the widgets migration is complete.
+access, and an opaque host-command slot. Application-owned advanced components use the same public
+element and event contracts as the widgets shipped by `lgui`; they do not require a dispatcher or
+presenter facade in `frontend`.
 
 Async effects are available with the `async` feature through the executor-neutral `UiExecutor`
 contract and standard `Future` cancellation. The `tokio` feature only exports a Tokio executor
@@ -70,8 +70,10 @@ Effect commits without exposing native handles to the component tree.
 The layered host still receives scene drawing, session configuration, and error reporting from
 the application, so it has no dependency on Liuguang configuration, resources, network executors,
 logging, or `AppRuntime`. Liuguang's resource-heavy GDI/Direct2D drawing remains an application
-adapter for images, SVG, blur, fonts/icons, and custom paint until those registries have neutral
-public contracts. The standalone counter target and independent `lgui-showcase` package exercise
+adapter for images, SVG, blur, fonts/icons, and custom paint alongside the neutral
+`RenderResources` contracts available to public backends. Its cache, remote-fetch, and
+brand-resource policies intentionally do not enter the portable crate. The standalone counter
+target and independent `lgui-showcase` package exercise
 the public Win32 backend without a Liuguang dependency. The showcase's manifest has no dependency
 other than `lgui`, and covers State, committed Effects, typed Store selection/actions, generic
 Router navigation, and optional diagnostics.
@@ -86,4 +88,6 @@ The `core`, `frame`, `host`, and `session` modules must not depend on:
 
 These boundaries are checked by `tests/architecture.rs`: portable sources reject Windows and
 application dependencies, while `platform::win32` separately rejects application dependencies.
-The portable dependency boundary is also checked by compiling with no default features.
+The portable dependency boundary is also checked by compiling with no default features. Liuguang's
+own architecture tests reject `frontend` dispatcher/host code, lgui facades, and infrastructure
+imports routed back through `frontend`.

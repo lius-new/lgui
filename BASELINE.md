@@ -1,6 +1,7 @@
 # Extraction Baseline
 
-Recorded on 2026-08-26 for the first workspace and runtime extraction.
+Recorded on 2026-08-27 after the complete workspace, runtime, platform, and application-boundary
+migration.
 
 ## Behavioral Contract
 
@@ -16,11 +17,14 @@ Recorded on 2026-08-26 for the first workspace and runtime extraction.
 
 ## Automated Baseline
 
-- `lgui --no-default-features`: 59 unit tests and 1 architecture test pass.
-- `lgui --features tokio`: the same 60 tests pass.
-- `liugc --bin liugc`: 219 tests pass and 4 environment-dependent live tests remain ignored.
+- `lgui --no-default-features`: 72 unit tests and 2 architecture tests pass.
+- `lgui --all-features`: 100 unit tests and 2 architecture tests pass.
+- `lgui-showcase --all-features` compiles with `lgui` as its only direct dependency.
+- The scoped Liuguang binary check and frontend test target pass; backend-wide tests are excluded
+  from this migration validation.
 - The portable dependency tree contains only `lgui` itself.
-- The `tokio` feature adds only Tokio and its macro dependencies.
+- Optional Windows, Tokio, image/SVG, and diagnostics surfaces are absent when default features are
+  disabled.
 
 Hardware FPS and frame-time numbers are intentionally not treated as portable thresholds. The
 Liuguang diagnostics runtime remains the measurement source until diagnostics is extracted; later

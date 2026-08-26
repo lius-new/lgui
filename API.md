@@ -53,9 +53,12 @@ attach typed state synchronization without teaching `lgui` about its runtime. `P
 `PresentMode`, and `PresentStats` are shared by the GDI and Direct2D adapters.
 
 The built-in GDI renderer covers rectangles, ellipses, text, lines, clips, static layers, and
-scroll-raster subcommands. Image registries, SVG, blur, and custom-paint commands remain in
-Liuguang's enhanced GDI/Direct2D adapters until their resource contracts are application-neutral.
-Effects are committed only after the built-in backend completes drawing a frame.
+scroll-raster subcommands. The optional `renderer-d2d` backend covers the same basic scene through
+Direct2D and DirectWrite. With `images` and `svg`, `RenderResources` provides application-neutral
+`AssetResolver`, `ImageLoader`, `SvgRenderer`, and `CustomPaintProvider` injection points. Complex
+cache policy, remote fetching, brand assets, font fallback, blur, and custom effects remain in
+Liuguang's enhanced renderer adapter. Effects are committed only after the built-in backend
+completes drawing a frame.
 
 ## State
 

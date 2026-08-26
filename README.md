@@ -9,8 +9,11 @@ typed Store integration, generic Router history and subscriptions, optional back
 diagnostics, and `UiSession`. The default `renderer-gdi` feature provides a runnable Win32
 `Application::new()` backend and a basic GDI scene renderer. The optional `backend-win32` layer
 also provides clipboard and DPI services plus the layered auxiliary-window host and GDI
-backbuffer. Liuguang's resource-aware GDI/Direct2D drawing remains an application adapter for
-images, SVG, blur, and custom paint. Public widgets include the layout and display primitives
+backbuffer, while `renderer-d2d` provides a basic Direct2D/DirectWrite renderer selected through
+the same renderer factory. The optional `images` and `svg` features expose `RenderResources` and
+application-supplied asset, image, SVG, and custom-paint contracts. Liuguang's resource-aware
+drawing remains an application adapter because its cache, font, blur, and brand-asset policies are
+not portable GUI mechanics. Public widgets include the layout and display primitives
 `button`, `panel`, `stack`, `text`, `divider`, and `faded_divider`, plus the controlled `checkbox`,
 `switch`, `slider`, and `select` controls styled through semantic theme tokens. Diagnostics HUDs
 and operating-system sampling remain application adapters.
@@ -41,4 +44,4 @@ cargo run -p lgui-showcase --features diagnostics
 
 Liuguang currently enables the `tokio` feature, which includes executor-neutral async effects and
 the optional Tokio executor adapter. Disabling default features keeps the crate platform-neutral
-and does not pull in Windows, Tokio, diagnostics, or serialization dependencies.
+and does not pull in Windows, Tokio, images, diagnostics, or serialization dependencies.
