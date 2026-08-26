@@ -131,6 +131,10 @@ impl UiUpdateQueue {
         *self.wake.write().expect("hook wake lock poisoned") = None;
     }
 
+    pub fn request_frame(&self) {
+        self.wake();
+    }
+
     pub fn invalidate(&self, owner: ComponentId, invalidation_id: UiId) {
         self.pending
             .lock()

@@ -59,6 +59,10 @@ pub trait ComponentState: Any {
         false
     }
 
+    fn wants_frame(&self) -> bool {
+        false
+    }
+
     fn take_route_invalidation(&mut self) -> bool {
         false
     }

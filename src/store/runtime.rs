@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
-use crate::core::UiRect;
+use crate::core::{UiRect, UiWake};
 
 use super::{
     definition::StoreDefinition,
@@ -12,6 +12,7 @@ use super::{
 
 pub struct StoreRuntime {
     registry: Mutex<StoreRegistry>,
+    wake: RwLock<Option<UiWake>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -24,7 +25,16 @@ impl StoreRuntime {
     pub fn new(registry: StoreRegistry) -> Self {
         Self {
             registry: Mutex::new(registry),
+            wake: RwLock::new(None),
         }
+    }
+
+    pub fn set_wake(&self, wake: UiWake) {
+        *self.wake.write().expect("store wake lock poisoned") = Some(wake);
+    }
+
+    pub fn clear_wake(&self) {
+        *self.wake.write().expect("store wake lock poisoned") = None;
     }
 
     pub fn read<T, R>(&self, read: impl FnOnce(&T) -> R) -> R
@@ -150,7 +160,9 @@ impl StoreRuntime {
     }
 
     fn dispatch_notifications(&self, notifications: impl IntoIterator<Item = StoreNotification>) {
+        let mut changed = false;
         for notification in notifications {
+            changed = true;
             let observers = self
                 .registry
                 .lock()
@@ -158,6 +170,11 @@ impl StoreRuntime {
                 .observers_for(&notification);
             for observer in observers {
                 observer.on_store_notification(&notification);
+            }
+        }
+        if changed {
+            if let Some(wake) = self.wake.read().expect("store wake lock poisoned").as_ref() {
+                wake();
             }
         }
     }

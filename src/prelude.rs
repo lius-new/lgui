@@ -1,4 +1,6 @@
-pub use crate::application::{AppView, Application, ApplicationBackend, WindowOptions};
+pub use crate::application::{
+    AppView, Application, ApplicationBackend, ApplicationHandle, WindowOptions,
+};
 pub use crate::core::{
     component, context_provider, group, Align, Axis, Color, EdgeInsets, Element, ElementKey,
     RenderCx, RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiRect,

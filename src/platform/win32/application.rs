@@ -4,7 +4,7 @@ use windows::{
     core::{Error, Result, PCWSTR},
     Win32::{
         Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
-        Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, UpdateWindow, PAINTSTRUCT},
+        Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, UpdateWindow, HDC, PAINTSTRUCT},
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
@@ -39,13 +39,52 @@ thread_local! {
     static STATE: RefCell<Option<WindowState>> = const { RefCell::new(None) };
 }
 
-#[derive(Default)]
-pub struct Win32Application;
+pub trait Win32Renderer: 'static {
+    fn draw(&mut self, hwnd: HWND, target: HDC, scene: &crate::core::Scene, viewport: UiRect);
+}
+
+pub trait Win32RendererFactory: Send + Sync + 'static {
+    fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>>;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GdiRendererFactory;
+
+impl Win32RendererFactory for GdiRendererFactory {
+    fn create(&self, _hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
+        Ok(Box::new(GdiRenderer::default()))
+    }
+}
+
+impl Win32Renderer for GdiRenderer {
+    fn draw(&mut self, _hwnd: HWND, target: HDC, scene: &crate::core::Scene, viewport: UiRect) {
+        self.clear(target, viewport);
+        self.draw_scene(target, scene, None);
+    }
+}
+
+pub struct Win32Application {
+    renderer_factory: Arc<dyn Win32RendererFactory>,
+}
+
+impl Win32Application {
+    pub fn with_renderer(factory: impl Win32RendererFactory) -> Self {
+        Self {
+            renderer_factory: Arc::new(factory),
+        }
+    }
+}
+
+impl Default for Win32Application {
+    fn default() -> Self {
+        Self::with_renderer(GdiRendererFactory)
+    }
+}
 
 struct WindowState {
     view: AppView,
     session: UiSession,
-    renderer: GdiRenderer,
+    renderer: Box<dyn Win32Renderer>,
     logical_size: Size,
     minimum_size: Option<Size>,
 }
@@ -74,15 +113,6 @@ impl ApplicationBackend for Win32Application {
             return Err(Error::from_thread());
         }
 
-        STATE.with(|state| {
-            *state.borrow_mut() = Some(WindowState {
-                view,
-                session: UiSession::new(),
-                renderer: GdiRenderer::default(),
-                logical_size: options.size,
-                minimum_size: options.minimum_size,
-            });
-        });
         let style = if options.resizable {
             WS_OVERLAPPEDWINDOW
         } else {
@@ -104,6 +134,16 @@ impl ApplicationBackend for Win32Application {
                 None,
             )
         }?;
+        let renderer = self.renderer_factory.create(hwnd)?;
+        STATE.with(|state| {
+            *state.borrow_mut() = Some(WindowState {
+                view,
+                session: UiSession::new(),
+                renderer,
+                logical_size: options.size,
+                minimum_size: options.minimum_size,
+            });
+        });
         install_wake(hwnd);
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOW);
@@ -263,10 +303,12 @@ fn paint(hwnd: HWND) {
         let viewport = UiRect::new(0, 0, logical.width, logical.height);
         let commit = state.session.render_view(&state.view, viewport, dpi.scale);
         let scene = commit.scene.project_to_physical(dpi.scale);
-        state
-            .renderer
-            .clear(target, UiRect::new(0, 0, physical.width, physical.height));
-        state.renderer.draw_scene(target, &scene, None);
+        state.renderer.draw(
+            hwnd,
+            target,
+            &scene,
+            UiRect::new(0, 0, physical.width, physical.height),
+        );
         state.session.runtime().run_effects();
     });
     unsafe {

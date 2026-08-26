@@ -9,6 +9,35 @@ pub type AppView = Arc<
         + 'static,
 >;
 
+pub type ApplicationTask = Box<dyn FnOnce() + Send + 'static>;
+
+/// Cloneable, platform-neutral access to the running application event loop.
+#[derive(Clone)]
+pub struct ApplicationHandle {
+    post: Arc<dyn Fn(ApplicationTask) + Send + Sync>,
+    request_frame: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl ApplicationHandle {
+    pub fn new(
+        post: impl Fn(ApplicationTask) + Send + Sync + 'static,
+        request_frame: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            post: Arc::new(post),
+            request_frame: Arc::new(request_frame),
+        }
+    }
+
+    pub fn post(&self, task: impl FnOnce() + Send + 'static) {
+        (self.post)(Box::new(task));
+    }
+
+    pub fn request_frame(&self) {
+        (self.request_frame)();
+    }
+}
+
 impl RootComponent for AppView {
     fn render_root(self, cx: &mut RenderCx<'_, '_>) -> Element {
         self(cx)
@@ -137,5 +166,34 @@ mod tests {
                 .clone(),
             Some(options)
         );
+    }
+
+    #[test]
+    fn application_handle_posts_tasks_and_requests_frames() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let posted = Arc::new(AtomicUsize::new(0));
+        let frames = Arc::new(AtomicUsize::new(0));
+        let handle = ApplicationHandle::new(
+            {
+                let posted = Arc::clone(&posted);
+                move |task| {
+                    task();
+                    posted.fetch_add(1, Ordering::SeqCst);
+                }
+            },
+            {
+                let frames = Arc::clone(&frames);
+                move || {
+                    frames.fetch_add(1, Ordering::SeqCst);
+                }
+            },
+        );
+
+        handle.post(|| {});
+        handle.request_frame();
+
+        assert_eq!(posted.load(Ordering::SeqCst), 1);
+        assert_eq!(frames.load(Ordering::SeqCst), 1);
     }
 }
