@@ -75,3 +75,30 @@ not declare string paths, and an unselected field cannot refresh the component.
 
 Diagnostics, widgets, platform, and renderer features are added only when their implementations
 cross into this crate.
+
+## Router
+
+The default `router` feature provides a generic route runtime with typed history and subscriptions:
+
+```rust,ignore
+#[derive(Clone, PartialEq)]
+enum Route {
+    Home,
+    Settings,
+}
+
+let router = Router::new(Route::Home);
+router.navigate(Route::Settings);
+router.replace(Route::Home);
+router.back();
+```
+
+`Router<R>` owns only generic route values. `navigate` pushes history, `replace` preserves the
+existing history entry, and `back` restores the most recent distinct route. No-op transitions do
+not notify subscribers. `RenderCx::use_router` returns a directly bound `RouterContext`; an
+application adapter can instead consume `use_router_snapshot` and bind Context actions through its
+own lifecycle boundary.
+
+Components below a `RouterContext<R>` can call `use_route`, `use_navigate`, `use_replace`, or
+`use_back`. Route notifications invalidate the component that called the Router hook, while
+unrelated sibling components remain clean.

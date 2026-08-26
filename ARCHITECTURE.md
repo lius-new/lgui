@@ -36,6 +36,11 @@ Applications inject an `Arc<StoreRuntime>` through `StoreContext`; Store hooks n
 application singleton. Notifications are store-typed, while selector equality controls component
 invalidation, so business mutation code does not expose or construct string paths.
 
+The `router` feature owns generic `Router<R>` history, route subscriptions, and Router hooks.
+Route values remain application-defined. Applications may bind the generic `RouterContext`
+callbacks through an adapter when navigation must also publish business lifecycle events or clear
+platform caches; those concerns do not enter `lgui`.
+
 ## Forbidden Dependencies
 
 The `core`, `frame`, `host`, and `session` modules must not depend on:

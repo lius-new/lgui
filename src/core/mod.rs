@@ -22,7 +22,6 @@ mod node;
 mod observable;
 mod reactor;
 mod render;
-mod router;
 mod runtime;
 mod scope;
 mod static_layer;
@@ -30,6 +29,8 @@ mod style;
 mod task;
 mod tree;
 
+#[cfg(feature = "router")]
+pub use crate::router::{Back, Navigate, Replace, RouterContext};
 pub use action::{ActionId, UiAction, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION};
 pub use animation::{
     AnimProperty, AnimatedValue, AnimationBinding, AnimationRegistry, AnimationSnapshot,
@@ -74,7 +75,6 @@ pub use render::{
     scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene, ScenePrimitive,
     ScrollRasterSpec,
 };
-pub use router::{Navigate, RouterContext};
 pub use runtime::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 pub use scope::UiScope;
 pub use static_layer::{

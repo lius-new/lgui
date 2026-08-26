@@ -6,8 +6,9 @@ publish = false
 readme = "README.md"
 
 [features]
-default = ["store"]
+default = ["router", "store"]
 async = []
+router = []
 store = []
 tokio = ["async", "dep:tokio"]
 

@@ -7,9 +7,11 @@ use std::{
 #[cfg(feature = "async")]
 use std::future::Future;
 
+#[cfg(feature = "router")]
+use super::{Back, Navigate, Replace, RouterContext};
 use super::{
-    ComponentId, ComponentState, DeclarativeView, HookId, HookSlotKind, Navigate, Observable,
-    RouterContext, UiElement, UiId, UiRenderContext, UiScope,
+    ComponentId, ComponentState, DeclarativeView, HookId, HookSlotKind, Observable, UiElement,
+    UiId, UiRenderContext, UiScope,
 };
 
 pub struct RenderCx<'a, 'ctx> {
@@ -284,6 +286,7 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         current
     }
 
+    #[cfg(feature = "router")]
     pub fn use_route<R>(&mut self) -> R
     where
         R: Clone + PartialEq + 'static,
@@ -291,11 +294,28 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         self.use_context::<RouterContext<R>>().current().clone()
     }
 
+    #[cfg(feature = "router")]
     pub fn use_navigate<R>(&mut self) -> Navigate<R>
     where
         R: Clone + PartialEq + 'static,
     {
         self.use_context::<RouterContext<R>>().navigate()
+    }
+
+    #[cfg(feature = "router")]
+    pub fn use_replace<R>(&mut self) -> Replace<R>
+    where
+        R: Clone + PartialEq + 'static,
+    {
+        self.use_context::<RouterContext<R>>().replace()
+    }
+
+    #[cfg(feature = "router")]
+    pub fn use_back<R>(&mut self) -> Back
+    where
+        R: Clone + PartialEq + 'static,
+    {
+        self.use_context::<RouterContext<R>>().back()
     }
 
     fn next_hook(&mut self, kind: HookKind) -> HookId {
