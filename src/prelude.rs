@@ -1,11 +1,20 @@
+pub use crate::application::{AppView, Application, ApplicationBackend, WindowOptions};
 pub use crate::core::{
-    component, context_provider, group, Element, ElementKey, RenderCx, RootComponent, State,
+    component, context_provider, group, Element, ElementKey, RenderCx, RootComponent, Size, State,
     StateSetter, UiRect,
 };
 #[cfg(feature = "diagnostics")]
 pub use crate::diagnostics::{
     DiagnosticPresentMode, DiagnosticsProvider, DiagnosticsSink, FrameCollector,
     FrameDiagnosticsSnapshot, FramePresentMetrics, FrameRenderMetrics, FrameSample,
+};
+pub use crate::platform::{
+    dpi::{ScaleContext, ScalePreference, WorkArea},
+    Clipboard, ClipboardError, ClipboardHandle, InputSink, WakeHandle,
+};
+pub use crate::renderer::{
+    PresentMode, PresentRequest, PresentStats, PresenterPlugin, PresenterPluginHost, RenderBackend,
+    UiPresenter,
 };
 #[cfg(feature = "router")]
 pub use crate::router::{

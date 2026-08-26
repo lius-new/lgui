@@ -13,6 +13,34 @@ without combining a physical crate migration with an API rewrite:
 Application behavior is added to `UiEventContext` with an application-owned extension trait. The
 GUI crate does not know application routes, stores, themes, network runtimes, or window commands.
 
+## Application And Platform
+
+`Application<B>` owns backend-neutral window options and an `AppView`. Backends implement
+`ApplicationBackend`, so application code does not pass native handles into the component tree:
+
+```rust,ignore
+Application::with_backend(backend)
+    .window_options(WindowOptions::new("Counter", Size::new(640, 480)))
+    .run(app)?;
+```
+
+The portable platform surface includes `InputEvent`, `InputSink`, `WakeHandle`, executor-neutral
+tasks, `Clipboard`, and pure DPI scale resolution. The optional `backend-win32` feature adds the
+Win32 clipboard, monitor/DPI adapter, layered window host, and layered GDI backbuffer. Native
+window and device-context types stay inside `platform::win32`; the portable core never exposes
+them.
+
+The layered host accepts application callbacks for scene drawing, task/session setup, and error
+reporting. This keeps image/font registries, the network executor, and application logging outside
+the platform crate.
+
+## Renderer And Presenter
+
+`RenderBackend<Target>` is the scene drawing contract. `UiPresenter<Target, State>` owns frame,
+input, animation, and invalidation coordination, while `PresenterPlugin<State>` lets an application
+attach typed state synchronization without teaching `lgui` about its runtime. `PresentRequest`,
+`PresentMode`, and `PresentStats` are shared by the GDI and Direct2D adapters.
+
 ## State
 
 New components use one typed handle. `update` receives the latest value, so event handlers do not
@@ -73,7 +101,8 @@ typed store and invalidates its component only when the selected value changes. 
 notifications before the next frame are batched by the component update queue. Mutation code does
 not declare string paths, and an unselected field cannot refresh the component.
 
-Platform and renderer features are added only when their implementations cross into this crate.
+Platform-specific implementations are feature-gated; portable contracts remain available without
+default features.
 
 ## Router
 

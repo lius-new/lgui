@@ -22,6 +22,7 @@ fn rust_sources(relative: &str) -> Vec<(PathBuf, String)> {
 
 #[test]
 fn runtime_has_no_application_platform_or_backend_dependencies() {
+    let win32_backend = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/platform/win32");
     let forbidden = [
         "crate::frontend",
         "native::windows",
@@ -38,6 +39,7 @@ fn runtime_has_no_application_platform_or_backend_dependencies() {
     ];
     let violations = rust_sources("src")
         .into_iter()
+        .filter(|(path, _)| !path.starts_with(&win32_backend))
         .flat_map(|(path, source)| {
             forbidden.iter().filter_map(move |needle| {
                 source
@@ -50,6 +52,37 @@ fn runtime_has_no_application_platform_or_backend_dependencies() {
     assert!(
         violations.is_empty(),
         "GUI architecture boundary violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn win32_backend_has_no_application_dependencies() {
+    let forbidden = [
+        "crate::frontend",
+        "native::windows",
+        "frontend::pages",
+        "frontend::state",
+        "frontend::runtime",
+        "frontend::components",
+        "frontend::theme",
+        "AppRuntime",
+        "Liuguang",
+    ];
+    let violations = rust_sources("src/platform/win32")
+        .into_iter()
+        .flat_map(|(path, source)| {
+            forbidden.iter().filter_map(move |needle| {
+                source
+                    .contains(needle)
+                    .then(|| format!("{} contains `{needle}`", path.display()))
+            })
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        violations.is_empty(),
+        "Win32 backend boundary violations:\n{}",
         violations.join("\n")
     );
 }

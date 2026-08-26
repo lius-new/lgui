@@ -52,6 +52,18 @@ metric value types without making serialization part of the portable core. Platf
 sampling, HUD rendering, tree inspection, debug commands, `AppRuntime`, and cache mutation remain
 in the application adapter.
 
+`Application<B>` and `ApplicationBackend` define window startup without choosing a platform in the
+portable layer. `RenderBackend`, `UiPresenter`, and `PresenterPlugin` define rendering and frame
+coordination without concrete device handles. Input, wake, task, clipboard, and scale contracts
+are platform-neutral.
+
+The optional `backend-win32` feature is isolated under `platform::win32`. It owns Win32 clipboard
+access, monitor/DPI queries, the layered auxiliary window host, and its GDI backbuffer. The host
+receives scene drawing, session configuration, and error reporting from the application, so it has
+no dependency on Liuguang configuration, resources, network executors, logging, or `AppRuntime`.
+The main Liuguang window loop and concrete resource-heavy GDI/Direct2D drawing remain application
+adapters until their image, font, icon, and custom-paint registries have public contracts.
+
 ## Forbidden Dependencies
 
 The `core`, `frame`, `host`, and `session` modules must not depend on:
@@ -60,5 +72,6 @@ The `core`, `frame`, `host`, and `session` modules must not depend on:
 - Win32, GDI, Direct2D, or concrete renderer types
 - pages, application runtime, business stores, application routes, components, or themes
 
-These boundaries are checked by `tests/architecture.rs` and by compiling the crate with no default
-features.
+These boundaries are checked by `tests/architecture.rs`: portable sources reject Windows and
+application dependencies, while `platform::win32` separately rejects application dependencies.
+The portable dependency boundary is also checked by compiling with no default features.

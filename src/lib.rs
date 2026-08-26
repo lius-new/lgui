@@ -1,11 +1,14 @@
 #![deny(unsafe_code)]
 
+pub mod application;
 pub mod core;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;
 pub mod frame;
 pub mod host;
+pub mod platform;
 pub mod prelude;
+pub mod renderer;
 #[cfg(feature = "router")]
 pub mod router;
 pub mod session;
