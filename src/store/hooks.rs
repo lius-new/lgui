@@ -91,7 +91,7 @@ where
     pub fn select<S, F>(self, cx: &mut RenderCx<'_, '_>, selector: F) -> S
     where
         S: Clone + PartialEq + Send + 'static,
-        F: Fn(&T) -> S + Copy + Send + Sync + 'static,
+        F: Fn(&T) -> S + Send + Sync + 'static,
     {
         let context = cx.use_context::<StoreContext>();
         use_definition(cx, context.runtime, self, selector)
@@ -124,7 +124,7 @@ where
         }
     }
 
-    pub fn call_in(self, runtime: &StoreRuntime) -> bool {
+    pub fn call_in(self, runtime: &StoreRuntime) {
         runtime.update_defined(self.store, "store.action", self.mutate)
     }
 }
@@ -141,7 +141,7 @@ where
         }
     }
 
-    pub fn call_in(self, runtime: &StoreRuntime, argument: A) -> bool {
+    pub fn call_in(self, runtime: &StoreRuntime, argument: A) {
         runtime.update_defined(self.store, "store.action", move |store| {
             (self.mutate)(store, argument)
         })
@@ -152,7 +152,7 @@ impl<T> BoundStoreAction<T>
 where
     T: Send + Sync + 'static,
 {
-    pub fn call(&self) -> bool {
+    pub fn call(&self) {
         self.action.call_in(&self.runtime)
     }
 }
@@ -161,7 +161,7 @@ impl<T, A> BoundStoreActionWith<T, A>
 where
     T: Send + Sync + 'static,
 {
-    pub fn call(&self, argument: A) -> bool {
+    pub fn call(&self, argument: A) {
         self.action.call_in(&self.runtime, argument)
     }
 }
@@ -171,7 +171,7 @@ pub trait StoreHooks {
     where
         T: StoreUnit,
         S: Clone + PartialEq + Send + 'static,
-        F: Fn(&T) -> S + Copy + Send + Sync + 'static;
+        F: Fn(&T) -> S + Send + Sync + 'static;
 }
 
 impl StoreHooks for RenderCx<'_, '_> {
@@ -179,7 +179,7 @@ impl StoreHooks for RenderCx<'_, '_> {
     where
         T: StoreUnit,
         S: Clone + PartialEq + Send + 'static,
-        F: Fn(&T) -> S + Copy + Send + Sync + 'static,
+        F: Fn(&T) -> S + Send + Sync + 'static,
     {
         let context = self.use_context::<StoreContext>();
         use_unit(self, context.runtime, selector)
@@ -200,13 +200,14 @@ fn use_unit<T, S, F>(cx: &mut RenderCx<'_, '_>, runtime: Arc<StoreRuntime>, sele
 where
     T: StoreUnit,
     S: Clone + PartialEq + Send + 'static,
-    F: Fn(&T) -> S + Copy + Send + Sync + 'static,
+    F: Fn(&T) -> S + Send + Sync + 'static,
 {
     let read_runtime = Arc::clone(&runtime);
     let subscribe_runtime = runtime;
+    let selector = Arc::new(selector);
     let source = Observable::new(
         observable_id::<T, F>(),
-        move || read_runtime.read::<T, _>(selector),
+        move || read_runtime.read::<T, _>(|store| selector(store)),
         move |listener| subscribe::<T>(Arc::clone(&subscribe_runtime), listener),
     );
     cx.use_observable(source, clone_selected::<S>)
@@ -221,13 +222,14 @@ fn use_definition<T, S, F>(
 where
     T: Send + Sync + 'static,
     S: Clone + PartialEq + Send + 'static,
-    F: Fn(&T) -> S + Copy + Send + Sync + 'static,
+    F: Fn(&T) -> S + Send + Sync + 'static,
 {
     let read_runtime = Arc::clone(&runtime);
     let subscribe_runtime = runtime;
+    let selector = Arc::new(selector);
     let source = Observable::new(
         observable_id::<T, F>(),
-        move || read_runtime.read_defined(store, selector),
+        move || read_runtime.read_defined(store, |value| selector(value)),
         move |listener| subscribe_definition(Arc::clone(&subscribe_runtime), store, listener),
     );
     cx.use_observable(source, clone_selected::<S>)
@@ -283,7 +285,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::store::{create, StoreRegistry};
+    use crate::{resources::Resources, store::create};
 
     struct CounterStore {
         count: i32,
@@ -356,9 +358,7 @@ mod tests {
 
     #[test]
     fn selectors_ignore_unrelated_fields_and_bound_actions_batch_component_updates() {
-        let mut registry = StoreRegistry::new();
-        registry.register(COUNTER);
-        let stores = Arc::new(StoreRuntime::new(registry));
+        let stores = Arc::new(StoreRuntime::new(Resources::new()));
         let context = StoreContext::new(Arc::clone(&stores));
         let mut ui = UiRuntime::new();
         let executions = Arc::new(AtomicUsize::new(0));
@@ -373,7 +373,7 @@ mod tests {
         ui.run_effects();
         assert_eq!(executions.load(Ordering::SeqCst), 1);
 
-        assert!(stores.update_defined(COUNTER, "label", |store| store.label = "renamed"));
+        stores.update_defined(COUNTER, "label", |store| store.label = "renamed");
         assert!(ui.apply_pending_updates().dirty_ids.is_empty());
         mount(
             &ui,
@@ -388,8 +388,8 @@ mod tests {
             .expect("counter action poisoned")
             .clone()
             .expect("counter action missing");
-        assert!(increment.call());
-        assert!(increment.call());
+        increment.call();
+        increment.call();
         assert_eq!(ui.apply_pending_updates().dirty_ids.len(), 1);
         mount(&ui, context, Arc::clone(&executions), Arc::clone(&action));
 

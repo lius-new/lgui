@@ -1,8 +1,7 @@
 # UI Core Runtime
 
-`core` is the backend-independent retained UI runtime. The extraction boundary and public-crate
-constraints live in [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md). The original runtime design
-and acceptance criteria remain in the Liuguang application migration documentation.
+`core` is the backend-independent retained UI runtime. The library boundary and public-crate
+constraints live in [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md).
 
 ## Public component model
 
@@ -12,20 +11,22 @@ Application UI is expressed as retained function components and declarative `Ele
 fn counter(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_u32);
     let current = count.get();
+    let rect = UiRect::new(0, 0, 160, 48);
 
     cx.use_effect((current,), move || {
         move || tracing::debug!(count = current, "counter effect cleanup")
     });
 
-    group(UiRect::new(0, 0, 160, 48)).content((
+    group(rect).content((
         current,
-        button("Add").on_click(move || count.update(|value| *value += 1)),
+        button(rect, "Add", ButtonStyle::default())
+            .on_click(move |_| count.update(|value| *value += 1)),
     ))
 }
 ```
 
-`Element::on_click` accepts a zero-argument closure. Code that needs propagation control,
-default prevention, async spawning, or a window request uses `Element::on_click_event`.
+Element handlers receive the generic `UiEventContext`, which provides propagation control,
+default prevention, async spawning, Store/Router access, and the current Window handle.
 
 ## Ownership and update flow
 
@@ -54,8 +55,8 @@ generic input -> Element handler -> queued update -> dirty component execution
 ## Dependency boundary
 
 Core contains no Win32, GDI, Direct2D, page, application route, settings, or domain-store types.
-Platform code translates native messages to `InputEvent`; application layers provide theme,
-Store adapters, and route types. Control-specific retained state (text editing, selection, scroll,
+Platform code translates native messages to `InputEvent`; applications provide theme data,
+pure Store types, and route values. Control-specific retained state (text editing, selection, scroll,
 slider, rich editor) remains separate from component Hook State.
 
 ## Identity rules
@@ -72,10 +73,11 @@ Run from the `native` workspace:
 
 ```powershell
 cargo fmt --all --check
-cargo test -p lgui --no-default-features
-cargo test -p lgui --features tokio
-cargo check -p liugc --all-features --all-targets
-cargo test -p liugc --bin liugc
+cargo test -p lgui --no-default-features --quiet
+cargo test -p lgui --all-features --quiet
+cargo check -p liugc --bin liugc
+cargo test -p liugc --bin liugc frontend:: --quiet
+cargo check -p lgui-showcase --all-features
 ```
 
 Then run `git diff --check` from the repository root. Architecture scans must find no compatibility

@@ -10,9 +10,5 @@ pub use hooks::{
     BoundStoreAction, BoundStoreActionWith, StoreAction, StoreActionWith, StoreContext, StoreHooks,
 };
 pub use notification::{StoreNotification, StoreObserver, Subscription, SubscriptionToken};
-pub use registry::{AnyStoreUnit, StoreRegistry};
-pub use runtime::{StoreFrameResult, StorePresenterBridge, StoreRuntime};
-pub use unit::{
-    StoreInvalidation, StoreInvalidationContext, StoreInvalidationSet, StoreLifecycleEvent,
-    StoreMutation, StoreRouteId, StoreUnit,
-};
+pub use runtime::StoreRuntime;
+pub use unit::StoreUnit;

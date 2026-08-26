@@ -1,32 +1,22 @@
-# Extraction Baseline
+# LGUI Acceptance Baseline
 
-Recorded on 2026-08-27 after the complete workspace, runtime, platform, and application-boundary
-migration.
+The runtime contract requires component-local State invalidation, stale-handle rejection,
+post-present Effects and cleanup, lazy Application-scoped Stores, selector equality, batched Store
+updates, declarative Router history/outlets, shared multi-window Context, owner restoration, and a
+single Application API for GDI and Direct2D.
 
-## Behavioral Contract
+The acceptance suite is:
 
-- State updates enqueue work and dirty only the owning component.
-- Updates from stale component generations cannot recreate unmounted state.
-- Effects run only after a committed presentation and clean up on dependency change or unmount.
-- Keyed children retain identity across reordering.
-- Clean component boundaries retain their Host subtree without visiting descendants.
-- Layout updates the nearest affected boundary and reuses paint-only layout results.
-- Host commits retain scene nodes and calculate damage from old and new bounds.
-- GDI and Direct2D remain application backends consuming the same logical scene and scale data.
-- Platform-independent DPI projection rounds outward and preserves visible hairlines.
+```powershell
+cargo test -p lgui --no-default-features --quiet
+cargo test -p lgui --all-features --quiet
+cargo check -p liugc --bin liugc
+cargo test -p liugc --bin liugc frontend:: --quiet
+cargo check -p lgui-showcase --all-features
+cargo fmt --all --check
+git diff --check
+```
 
-## Automated Baseline
-
-- `lgui --no-default-features`: 72 unit tests and 2 architecture tests pass.
-- `lgui --all-features`: 100 unit tests and 2 architecture tests pass.
-- `lgui-showcase --all-features` compiles with `lgui` as its only direct dependency.
-- The scoped Liuguang binary check and frontend test target pass; backend-wide tests are excluded
-  from this migration validation.
-- The portable dependency tree contains only `lgui` itself.
-- Optional Windows, Tokio, image/SVG, and diagnostics surfaces are absent when default features are
-  disabled.
-
-Hardware FPS and frame-time numbers are intentionally not treated as portable thresholds. The
-Liuguang diagnostics runtime remains the measurement source until diagnostics is extracted; later
-performance comparisons must use the same page, viewport, renderer, DPI, build profile, and input
-sequence.
+Backend-wide tests are outside this GUI boundary and are not part of this baseline. Hardware FPS
+is not a portable threshold; performance comparisons must use the same page, viewport, renderer,
+DPI, build profile, and input sequence.

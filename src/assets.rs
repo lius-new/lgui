@@ -1,6 +1,22 @@
-use std::{fmt, sync::Arc};
+use std::{cell::RefCell, fmt, sync::Arc};
 
 use crate::core::{CustomPaintStyle, Size};
+
+pub use crate::platform::win32::{
+    CachedImageSource as ImageSource, CachedImageStatus as ImageStatus,
+};
+
+/// Starts loading an image and returns its current cache status.
+pub fn request_image(source: &ImageSource) -> ImageStatus {
+    crate::platform::win32::request_cached_image(source)
+}
+
+/// Releases decoded and platform image caches owned by the current UI thread.
+pub fn clear_image_caches() {
+    crate::platform::win32::clear_cached_decoded_image_cache();
+    #[cfg(feature = "advanced-rendering")]
+    crate::platform::win32::enhanced::image::clear_decoded_image_cache();
+}
 
 pub type AssetBytes = Arc<[u8]>;
 
@@ -76,6 +92,31 @@ pub struct RenderResources {
     custom_paint: Option<Arc<dyn CustomPaintProvider>>,
     #[cfg(feature = "svg")]
     svg_renderer: Option<Arc<dyn SvgRenderer>>,
+}
+
+thread_local! {
+    static CURRENT_RENDER_RESOURCES: RefCell<Vec<RenderResources>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn with_render_resources<R>(
+    resources: RenderResources,
+    use_resources: impl FnOnce() -> R,
+) -> R {
+    CURRENT_RENDER_RESOURCES.with(|current| current.borrow_mut().push(resources));
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            CURRENT_RENDER_RESOURCES.with(|current| {
+                current.borrow_mut().pop();
+            });
+        }
+    }
+    let _reset = Reset;
+    use_resources()
+}
+
+pub(crate) fn render_resources() -> RenderResources {
+    CURRENT_RENDER_RESOURCES.with(|current| current.borrow().last().cloned().unwrap_or_default())
 }
 
 impl RenderResources {

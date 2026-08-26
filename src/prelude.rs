@@ -1,6 +1,12 @@
+#[cfg(feature = "tray")]
+pub use crate::application::TrayOptions;
 pub use crate::application::{
-    AppView, Application, ApplicationBackend, ApplicationHandle, WindowOptions,
+    AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle, ClosePolicy,
+    WindowCloseHandler, WindowHandle, WindowId, WindowManager, WindowMode, WindowOptions,
+    WindowPosition,
 };
+#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+pub use crate::application::{RendererKind, RendererProbeError};
 #[cfg(feature = "svg")]
 pub use crate::assets::SvgRenderer;
 #[cfg(feature = "images")]
@@ -20,23 +26,21 @@ pub use crate::diagnostics::{
 };
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
-    Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationService,
-    TrayMenuItem, TrayService, WakeHandle,
+    Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationError,
+    NotificationHandle, NotificationService, TrayMenuItem, TrayService, WakeHandle,
 };
-pub use crate::renderer::{
-    PresentMode, PresentRequest, PresentStats, PresenterPlugin, PresenterPluginHost, RenderBackend,
-    UiPresenter,
-};
+pub use crate::renderer::{ClipRegion, RenderBackend};
+pub use crate::resources::Resources;
 #[cfg(feature = "router")]
 pub use crate::router::{
-    Back, Navigate, Replace, RouteAction, RouteChange, RouteSubscriptionToken, Router,
-    RouterContext, RouterHooks, RouterSnapshot,
+    create_router, route, Back, DeclarativeRouter, Navigate, Replace, Route, RouteAction,
+    RouteChange, RouteSubscriptionToken, Router, RouterContext, RouterHooks, RouterSnapshot,
 };
 pub use crate::session::UiSession;
 #[cfg(feature = "store")]
 pub use crate::store::{
     create, BoundStoreAction, BoundStoreActionWith, StoreAction, StoreActionWith, StoreContext,
-    StoreDefinition, StoreHooks, StoreRegistry, StoreRuntime,
+    StoreDefinition, StoreHooks, StoreRuntime,
 };
 #[cfg(feature = "theme")]
 pub use crate::theme::{ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens};

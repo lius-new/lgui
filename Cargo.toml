@@ -8,17 +8,64 @@ readme = "README.md"
 [features]
 default = ["renderer-gdi", "router", "store", "widgets"]
 async = []
+advanced-rendering = [
+  "renderer-d2d",
+  "renderer-gdi",
+]
 backend-win32 = ["dep:windows"]
+clipboard = [
+  "backend-win32",
+  "windows/Win32_System_DataExchange",
+  "windows/Win32_System_Memory",
+]
+open-url = ["backend-win32", "windows/Win32_UI_Shell"]
 diagnostics = []
 diagnostics-serde = ["diagnostics", "dep:serde"]
-images = []
+system-diagnostics = [
+  "diagnostics",
+  "backend-win32",
+  "windows/Win32_System_ProcessStatus",
+  "windows/Win32_System_SystemInformation",
+  "windows/Win32_System_Threading",
+]
+images = [
+  "backend-win32",
+  "windows/Win32_Graphics_GdiPlus",
+  "windows/Win32_System_Com",
+  "windows/Win32_UI_Shell",
+]
+multi-window = ["backend-win32"]
+notifications = [
+  "backend-win32",
+  "windows/Data_Xml_Dom",
+  "windows/UI_Notifications",
+  "windows/Win32_UI_Shell",
+]
 router = []
 renderer-gdi = ["backend-win32"]
-renderer-d2d = ["backend-win32", "dep:windows-numerics"]
+renderer-d2d = [
+  "backend-win32",
+  "dep:windows-numerics",
+  "diagnostics",
+  "images",
+  "svg",
+  "windows/Win32_Graphics_Direct3D",
+  "windows/Win32_Graphics_Direct3D11",
+  "windows/Win32_Graphics_DirectComposition",
+  "windows/Win32_Graphics_Dxgi",
+]
 store = []
-svg = ["images"]
+svg = [
+  "images",
+  "backend-win32",
+  "dep:icondata",
+  "dep:resvg",
+  "dep:tiny-skia",
+  "dep:usvg",
+]
 theme = []
 tokio = ["async", "dep:tokio"]
+tray = ["backend-win32", "windows/Win32_UI_Shell"]
 widgets = ["theme"]
 
 [dependencies]
@@ -27,6 +74,10 @@ tokio = { version = "1", optional = true, features = ["rt"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics = { version = "0.3.1", optional = true }
+icondata = { version = "0.7.0", optional = true, default-features = false, features = ["lucide"] }
+resvg = { version = "0.45", optional = true }
+tiny-skia = { version = "0.11", optional = true }
+usvg = { version = "0.45", optional = true }
 windows = { version = "0.62.2", optional = true, features = [
   "Win32_Foundation",
   "Win32_Graphics_Direct2D",
@@ -35,9 +86,7 @@ windows = { version = "0.62.2", optional = true, features = [
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
-  "Win32_System_DataExchange",
   "Win32_System_LibraryLoader",
-  "Win32_System_Memory",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Input_Ime",
   "Win32_UI_HiDpi",

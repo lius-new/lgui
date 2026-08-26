@@ -113,3 +113,38 @@ impl Win32Dispatcher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use super::*;
+
+    #[test]
+    fn dispatcher_marshals_cross_thread_tasks_and_coalesces_frame_requests() {
+        let dispatcher = Win32Dispatcher::new();
+        let completed = Arc::new(AtomicUsize::new(0));
+        let worker_dispatcher = dispatcher.clone();
+        let worker_completed = Arc::clone(&completed);
+
+        std::thread::spawn(move || {
+            worker_dispatcher.post(move || {
+                worker_completed.fetch_add(1, Ordering::SeqCst);
+            });
+            worker_dispatcher.request_frame();
+            worker_dispatcher.request_frame();
+        })
+        .join()
+        .expect("dispatcher producer thread should finish");
+
+        assert_eq!(completed.load(Ordering::SeqCst), 0);
+        let drained = dispatcher.drain();
+        assert!(drained.tasks_executed);
+        assert!(drained.frame_requested);
+        assert_eq!(completed.load(Ordering::SeqCst), 1);
+        assert_eq!(dispatcher.drain(), Win32DispatchResult::default());
+    }
+}

@@ -4,6 +4,78 @@ use std::{
 };
 
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Debug, Default)]
+pub struct SystemUsageSnapshot {
+    pub schema: &'static str,
+    pub sample_interval_ms: u64,
+    pub sample_age_ms: u64,
+    pub process: ProcessUsageSnapshot,
+    pub system: MachineUsageSnapshot,
+    pub gpu: GpuUsageSnapshot,
+}
+
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Debug, Default)]
+pub struct ProcessUsageSnapshot {
+    pub cpu_percent: Option<f32>,
+    pub working_set_mb: Option<f32>,
+    pub pagefile_mb: Option<f32>,
+}
+
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Debug, Default)]
+pub struct MachineUsageSnapshot {
+    pub memory_load_percent: Option<u32>,
+    pub total_memory_mb: Option<f32>,
+    pub available_memory_mb: Option<f32>,
+}
+
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Debug)]
+pub struct GpuUsageSnapshot {
+    pub usage_percent: Option<f32>,
+    pub memory_mb: Option<f32>,
+    pub status: &'static str,
+}
+
+impl Default for GpuUsageSnapshot {
+    fn default() -> Self {
+        Self {
+            usage_percent: None,
+            memory_mb: None,
+            status: "not-sampled",
+        }
+    }
+}
+
+pub fn system_usage_snapshot() -> SystemUsageSnapshot {
+    #[cfg(all(feature = "system-diagnostics", target_os = "windows"))]
+    {
+        return crate::platform::win32::snapshot_system_usage();
+    }
+
+    #[cfg(not(all(feature = "system-diagnostics", target_os = "windows")))]
+    SystemUsageSnapshot {
+        schema: "lgui.diagnostics.system-usage.v1",
+        gpu: GpuUsageSnapshot {
+            status: "unsupported",
+            ..GpuUsageSnapshot::default()
+        },
+        ..SystemUsageSnapshot::default()
+    }
+}
+
+pub fn system_usage_sample_interval_ms() -> u64 {
+    #[cfg(all(feature = "system-diagnostics", target_os = "windows"))]
+    {
+        return crate::platform::win32::sample_interval_ms();
+    }
+
+    #[cfg(not(all(feature = "system-diagnostics", target_os = "windows")))]
+    0
+}
+
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticPresentMode {
     Full,

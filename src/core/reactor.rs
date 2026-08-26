@@ -105,6 +105,14 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         self.scope.node_id()
     }
 
+    pub fn viewport(&self) -> super::UiRect {
+        self.context.viewport()
+    }
+
+    pub fn application(&mut self) -> crate::application::ApplicationContext {
+        self.use_context::<crate::application::ApplicationContext>()
+    }
+
     pub(crate) fn compile<V>(&self, view: V) -> UiElement
     where
         V: DeclarativeView,

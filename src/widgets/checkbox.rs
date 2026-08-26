@@ -244,13 +244,15 @@ mod tests {
         assert!(!next_checked(true));
         assert!(next_checked(false));
 
-        static APPLICATION: () = ();
         let reported = Arc::new(AtomicBool::new(false));
         let next = Arc::clone(&reported);
         let checkbox = checkbox(UiRect::new(0, 0, 16, 16), false, move |checked| {
             next.store(checked, Ordering::SeqCst);
         });
-        let mut context = UiEventContext::new(&APPLICATION);
+        let mut context = UiEventContext::new(
+            crate::application::ApplicationContext::empty(),
+            crate::application::WindowId::new("test"),
+        );
         (checkbox.on_change)(&mut context, next_checked(checkbox.checked));
         assert!(reported.load(Ordering::SeqCst));
     }

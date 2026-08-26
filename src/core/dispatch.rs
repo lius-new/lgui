@@ -1,4 +1,6 @@
-use std::{any::Any, collections::HashSet};
+use std::collections::HashSet;
+
+use crate::application::{ApplicationContext, WindowId};
 
 use super::{
     HitResult, RuntimeOutput, UiDefaultAction, UiEvent, UiEventContext, UiHandlerEvent, UiRect,
@@ -11,7 +13,8 @@ use super::{
 /// control behavior remain owned by the GUI runtime.
 pub fn dispatch_runtime_output(
     output: RuntimeOutput,
-    application: &'static (dyn Any + Send + Sync),
+    application: &ApplicationContext,
+    window: &WindowId,
     mut handle_default_action: impl FnMut(UiDefaultAction) -> RuntimeOutput,
     mut finish_context: impl FnMut(UiEventContext),
 ) -> RuntimeOutput {
@@ -21,13 +24,13 @@ pub fn dispatch_runtime_output(
 
     while let Some(output) = pending.pop() {
         for event in &output.action_events {
-            let mut context = UiEventContext::new(application);
+            let mut context = UiEventContext::new(application.clone(), window.clone());
             event.dispatch(&mut context);
             finish_context(context);
         }
 
         for event in &output.handler_events {
-            let context = dispatch_event_handlers(event, application);
+            let context = dispatch_event_handlers(event, application, window);
             if context.default_prevented() {
                 default_prevented.insert(event.target.clone());
             }
@@ -39,7 +42,7 @@ pub fn dispatch_runtime_output(
                 UiEvent::Clicked(hit) | UiEvent::Wheel { hit, .. } => hit,
                 _ => continue,
             };
-            let Some(context) = dispatch_hit_handlers(hit, application) else {
+            let Some(context) = dispatch_hit_handlers(hit, application, window) else {
                 continue;
             };
             if context.default_prevented() {
@@ -62,12 +65,13 @@ pub fn dispatch_runtime_output(
 
 pub fn dispatch_hit_handlers(
     hit: &HitResult,
-    application: &'static (dyn Any + Send + Sync),
+    application: &ApplicationContext,
+    window: &WindowId,
 ) -> Option<UiEventContext> {
     if hit.capture_handlers.is_empty() && hit.bubble_handlers.is_empty() {
         return None;
     }
-    let mut context = UiEventContext::new(application);
+    let mut context = UiEventContext::new(application.clone(), window.clone());
     for handler in &hit.capture_handlers {
         handler(&mut context);
         if context.propagation_stopped() {
@@ -85,9 +89,10 @@ pub fn dispatch_hit_handlers(
 
 pub fn dispatch_event_handlers(
     event: &UiHandlerEvent,
-    application: &'static (dyn Any + Send + Sync),
+    application: &ApplicationContext,
+    window: &WindowId,
 ) -> UiEventContext {
-    let mut context = UiEventContext::new(application);
+    let mut context = UiEventContext::new(application.clone(), window.clone());
     for handler in &event.capture_handlers {
         handler(&mut context, &event.payload);
         if context.propagation_stopped() {
@@ -193,7 +198,8 @@ mod tests {
 
         dispatch_runtime_output(
             output,
-            &(),
+            &ApplicationContext::empty(),
+            &WindowId::new("test"),
             |action| runtime.handle_default_action(action),
             |_| {},
         );

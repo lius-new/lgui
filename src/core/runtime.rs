@@ -777,7 +777,10 @@ mod tests {
         assert_eq!(output.handler_events.len(), 1);
         assert_eq!(output.default_actions.len(), 1);
         assert_eq!(runtime.interaction_state().focused, Some(id));
-        let mut context = super::super::UiEventContext::new(&());
+        let mut context = super::super::UiEventContext::new(
+            crate::application::ApplicationContext::empty(),
+            crate::application::WindowId::new("test"),
+        );
         for handler in &output.handler_events[0].bubble_handlers {
             handler(&mut context, &output.handler_events[0].payload);
         }

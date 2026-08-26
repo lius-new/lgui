@@ -33,7 +33,11 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
 #[cfg(target_os = "windows")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     Application::new()
-        .window_options(WindowOptions::new("lgui counter", Size::new(380, 240)))
+        .window_options(
+            WindowOptions::new("counter")
+                .title("lgui counter")
+                .size(Size::new(380, 240)),
+        )
         .run(app)?;
     Ok(())
 }

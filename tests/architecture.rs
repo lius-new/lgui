@@ -68,6 +68,7 @@ fn win32_backend_has_no_application_dependencies() {
         "frontend::theme",
         "AppRuntime",
         "Liuguang",
+        "LIUGC_",
     ];
     let violations = rust_sources("src/platform/win32")
         .into_iter()

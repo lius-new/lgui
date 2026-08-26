@@ -1,4 +1,6 @@
-use std::any::Any;
+use std::{future::Future, sync::Arc};
+
+use crate::application::{ApplicationContext, WindowHandle, WindowId, WindowManager};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UiEventFlags {
@@ -9,28 +11,124 @@ pub struct UiEventFlags {
     pub default_prevented: bool,
 }
 
-/// Backend- and application-independent context passed to declarative event handlers.
-///
-/// Application crates add business behavior through extension traits. The core only owns
-/// propagation, scheduling flags and an opaque host-command slot.
+/// Generic application, Store, Router, task and window access passed to every event handler.
 pub struct UiEventContext {
-    application: &'static (dyn Any + Send + Sync),
+    application: ApplicationContext,
+    window: WindowHandle,
     flags: UiEventFlags,
     propagation_stopped: bool,
-    host_command: Option<Box<dyn Any + Send>>,
 }
 
-#[derive(Clone, Copy)]
-pub struct UiAsyncContext;
+#[derive(Clone)]
+pub struct UiAsyncContext {
+    application: ApplicationContext,
+}
 
 impl UiEventContext {
-    pub fn new(application: &'static (dyn Any + Send + Sync)) -> Self {
+    pub fn new(application: ApplicationContext, window_id: WindowId) -> Self {
+        let window = WindowHandle::new(window_id, application.windows());
         Self {
             application,
+            window,
             flags: UiEventFlags::default(),
             propagation_stopped: false,
-            host_command: None,
         }
+    }
+
+    pub fn application(&self) -> ApplicationContext {
+        self.application.clone()
+    }
+
+    pub fn resource<T>(&self) -> Arc<T>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.application.resource::<T>()
+    }
+
+    #[cfg(feature = "store")]
+    pub fn read_store<T, R>(&self, read: impl FnOnce(&T) -> R) -> R
+    where
+        T: crate::store::StoreUnit,
+    {
+        self.application.read_store(read)
+    }
+
+    #[cfg(feature = "store")]
+    pub fn update_store<T, R>(
+        &mut self,
+        reason: impl Into<std::borrow::Cow<'static, str>>,
+        update: impl FnOnce(&mut T) -> R,
+    ) -> R
+    where
+        T: crate::store::StoreUnit,
+    {
+        let result = self.application.update_store(reason, update);
+        self.mark_changed(false);
+        result
+    }
+
+    #[cfg(feature = "router")]
+    pub fn navigate<R>(&mut self, route: R)
+    where
+        R: Default + Clone + PartialEq + Send + Sync + 'static,
+    {
+        if self.application.router::<R>().navigate(route).is_some() {
+            self.mark_changed(true);
+        }
+    }
+
+    #[cfg(feature = "router")]
+    pub fn replace<R>(&mut self, route: R)
+    where
+        R: Default + Clone + PartialEq + Send + Sync + 'static,
+    {
+        if self.application.router::<R>().replace(route).is_some() {
+            self.mark_changed(true);
+        }
+    }
+
+    #[cfg(feature = "router")]
+    pub fn back<R>(&mut self)
+    where
+        R: Default + Clone + PartialEq + Send + Sync + 'static,
+    {
+        if self.application.router::<R>().back().is_some() {
+            self.mark_changed(true);
+        }
+    }
+
+    pub fn spawn(&mut self, task: impl Future<Output = ()> + Send + 'static) -> bool {
+        self.mark_consumed();
+        self.application.spawn(task)
+    }
+
+    pub fn spawn_or_else(
+        &mut self,
+        task: impl Future<Output = ()> + Send + 'static,
+        unavailable: impl FnOnce(),
+    ) {
+        if !self.spawn(task) {
+            unavailable();
+        }
+    }
+
+    pub fn spawn_async<Fut>(&mut self, handler: impl FnOnce(UiAsyncContext) -> Fut + Send + 'static)
+    where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let context = UiAsyncContext {
+            application: self.application.clone(),
+        };
+        let _ = self.spawn(handler(context));
+    }
+
+    pub fn window(&self) -> WindowHandle {
+        self.window.clone()
+    }
+
+    pub fn windows(&self) -> WindowManager {
+        self.application.windows()
     }
 
     pub fn stop_propagation(&mut self) {
@@ -55,15 +153,6 @@ impl UiEventContext {
         self.flags
     }
 
-    pub fn application<T: Any + Send + Sync>(&self) -> &'static T {
-        self.application.downcast_ref::<T>().unwrap_or_else(|| {
-            panic!(
-                "event context application type mismatch: expected `{}`",
-                std::any::type_name::<T>()
-            )
-        })
-    }
-
     pub fn mark_consumed(&mut self) {
         self.flags.consumed = true;
     }
@@ -78,23 +167,37 @@ impl UiEventContext {
     pub fn request_frame(&mut self) {
         self.flags.needs_frame = true;
     }
+}
 
-    pub fn set_host_command<T: Any + Send>(&mut self, command: T) {
-        self.flags.consumed = true;
-        self.host_command = Some(Box::new(command));
+impl UiAsyncContext {
+    pub fn application(&self) -> ApplicationContext {
+        self.application.clone()
     }
 
-    pub fn take_host_command<T: Any + Send>(&mut self) -> Option<T> {
-        self.host_command
-            .take()
-            .map(|command| {
-                command.downcast::<T>().unwrap_or_else(|_| {
-                    panic!(
-                        "event context host command type mismatch: expected `{}`",
-                        std::any::type_name::<T>()
-                    )
-                })
-            })
-            .map(|command| *command)
+    pub fn resource<T>(&self) -> Arc<T>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.application.resource::<T>()
+    }
+
+    #[cfg(feature = "store")]
+    pub fn read_store<T, R>(&self, read: impl FnOnce(&T) -> R) -> R
+    where
+        T: crate::store::StoreUnit,
+    {
+        self.application.read_store(read)
+    }
+
+    #[cfg(feature = "store")]
+    pub fn update_store<T, R>(
+        &self,
+        reason: impl Into<std::borrow::Cow<'static, str>>,
+        update: impl FnOnce(&mut T) -> R,
+    ) -> R
+    where
+        T: crate::store::StoreUnit,
+    {
+        self.application.update_store(reason, update)
     }
 }

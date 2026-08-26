@@ -60,6 +60,42 @@ pub trait NotificationService: Send + Sync + 'static {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotificationError(String);
+
+impl NotificationError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+impl fmt::Display for NotificationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotificationError {}
+
+#[derive(Clone)]
+pub struct NotificationHandle {
+    show: Arc<dyn Fn(&Notification) -> Result<(), NotificationError> + Send + Sync>,
+}
+
+impl NotificationHandle {
+    pub fn new(
+        show: impl Fn(&Notification) -> Result<(), NotificationError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            show: Arc::new(show),
+        }
+    }
+
+    pub fn show(&self, notification: &Notification) -> Result<(), NotificationError> {
+        (self.show)(notification)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrayMenuItem<Command> {
     pub label: String,
     pub command: Command,
