@@ -1,0 +1,13 @@
+[package]
+name = "lgui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+readme = "README.md"
+
+[features]
+default = []
+tokio = ["dep:tokio"]
+
+[dependencies]
+tokio = { version = "1", optional = true, features = ["macros", "sync"] }
