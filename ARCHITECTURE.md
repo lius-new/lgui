@@ -42,9 +42,11 @@ callbacks through an adapter when navigation must also publish business lifecycl
 platform caches; those concerns do not enter `lgui`.
 
 The `theme` feature defines semantic color, spacing, and typography tokens plus `ThemeContext`.
-The `widgets` feature contains only controlled, Store-agnostic controls. Widget defaults resolve
-tokens from Context at element render time; explicit styles remain available. Application theme
-catalogs, persistence, branded palette fields, and business callbacks stay in the application.
+The `widgets` feature contains application-neutral display/layout primitives and controlled,
+Store-agnostic controls. It currently owns `button`, `panel`, `stack`, `text`, `switch`, `slider`,
+and `select`. Widget defaults resolve tokens from Context at element render time; explicit styles
+remain available. Application theme catalogs, persistence, branded palette fields, async business
+dispatch, and business callbacks stay in the application.
 
 The `diagnostics` feature owns backend-neutral frame metric values, snapshots, bounded collection,
 recent-sample queries, and provider/sink contracts. `diagnostics-serde` adds serialization for
@@ -58,11 +60,18 @@ coordination without concrete device handles. Input, wake, task, clipboard, and 
 are platform-neutral.
 
 The optional `backend-win32` feature is isolated under `platform::win32`. It owns Win32 clipboard
-access, monitor/DPI queries, the layered auxiliary window host, and its GDI backbuffer. The host
-receives scene drawing, session configuration, and error reporting from the application, so it has
-no dependency on Liuguang configuration, resources, network executors, logging, or `AppRuntime`.
-The main Liuguang window loop and concrete resource-heavy GDI/Direct2D drawing remain application
-adapters until their image, font, icon, and custom-paint registries have public contracts.
+access, monitor/DPI queries, the layered auxiliary window host, and its GDI backbuffer. The default
+`renderer-gdi` feature builds on that boundary with a runnable `Win32Application` message loop and
+a basic GDI renderer for geometry, text, clipping, and retained raster subcommands. The backend
+owns native window creation, DPI/input translation, wake-driven repainting, and successful-present
+Effect commits without exposing native handles to the component tree.
+
+The layered host still receives scene drawing, session configuration, and error reporting from
+the application, so it has no dependency on Liuguang configuration, resources, network executors,
+logging, or `AppRuntime`. Liuguang's resource-heavy GDI/Direct2D drawing remains an application
+adapter for images, SVG, blur, fonts/icons, and custom paint until those registries have neutral
+public contracts. The standalone counter example exercises the public Win32 backend without a
+Liuguang dependency.
 
 ## Forbidden Dependencies
 

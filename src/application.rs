@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::{Element, RenderCx, Size};
+use crate::core::{Element, RenderCx, RootComponent, Size};
 
 pub type AppView = Arc<
     dyn for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
@@ -9,13 +9,18 @@ pub type AppView = Arc<
         + 'static,
 >;
 
+impl RootComponent for AppView {
+    fn render_root(self, cx: &mut RenderCx<'_, '_>) -> Element {
+        self(cx)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowOptions {
     pub title: String,
     pub size: Size,
     pub minimum_size: Option<Size>,
     pub resizable: bool,
-    pub transparent: bool,
 }
 
 impl WindowOptions {
@@ -36,11 +41,6 @@ impl WindowOptions {
         self.resizable = resizable;
         self
     }
-
-    pub fn transparent(mut self, transparent: bool) -> Self {
-        self.transparent = transparent;
-        self
-    }
 }
 
 impl Default for WindowOptions {
@@ -50,7 +50,6 @@ impl Default for WindowOptions {
             size: Size::new(1024, 720),
             minimum_size: None,
             resizable: true,
-            transparent: false,
         }
     }
 }
@@ -77,6 +76,13 @@ impl<B> Application<B> {
     pub fn window_options(mut self, options: WindowOptions) -> Self {
         self.window = options;
         self
+    }
+}
+
+#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+impl Application<crate::platform::win32::Win32Application> {
+    pub fn new() -> Self {
+        Self::with_backend(crate::platform::win32::Win32Application::default())
     }
 }
 

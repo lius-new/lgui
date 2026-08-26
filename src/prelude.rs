@@ -1,7 +1,8 @@
 pub use crate::application::{AppView, Application, ApplicationBackend, WindowOptions};
 pub use crate::core::{
-    component, context_provider, group, Element, ElementKey, RenderCx, RootComponent, Size, State,
-    StateSetter, UiRect,
+    component, context_provider, group, Align, Axis, Color, EdgeInsets, Element, ElementKey,
+    RenderCx, RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiRect,
+    VisualStyle,
 };
 #[cfg(feature = "diagnostics")]
 pub use crate::diagnostics::{
@@ -31,5 +32,6 @@ pub use crate::store::{
 pub use crate::theme::{ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens};
 #[cfg(feature = "widgets")]
 pub use crate::widgets::{
-    select, slider, switch, Select, SelectOption, Slider, Switch, SwitchStyle,
+    button, panel, select, slider, stack, switch, text, Button, ButtonStyle, Panel, Select,
+    SelectOption, Slider, Stack, Switch, SwitchStyle, Text,
 };

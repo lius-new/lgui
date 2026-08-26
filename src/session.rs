@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use super::{
+    application::AppView,
     core::{
-        HostTree, LayoutCommitMetrics, LayoutRuntime, UiRuntime, UiScale, UiTaskSpawner, UiWake,
+        HostTree, HostTreeBuilder, LayoutCommitMetrics, LayoutRuntime, UiRuntime, UiScale,
+        UiTaskSpawner, UiWake,
     },
     frame::InvalidationSet,
     host::{HostCommit, HostRuntime},
@@ -82,6 +86,40 @@ impl UiSession {
             &mut self.invalidations,
             changes,
         )
+    }
+
+    pub fn render_view(&mut self, view: &AppView, viewport: UiRect, scale: UiScale) -> HostCommit {
+        self.apply_pending_updates();
+        self.prepare_render(viewport, scale);
+        let mut tree = self.build_view_tree(Arc::clone(view), viewport, scale);
+        if self.runtime.sync_tree_focus(&tree) {
+            tree = self.build_view_tree(Arc::clone(view), viewport, scale);
+        }
+        if self.runtime.sync_tree_animation_targets(&tree) {
+            tree = self.build_view_tree(Arc::clone(view), viewport, scale);
+        }
+        self.replace_tree(tree);
+        self.commit(viewport)
+    }
+
+    fn build_view_tree(&self, view: AppView, viewport: UiRect, scale: UiScale) -> HostTree {
+        let interaction = self.runtime.interaction_state();
+        let mut builder = HostTreeBuilder::from_retained(self.render_tree());
+        builder.mount(
+            view,
+            viewport,
+            &interaction,
+            self.runtime.animations(),
+            self.runtime.component_states(),
+            self.runtime.component_tree(),
+            self.runtime.contexts(),
+            self.runtime.hook_states(),
+            self.runtime.hook_updates(),
+            self.runtime.task_spawner(),
+            self.runtime.effects(),
+            scale,
+        );
+        builder.finish()
     }
 
     pub fn apply_pending_updates(&mut self) {

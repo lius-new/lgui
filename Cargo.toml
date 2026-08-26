@@ -6,12 +6,13 @@ publish = false
 readme = "README.md"
 
 [features]
-default = ["router", "store", "widgets"]
+default = ["renderer-gdi", "router", "store", "widgets"]
 async = []
 backend-win32 = ["dep:windows"]
 diagnostics = []
 diagnostics-serde = ["diagnostics", "dep:serde"]
 router = []
+renderer-gdi = ["backend-win32"]
 store = []
 theme = []
 tokio = ["async", "dep:tokio"]
@@ -33,3 +34,7 @@ windows = { version = "0.62.2", optional = true, features = [
   "Win32_UI_HiDpi",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[[example]]
+name = "counter"
+required-features = ["renderer-gdi", "widgets"]

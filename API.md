@@ -16,7 +16,16 @@ GUI crate does not know application routes, stores, themes, network runtimes, or
 ## Application And Platform
 
 `Application<B>` owns backend-neutral window options and an `AppView`. Backends implement
-`ApplicationBackend`, so application code does not pass native handles into the component tree:
+`ApplicationBackend`, so application code does not pass native handles into the component tree.
+On Windows, the default `renderer-gdi` feature supplies `Application::new()`:
+
+```rust,ignore
+Application::new()
+    .window_options(WindowOptions::new("Counter", Size::new(380, 240)))
+    .run(app)?;
+```
+
+Portable or custom backends use the explicit constructor:
 
 ```rust,ignore
 Application::with_backend(backend)
@@ -26,9 +35,11 @@ Application::with_backend(backend)
 
 The portable platform surface includes `InputEvent`, `InputSink`, `WakeHandle`, executor-neutral
 tasks, `Clipboard`, and pure DPI scale resolution. The optional `backend-win32` feature adds the
-Win32 clipboard, monitor/DPI adapter, layered window host, and layered GDI backbuffer. Native
-window and device-context types stay inside `platform::win32`; the portable core never exposes
-them.
+Win32 clipboard, monitor/DPI adapter, layered window host, and layered GDI backbuffer.
+`renderer-gdi` builds on it with the native message loop, per-monitor DPI sizing,
+pointer/keyboard input, wake-driven repainting, minimum-window sizing, and the basic scene
+renderer. Native window and device-context types stay inside `platform::win32`; the portable core
+never exposes them.
 
 The layered host accepts application callbacks for scene drawing, task/session setup, and error
 reporting. This keeps image/font registries, the network executor, and application logging outside
@@ -40,6 +51,11 @@ the platform crate.
 input, animation, and invalidation coordination, while `PresenterPlugin<State>` lets an application
 attach typed state synchronization without teaching `lgui` about its runtime. `PresentRequest`,
 `PresentMode`, and `PresentStats` are shared by the GDI and Direct2D adapters.
+
+The built-in GDI renderer covers rectangles, ellipses, text, lines, clips, static layers, and
+scroll-raster subcommands. Image registries, SVG, blur, and custom-paint commands remain in
+Liuguang's enhanced GDI/Direct2D adapters until their resource contracts are application-neutral.
+Effects are committed only after the built-in backend completes drawing a frame.
 
 ## State
 
@@ -133,9 +149,11 @@ unrelated sibling components remain clean.
 
 ## Theme and widgets
 
-The default `widgets` feature enables the `theme` feature and currently exports the controlled
-`switch`, `slider`, and `select` controls. Their values always come from the caller, and their
-callbacks report the proposed next value; widgets do not read Stores or application globals.
+The default `widgets` feature enables the `theme` feature and exports `button`, `panel`, `stack`,
+and `text`, together with the controlled `switch`, `slider`, and `select` controls. Controlled
+values always come from the caller, and callbacks report the proposed next value; widgets do not
+read Stores or application globals. Application-specific async dispatch stays in application
+event extensions instead of being embedded in a generic widget.
 
 ```rust,ignore
 let theme = ThemeContext::new(ThemeTokens {
@@ -156,6 +174,10 @@ Default widget styles resolve the nearest `ThemeContext` during element renderin
 `.style(...)` overrides those tokens. `ThemeTokens` separates semantic colors, spacing, and
 typography from application theme schemas, so applications map their own palette into this small
 public contract.
+
+The runnable `examples/counter.rs` demonstrates the current end-to-end API. Tuple content can be
+passed directly to `Stack::content`, while `State::update` ensures the click handler uses the
+latest value and refreshes only the owning component boundary.
 
 ## Diagnostics
 
