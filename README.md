@@ -31,6 +31,14 @@ Run the standalone counter on Windows:
 cargo run -p lgui --example counter
 ```
 
+The independent workspace showcase depends only on `lgui` and exercises State, committed Effects,
+typed Store selectors/actions, and generic Router navigation:
+
+```powershell
+cargo run -p lgui-showcase
+cargo run -p lgui-showcase --features diagnostics
+```
+
 Liuguang currently enables the `tokio` feature, which includes executor-neutral async effects and
 the optional Tokio executor adapter. Disabling default features keeps the crate platform-neutral
 and does not pull in Windows, Tokio, diagnostics, or serialization dependencies.

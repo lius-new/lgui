@@ -175,9 +175,11 @@ Default widget styles resolve the nearest `ThemeContext` during element renderin
 typography from application theme schemas, so applications map their own palette into this small
 public contract.
 
-The runnable `examples/counter.rs` demonstrates the current end-to-end API. Tuple content can be
+The runnable `examples/counter.rs` demonstrates the minimal end-to-end API. Tuple content can be
 passed directly to `Stack::content`, while `State::update` ensures the click handler uses the
-latest value and refreshes only the owning component boundary.
+latest value and refreshes only the owning component boundary. The independent `lgui-showcase`
+workspace package depends only on `lgui` and combines State, committed Effects, a typed Store, and
+generic Router navigation; its optional `diagnostics` feature enables the diagnostics model.
 
 ## Diagnostics
 

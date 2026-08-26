@@ -70,8 +70,10 @@ The layered host still receives scene drawing, session configuration, and error 
 the application, so it has no dependency on Liuguang configuration, resources, network executors,
 logging, or `AppRuntime`. Liuguang's resource-heavy GDI/Direct2D drawing remains an application
 adapter for images, SVG, blur, fonts/icons, and custom paint until those registries have neutral
-public contracts. The standalone counter example exercises the public Win32 backend without a
-Liuguang dependency.
+public contracts. The standalone counter target and independent `lgui-showcase` package exercise
+the public Win32 backend without a Liuguang dependency. The showcase's manifest has no dependency
+other than `lgui`, and covers State, committed Effects, typed Store selection/actions, generic
+Router navigation, and optional diagnostics.
 
 ## Forbidden Dependencies
 
