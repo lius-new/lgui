@@ -41,5 +41,37 @@ Dependency changes and unmounts run the previous cleanup before the next committ
 
 The `async` feature adds cancellable async Effects against the executor-neutral `UiExecutor`
 contract. The `tokio` feature adds `TokioExecutor`; component code and cancellation do not depend
-on Tokio. Store, diagnostics, widgets, platform, and renderer features are added only when their
-implementations cross into this crate.
+on Tokio.
+
+## Store
+
+The default `store` feature provides typed definitions, selectors, actions, and an injected
+runtime. Store creation and mutation remain independent from application globals:
+
+```rust,ignore
+struct CounterStore {
+    count: i32,
+}
+
+impl CounterStore {
+    fn inc(&mut self) {
+        self.count += 1;
+    }
+}
+
+const COUNTER: StoreDefinition<CounterStore> =
+    create("counter", || CounterStore { count: 1 });
+const INC: StoreAction<CounterStore> = COUNTER.action(CounterStore::inc);
+
+fn use_counter(cx: &mut RenderCx<'_, '_>) -> (i32, BoundStoreAction<CounterStore>) {
+    (COUNTER.select(cx, |store| store.count), INC.bind(cx))
+}
+```
+
+The application provides `StoreContext` above component consumers. A selector subscribes to one
+typed store and invalidates its component only when the selected value changes. Multiple store
+notifications before the next frame are batched by the component update queue. Mutation code does
+not declare string paths, and an unselected field cannot refresh the component.
+
+Diagnostics, widgets, platform, and renderer features are added only when their implementations
+cross into this crate.

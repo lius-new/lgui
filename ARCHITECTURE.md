@@ -31,6 +31,11 @@ Async effects are available with the `async` feature through the executor-neutra
 contract and standard `Future` cancellation. The `tokio` feature only exports a Tokio executor
 adapter; the component runtime has no Tokio-specific scheduling or cancellation code.
 
+The `store` feature owns the typed Store registry, runtime, selectors, and bound actions.
+Applications inject an `Arc<StoreRuntime>` through `StoreContext`; Store hooks never resolve an
+application singleton. Notifications are store-typed, while selector equality controls component
+invalidation, so business mutation code does not expose or construct string paths.
+
 ## Forbidden Dependencies
 
 The `core`, `frame`, `host`, and `session` modules must not depend on:

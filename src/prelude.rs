@@ -3,3 +3,8 @@ pub use crate::core::{
     StateSetter, UiRect,
 };
 pub use crate::session::UiSession;
+#[cfg(feature = "store")]
+pub use crate::store::{
+    create, BoundStoreAction, BoundStoreActionWith, StoreAction, StoreActionWith, StoreContext,
+    StoreDefinition, StoreHooks, StoreRegistry, StoreRuntime,
+};

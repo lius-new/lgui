@@ -5,3 +5,5 @@ pub mod frame;
 pub mod host;
 pub mod prelude;
 pub mod session;
+#[cfg(feature = "store")]
+pub mod store;

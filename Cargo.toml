@@ -6,8 +6,9 @@ publish = false
 readme = "README.md"
 
 [features]
-default = []
+default = ["store"]
 async = []
+store = []
 tokio = ["async", "dep:tokio"]
 
 [dependencies]
