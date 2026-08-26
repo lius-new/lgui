@@ -150,10 +150,11 @@ unrelated sibling components remain clean.
 ## Theme and widgets
 
 The default `widgets` feature enables the `theme` feature and exports `button`, `panel`, `stack`,
-and `text`, together with the controlled `checkbox`, `switch`, `slider`, and `select` controls.
-Controlled values always come from the caller, and callbacks report the proposed next value;
-widgets do not read Stores or application globals. Application-specific async dispatch stays in
-application event extensions instead of being embedded in a generic widget.
+`text`, `divider`, and `faded_divider`, together with the controlled `checkbox`, `switch`,
+`slider`, and `select` controls. Controlled values always come from the caller, and callbacks
+report the proposed next value; widgets do not read Stores or application globals.
+Application-specific async dispatch stays in application event extensions instead of being
+embedded in a generic widget.
 
 ```rust,ignore
 let theme = ThemeContext::new(ThemeTokens {

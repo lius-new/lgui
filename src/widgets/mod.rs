@@ -1,5 +1,7 @@
 mod button;
 mod checkbox;
+mod divider;
+mod faded_divider;
 mod panel;
 mod select;
 mod slider;
@@ -11,6 +13,8 @@ pub use button::{button, Button, ButtonStyle};
 pub use checkbox::{
     checkbox, Checkbox, CheckboxChangeHandler, CheckboxStyle, IntoCheckboxChangeHandler,
 };
+pub use divider::{divider, Divider, DividerDirection};
+pub use faded_divider::{faded_divider, FadedDivider};
 pub use panel::{panel, Panel};
 pub use select::{
     select, IntoSelectChangeHandler, Select, SelectChangeHandler, SelectOption, SelectPlacement,
