@@ -9,6 +9,7 @@ mod context;
 mod context_value;
 mod declarative;
 mod dirty;
+mod dispatch;
 mod effect;
 mod element;
 mod event;
@@ -49,6 +50,7 @@ pub use declarative::{
     Fragment, IntoClickHandler, IntoElementContent,
 };
 pub use dirty::{DirtySet, DirtyTracker};
+pub use dispatch::{dispatch_event_handlers, dispatch_hit_handlers, dispatch_runtime_output};
 pub use effect::{EffectRegistry, IntoEffectCleanup, UiEffect};
 pub use element::{UiComponent, UiElement};
 pub use event::{

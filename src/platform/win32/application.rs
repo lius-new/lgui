@@ -23,7 +23,10 @@ use windows::{
 
 use crate::{
     application::{AppView, ApplicationBackend, WindowOptions},
-    core::{InputEvent, KeyCode, KeyModifiers, Point, PointerButton, Size, UiRect},
+    core::{
+        dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton, Size,
+        UiRect,
+    },
     renderer::RenderBackend,
     session::UiSession,
 };
@@ -274,7 +277,14 @@ fn paint(hwnd: HWND) {
 fn dispatch_input(hwnd: HWND, input: InputEvent) {
     STATE.with(|state| {
         if let Some(state) = state.borrow_mut().as_mut() {
-            let _ = state.session.handle_input(input);
+            let output = state.session.handle_input(input);
+            let session = &mut state.session;
+            let _ = dispatch_runtime_output(
+                output,
+                &(),
+                |action| session.runtime_mut().handle_default_action(action),
+                |_| {},
+            );
         }
     });
     unsafe {
