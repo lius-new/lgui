@@ -43,10 +43,10 @@ platform caches; those concerns do not enter `lgui`.
 
 The `theme` feature defines semantic color, spacing, and typography tokens plus `ThemeContext`.
 The `widgets` feature contains application-neutral display/layout primitives and controlled,
-Store-agnostic controls. It currently owns `button`, `panel`, `stack`, `text`, `switch`, `slider`,
-and `select`. Widget defaults resolve tokens from Context at element render time; explicit styles
-remain available. Application theme catalogs, persistence, branded palette fields, async business
-dispatch, and business callbacks stay in the application.
+Store-agnostic controls. It currently owns `button`, `panel`, `stack`, `text`, `checkbox`,
+`switch`, `slider`, and `select`. Widget defaults resolve tokens from Context at element render
+time; explicit styles remain available. Application theme catalogs, persistence, branded palette
+fields, async business dispatch, and business callbacks stay in the application.
 
 The `diagnostics` feature owns backend-neutral frame metric values, snapshots, bounded collection,
 recent-sample queries, and provider/sink contracts. `diagnostics-serde` adds serialization for

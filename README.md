@@ -11,9 +11,9 @@ diagnostics, and `UiSession`. The default `renderer-gdi` feature provides a runn
 also provides clipboard and DPI services plus the layered auxiliary-window host and GDI
 backbuffer. Liuguang's resource-aware GDI/Direct2D drawing remains an application adapter for
 images, SVG, blur, and custom paint. Public widgets include the layout and display primitives
-`button`, `panel`, `stack`, and `text`, plus the controlled `switch`, `slider`, and `select`
-controls styled through semantic theme tokens. Diagnostics HUDs and operating-system sampling
-remain application adapters.
+`button`, `panel`, `stack`, and `text`, plus the controlled `checkbox`, `switch`, `slider`, and
+`select` controls styled through semantic theme tokens. Diagnostics HUDs and operating-system
+sampling remain application adapters.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) defines dependency boundaries.
 - [`API.md`](API.md) records the current surface and intended ergonomic direction.

@@ -32,6 +32,6 @@ pub use crate::store::{
 pub use crate::theme::{ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens};
 #[cfg(feature = "widgets")]
 pub use crate::widgets::{
-    button, panel, select, slider, stack, switch, text, Button, ButtonStyle, Panel, Select,
-    SelectOption, Slider, Stack, Switch, SwitchStyle, Text,
+    button, checkbox, panel, select, slider, stack, switch, text, Button, ButtonStyle, Checkbox,
+    CheckboxStyle, Panel, Select, SelectOption, Slider, Stack, Switch, SwitchStyle, Text,
 };

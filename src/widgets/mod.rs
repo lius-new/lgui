@@ -1,4 +1,5 @@
 mod button;
+mod checkbox;
 mod panel;
 mod select;
 mod slider;
@@ -7,6 +8,9 @@ mod switch;
 mod text;
 
 pub use button::{button, Button, ButtonStyle};
+pub use checkbox::{
+    checkbox, Checkbox, CheckboxChangeHandler, CheckboxStyle, IntoCheckboxChangeHandler,
+};
 pub use panel::{panel, Panel};
 pub use select::{
     select, IntoSelectChangeHandler, Select, SelectChangeHandler, SelectOption, SelectPlacement,
