@@ -41,6 +41,11 @@ Route values remain application-defined. Applications may bind the generic `Rout
 callbacks through an adapter when navigation must also publish business lifecycle events or clear
 platform caches; those concerns do not enter `lgui`.
 
+The `theme` feature defines semantic color, spacing, and typography tokens plus `ThemeContext`.
+The `widgets` feature contains only controlled, Store-agnostic controls. Widget defaults resolve
+tokens from Context at element render time; explicit styles remain available. Application theme
+catalogs, persistence, branded palette fields, and business callbacks stay in the application.
+
 ## Forbidden Dependencies
 
 The `core`, `frame`, `host`, and `session` modules must not depend on:

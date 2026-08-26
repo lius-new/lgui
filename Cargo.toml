@@ -6,11 +6,13 @@ publish = false
 readme = "README.md"
 
 [features]
-default = ["router", "store"]
+default = ["router", "store", "widgets"]
 async = []
 router = []
 store = []
+theme = []
 tokio = ["async", "dep:tokio"]
+widgets = ["theme"]
 
 [dependencies]
 tokio = { version = "1", optional = true, features = ["rt"] }

@@ -99,6 +99,26 @@ impl ElementRenderCx<'_, '_, '_> {
         self.scope.id(format!("{}._{}", self.id.as_str(), n))
     }
 
+    pub fn use_context<T>(&self) -> T
+    where
+        T: Clone + 'static,
+    {
+        self.try_use_context::<T>().unwrap_or_else(|| {
+            panic!(
+                "missing context value `{}` for element `{}`",
+                type_name::<T>(),
+                self.id.as_str()
+            )
+        })
+    }
+
+    pub fn try_use_context<T>(&self) -> Option<T>
+    where
+        T: Clone + 'static,
+    {
+        self.context.contexts().read(self.component_id)
+    }
+
     #[doc(hidden)]
     pub fn component_owner(&self) -> (ComponentId, bool) {
         (self.component_id, self.force_components)

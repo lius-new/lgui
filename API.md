@@ -102,3 +102,29 @@ own lifecycle boundary.
 Components below a `RouterContext<R>` can call `use_route`, `use_navigate`, `use_replace`, or
 `use_back`. Route notifications invalidate the component that called the Router hook, while
 unrelated sibling components remain clean.
+
+## Theme and widgets
+
+The default `widgets` feature enables the `theme` feature and currently exports the controlled
+`switch`, `slider`, and `select` controls. Their values always come from the caller, and their
+callbacks report the proposed next value; widgets do not read Stores or application globals.
+
+```rust,ignore
+let theme = ThemeContext::new(ThemeTokens {
+    colors: ColorTokens {
+        accent: Color(0x2FB8C5),
+        ..ColorTokens::default()
+    },
+    ..ThemeTokens::default()
+});
+
+context_provider(
+    theme,
+    switch(rect, enabled, move |next| set_enabled(next)),
+)
+```
+
+Default widget styles resolve the nearest `ThemeContext` during element rendering. An explicit
+`.style(...)` overrides those tokens. `ThemeTokens` separates semantic colors, spacing, and
+typography from application theme schemas, so applications map their own palette into this small
+public contract.

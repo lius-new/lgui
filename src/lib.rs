@@ -9,3 +9,7 @@ pub mod router;
 pub mod session;
 #[cfg(feature = "store")]
 pub mod store;
+#[cfg(feature = "theme")]
+pub mod theme;
+#[cfg(feature = "widgets")]
+pub mod widgets;
