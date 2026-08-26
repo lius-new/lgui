@@ -7,7 +7,8 @@ readme = "README.md"
 
 [features]
 default = []
-tokio = ["dep:tokio"]
+async = []
+tokio = ["async", "dep:tokio"]
 
 [dependencies]
-tokio = { version = "1", optional = true, features = ["macros", "sync"] }
+tokio = { version = "1", optional = true, features = ["rt"] }

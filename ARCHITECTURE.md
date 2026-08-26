@@ -17,9 +17,9 @@ application themes, or platform handles in the backend-independent runtime.
 
 ## Current Public Surface
 
-The first extraction preserves the existing `RenderCx`, `Element`, state, effect, context,
-observable, generic router, retained host tree, layout, damage, and `UiSession` semantics. New API
-design is deferred until the application compiles against this physical crate boundary.
+The runtime exposes `RenderCx`, `Element`, typed `State<T>`, Effect, Context, Observable, generic
+router, retained host tree, layout, damage, and `UiSession` semantics. The tuple-based `use_state`
+surface remains as a migration compatibility API for Liuguang callers.
 
 Application-specific behavior is attached to `UiEventContext` through traits defined in the
 application crate. The GUI crate exposes only propagation, scheduling flags, application context
@@ -27,9 +27,9 @@ access, and an opaque host-command slot. A small set of `#[doc(hidden)]` compone
 remains public while widgets still live in the application crate; they return to crate-private
 visibility when the widgets migration is complete.
 
-Async effects are available with the `tokio` feature during the migration. The core task-spawner
-contract remains executor-neutral; a later phase will remove Tokio-specific cancellation from the
-component runtime.
+Async effects are available with the `async` feature through the executor-neutral `UiExecutor`
+contract and standard `Future` cancellation. The `tokio` feature only exports a Tokio executor
+adapter; the component runtime has no Tokio-specific scheduling or cancellation code.
 
 ## Forbidden Dependencies
 

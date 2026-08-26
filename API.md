@@ -6,20 +6,20 @@ The first extraction preserves the existing public runtime names so the applicat
 without combining a physical crate migration with an API rewrite:
 
 - `RenderCx`, `Element`, `RootComponent`, and declarative content
-- `use_state`, `use_effect`, `use_context`, `use_observable`, and generic router context
+- `State<T>`, compatibility `use_state`, Effects, Context, Observable, and generic router context
 - `UiRuntime`, `HostTree`, `LayoutRuntime`, `HostRuntime`, and `UiSession`
 - generic input events, event handlers, scene data, scale, and geometry
 
 Application behavior is added to `UiEventContext` with an application-owned extension trait. The
 GUI crate does not know application routes, stores, themes, network runtimes, or window commands.
 
-## Intended Ergonomic Surface
+## State
 
-After the physical extraction is stable, state should move from a value/setter tuple toward a
-single typed handle:
+New components use one typed handle. `update` receives the latest value, so event handlers do not
+capture a render snapshot:
 
 ```rust,ignore
-fn counter(cx: &mut ViewCx) -> impl IntoElement {
+fn counter(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_i32);
 
     vstack((
@@ -29,5 +29,17 @@ fn counter(cx: &mut ViewCx) -> impl IntoElement {
 }
 ```
 
-This example is a design target, not the current `0.1.0` API. Store, router, diagnostics, widgets,
-platform, and renderer features are added only when their implementations cross into this crate.
+`State::set`, `State::update`, and `State::try_update` update the shared hook cell and enqueue only
+that component boundary. Multiple updates before the next frame are batched into one dirty ID.
+Handles from an unmounted component generation cannot invalidate a later generation. Existing
+Liuguang code may continue using `use_state` and `StateSetter` while it migrates.
+
+## Effect And Async Boundaries
+
+Effects are staged during rendering and run only when the platform reports a successful present.
+Dependency changes and unmounts run the previous cleanup before the next committed effect.
+
+The `async` feature adds cancellable async Effects against the executor-neutral `UiExecutor`
+contract. The `tokio` feature adds `TokioExecutor`; component code and cancellation do not depend
+on Tokio. Store, diagnostics, widgets, platform, and renderer features are added only when their
+implementations cross into this crate.

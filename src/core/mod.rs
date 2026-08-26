@@ -68,7 +68,7 @@ pub use layout::{
 };
 pub use node::{EventPolicy, InteractionRole, UiImageSource, UiNode, UiNodeKind};
 pub use observable::{Observable, ObservableListener};
-pub use reactor::{RenderCx, StateSetter, UiFocusHandle};
+pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
 pub use render::{
     commands_for_phase, compile_scene, compile_scene_root, scene_root_ids,
     scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene, ScenePrimitive,
@@ -85,6 +85,8 @@ pub use style::{
     RadialGradientLayer, Stroke, TextAlign, TextStyle, UiPath, UiPathCommand,
     VerticalGradientLayer, VisualStyle,
 };
-pub use task::{noop_task_spawner, UiTask, UiTaskSpawner};
+#[cfg(feature = "tokio")]
+pub use task::TokioExecutor;
+pub use task::{noop_task_spawner, UiExecutor, UiTask, UiTaskSpawner};
 pub(crate) use tree::ProjectionChanges;
 pub use tree::{HitResult, HostTree};

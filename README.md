@@ -4,7 +4,7 @@
 Windows client. The `0.1.x` migration series is not API-stable and is not published yet.
 
 The current crate contains the backend-independent component runtime, retained host tree,
-incremental layout and damage tracking, generic state/effect/context/router primitives, and
+incremental layout and damage tracking, typed state/effect/context/router primitives, and
 `UiSession`. Window creation, render backends, widgets, Store integration, and diagnostics are
 still provided by the application and will move in later phases.
 
@@ -18,4 +18,5 @@ Build the portable runtime without optional dependencies:
 cargo test -p lgui --no-default-features
 ```
 
-Liuguang currently enables the `tokio` feature for cancellable async effects.
+Liuguang currently enables the `tokio` feature, which includes executor-neutral async effects and
+the optional Tokio executor adapter.

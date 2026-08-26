@@ -434,15 +434,16 @@ mod tests {
 
     struct StatefulRoot {
         executions: Arc<AtomicUsize>,
-        setter: Arc<Mutex<Option<super::super::StateSetter<u32>>>>,
+        state: Arc<Mutex<Option<super::super::State<u32>>>>,
     }
 
     impl RootComponent for StatefulRoot {
         fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
             component((), move |cx, _| {
                 self.executions.fetch_add(1, Ordering::SeqCst);
-                let (value, setter) = cx.use_state(|| 0_u32);
-                *self.setter.lock().expect("setter poisoned") = Some(setter);
+                let state = cx.state(0_u32);
+                let value = state.get();
+                *self.state.lock().expect("state handle poisoned") = Some(state);
                 super::super::content_text(value.to_string())
             })
         }
@@ -451,13 +452,13 @@ mod tests {
     fn mount_stateful(
         runtime: &UiRuntime,
         executions: Arc<AtomicUsize>,
-        setter: Arc<Mutex<Option<super::super::StateSetter<u32>>>>,
+        state: Arc<Mutex<Option<super::super::State<u32>>>>,
     ) {
         let viewport = UiRect::new(0, 0, 10, 10);
         let interaction = runtime.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(
-            StatefulRoot { executions, setter },
+            StatefulRoot { executions, state },
             viewport,
             &interaction,
             runtime.animations(),
@@ -476,19 +477,21 @@ mod tests {
     fn state_update_marks_only_its_declarative_component_for_execution() {
         let mut runtime = UiRuntime::new();
         let executions = Arc::new(AtomicUsize::new(0));
-        let setter = Arc::new(Mutex::new(None));
-        mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&setter));
-        mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&setter));
+        let state = Arc::new(Mutex::new(None));
+        mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&state));
+        mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&state));
         assert_eq!(executions.load(Ordering::SeqCst), 1);
 
-        let set_value = setter
+        let count = state
             .lock()
-            .expect("setter poisoned")
+            .expect("state handle poisoned")
             .clone()
-            .expect("setter missing");
-        set_value(7);
+            .expect("state handle missing");
+        count.update(|value| *value += 3);
+        count.update(|value| *value += 4);
+        assert_eq!(count.get(), 7);
         assert_eq!(runtime.apply_pending_updates().dirty_ids.len(), 1);
-        mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&setter));
+        mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&state));
 
         assert_eq!(executions.load(Ordering::SeqCst), 2);
     }

@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "async")]
 use std::future::Future;
 
 use super::{
@@ -21,10 +21,15 @@ pub struct RenderCx<'a, 'ctx> {
 }
 
 #[derive(Clone)]
+pub struct State<T> {
+    value: Arc<Mutex<T>>,
+    invalidate: Arc<dyn Fn() + Send + Sync + 'static>,
+}
+
+#[derive(Clone)]
 pub struct StateSetter<T> {
     set: Arc<dyn Fn(T) + Send + Sync + 'static>,
-    update: Arc<dyn Fn(Box<dyn FnOnce(&mut T) + Send + 'static>) + Send + Sync + 'static>,
-    shadow: Arc<Mutex<T>>,
+    state: State<T>,
 }
 
 #[derive(Clone)]
@@ -114,7 +119,9 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
     where
         T: Clone + Send + 'static,
     {
-        self.create_state_hook(self.scope.node_id(), initial)
+        let state = self.create_state_hook(self.scope.node_id(), initial);
+        let value = state.get();
+        (value, StateSetter::new(state))
     }
 
     pub fn use_state_eq<T>(&mut self, initial: impl FnOnce() -> T) -> (T, StateSetter<T>)
@@ -123,6 +130,20 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
     {
         let (value, setter) = self.use_state(initial);
         (value, setter.with_equality())
+    }
+
+    pub fn state<T>(&mut self, initial: T) -> State<T>
+    where
+        T: Clone + Send + 'static,
+    {
+        self.state_with(|| initial)
+    }
+
+    pub fn state_with<T>(&mut self, initial: impl FnOnce() -> T) -> State<T>
+    where
+        T: Clone + Send + 'static,
+    {
+        self.create_state_hook(self.scope.node_id(), initial)
     }
 
     pub fn use_component_state<T, R>(&mut self, update: impl FnOnce(&mut T) -> R) -> R
@@ -136,45 +157,22 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         self.context.component_state_mut(&id, update)
     }
 
-    fn create_state_hook<T>(
-        &mut self,
-        owner: UiId,
-        initial: impl FnOnce() -> T,
-    ) -> (T, StateSetter<T>)
+    fn create_state_hook<T>(&mut self, owner: UiId, initial: impl FnOnce() -> T) -> State<T>
     where
         T: Clone + Send + 'static,
     {
         let id = self.next_hook(HookKind::State);
-        let value = self.context.hook_state(id, initial);
+        let value = self
+            .context
+            .hook_state(id, || Arc::new(Mutex::new(initial())));
         let updates = self.context.hook_updates();
-        let shadow = Arc::new(Mutex::new(value.clone()));
-        let set_shadow = Arc::clone(&shadow);
-        let set_owner = owner.clone();
         let component_id = self.component_id;
-        let set_id = id;
-        let set_updates = Arc::clone(&updates);
-        let update_owner = owner;
-        let update_component_id = component_id;
-        let update_id = id;
-        let update_updates = updates;
-        (
-            value.clone(),
-            StateSetter {
-                set: Arc::new(move |next| {
-                    *set_shadow.lock().expect("state setter shadow poisoned") = next.clone();
-                    set_updates.enqueue(component_id, set_owner.clone(), set_id, next);
-                }),
-                update: Arc::new(move |update| {
-                    update_updates.enqueue_update(
-                        update_component_id,
-                        update_owner.clone(),
-                        update_id,
-                        update,
-                    );
-                }),
-                shadow,
-            },
-        )
+        State {
+            value,
+            invalidate: Arc::new(move || {
+                updates.invalidate(component_id, owner.clone());
+            }),
+        }
     }
 
     pub fn use_effect<D, F, R>(&mut self, deps: D, effect: F)
@@ -194,7 +192,7 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         self.use_effect((), effect);
     }
 
-    #[cfg(feature = "tokio")]
+    #[cfg(feature = "async")]
     pub fn use_async_effect<D, F, Fut>(&mut self, deps: D, effect: F)
     where
         D: Clone + PartialEq + 'static,
@@ -206,21 +204,13 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
             .task_spawner()
             .unwrap_or_else(super::noop_task_spawner);
         self.use_effect(deps, move || {
-            let (cancel, cancelled) = tokio::sync::oneshot::channel();
-            let task = effect();
-            spawner(Box::pin(async move {
-                tokio::select! {
-                    _ = task => {}
-                    _ = cancelled => {}
-                }
-            }));
-            move || {
-                let _ = cancel.send(());
-            }
+            let (cancel, task) = super::task::cancellable_task(Box::pin(effect()));
+            spawner.spawn(task);
+            move || cancel.cancel()
         });
     }
 
-    #[cfg(feature = "tokio")]
+    #[cfg(feature = "async")]
     pub fn use_async_effect_once<F, Fut>(&mut self, effect: F)
     where
         F: FnOnce() -> Fut + 'static,
@@ -363,48 +353,70 @@ impl<T> Deref for StateSetter<T> {
     }
 }
 
+impl<T> State<T>
+where
+    T: Clone + Send + 'static,
+{
+    pub fn get(&self) -> T {
+        self.value.lock().expect("state value poisoned").clone()
+    }
+
+    pub fn set(&self, next: T) {
+        *self.value.lock().expect("state value poisoned") = next;
+        (self.invalidate)();
+    }
+
+    pub fn update(&self, update: impl FnOnce(&mut T)) {
+        update(&mut self.value.lock().expect("state value poisoned"));
+        (self.invalidate)();
+    }
+
+    pub fn try_update(&self, update: impl FnOnce(&mut T) -> bool) -> bool {
+        let changed = update(&mut self.value.lock().expect("state value poisoned"));
+        if changed {
+            (self.invalidate)();
+        }
+        changed
+    }
+}
+
 impl<T> StateSetter<T>
 where
     T: Clone + Send + 'static,
 {
+    fn new(state: State<T>) -> Self {
+        let set_state = state.clone();
+        Self {
+            set: Arc::new(move |next| set_state.set(next)),
+            state,
+        }
+    }
+
     pub fn current(&self) -> T {
-        self.shadow
-            .lock()
-            .expect("state setter shadow poisoned")
-            .clone()
+        self.state.get()
     }
 
     pub fn update(&self, update: impl FnOnce(&mut T) + Send + 'static) {
-        (self.update)(Box::new(update));
+        self.state.update(update);
     }
 
     pub fn try_update(&self, update: impl FnOnce(&mut T) -> bool) -> bool {
-        let next = {
-            let current = self.shadow.lock().expect("state setter shadow poisoned");
-            let mut next = current.clone();
-            if !update(&mut next) {
-                return false;
-            }
-            next
-        };
-        (self.set)(next);
-        true
+        self.state.try_update(update)
     }
 
     fn with_equality(self) -> Self
     where
         T: PartialEq,
     {
-        let current = Arc::clone(&self.shadow);
+        let current = self.state.clone();
         let set = Arc::clone(&self.set);
         Self {
             set: Arc::new(move |next| {
-                if *current.lock().expect("state setter shadow poisoned") != next {
+                if current.get() != next {
                     set(next);
                 }
             }),
-            update: self.update,
-            shadow: self.shadow,
+            state: self.state,
         }
     }
 }
@@ -418,23 +430,21 @@ impl UiFocusHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::ComponentTree;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn equality_setter_is_directly_callable_and_try_update_enqueues_once() {
-        let shadow = Arc::new(Mutex::new(1_u32));
+        let value = Arc::new(Mutex::new(1_u32));
         let writes = Arc::new(AtomicUsize::new(0));
-        let set_shadow = Arc::clone(&shadow);
         let set_writes = Arc::clone(&writes);
-        let setter = StateSetter {
-            set: Arc::new(move |next| {
-                *set_shadow.lock().expect("test state shadow poisoned") = next;
+        let state = State {
+            value: Arc::clone(&value),
+            invalidate: Arc::new(move || {
                 set_writes.fetch_add(1, Ordering::SeqCst);
             }),
-            update: Arc::new(|_| {}),
-            shadow,
-        }
-        .with_equality();
+        };
+        let setter = StateSetter::new(state).with_equality();
 
         setter(1);
         assert_eq!(writes.load(Ordering::SeqCst), 0);
@@ -443,9 +453,41 @@ mod tests {
             true
         }));
         assert_eq!(writes.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            *setter.shadow.lock().expect("test state shadow poisoned"),
-            2
-        );
+        assert_eq!(*value.lock().expect("test state value poisoned"), 2);
+    }
+
+    #[test]
+    fn stale_state_handle_cannot_dirty_a_remounted_component_generation() {
+        let components = ComponentTree::new();
+        let updates = Arc::new(super::super::UiUpdateQueue::new());
+        let store = super::super::HookStateStore::new();
+
+        components.begin_render();
+        let old_owner = components.root(UiId::owned("state-owner"), "state owner");
+        components.begin_component_execution(old_owner);
+        components.finish_component(old_owner);
+        components.end_render();
+
+        let state_updates = Arc::clone(&updates);
+        let state = State {
+            value: Arc::new(Mutex::new(1_u32)),
+            invalidate: Arc::new(move || {
+                state_updates.invalidate(old_owner, UiId::owned("state-owner"));
+            }),
+        };
+
+        components.begin_render();
+        components.end_render();
+        components.begin_render();
+        let new_owner = components.root(UiId::owned("state-owner"), "state owner");
+        components.begin_component_execution(new_owner);
+        components.finish_component(new_owner);
+        components.end_render();
+        assert_ne!(old_owner, new_owner);
+
+        state.set(2);
+
+        assert!(updates.apply(&store, &components).is_empty());
+        assert!(!components.is_dirty(new_owner));
     }
 }

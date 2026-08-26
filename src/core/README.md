@@ -10,15 +10,16 @@ Application UI is expressed as retained function components and declarative `Ele
 
 ```rust
 fn counter(cx: &mut RenderCx<'_, '_>) -> Element {
-    let (count, set_count) = cx.use_state(|| 0_u32);
+    let count = cx.state(0_u32);
+    let current = count.get();
 
-    cx.use_effect((count,), move || {
-        move || tracing::debug!(count, "counter effect cleanup")
+    cx.use_effect((current,), move || {
+        move || tracing::debug!(count = current, "counter effect cleanup")
     });
 
     group(UiRect::new(0, 0, 160, 48)).content((
-        count,
-        button("Add").on_click(move || set_count(count + 1)),
+        current,
+        button("Add").on_click(move || count.update(|value| *value += 1)),
     ))
 }
 ```
