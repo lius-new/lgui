@@ -27,7 +27,7 @@ use windows::{
             MFS_CHECKED, MFS_DISABLED, MFS_ENABLED, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP,
             MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, SM_CXSMICON, SWP_NOACTIVATE,
             SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, TPM_NONOTIFY, TPM_RETURNCMD,
-            TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_NULL, WM_RBUTTONUP,
+            TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
             WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
         },
     },
@@ -370,7 +370,7 @@ extern "system" fn tray_host_proc(
 ) -> LRESULT {
     if message == TRAY_MESSAGE_ID {
         match lparam.0 as u32 {
-            WM_LBUTTONDBLCLK => {
+            message if is_activation_message(message) => {
                 let action = TRAY_HOST_STATE.with(|state| {
                     state
                         .borrow()
@@ -421,6 +421,10 @@ extern "system" fn tray_host_proc(
         }
         _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
     }
+}
+
+fn is_activation_message(message: u32) -> bool {
+    message == WM_LBUTTONUP
 }
 
 fn execute_action(action: TrayAction) {
@@ -722,7 +726,15 @@ fn pick_icon_image(bytes: &[u8], desired_size: u32) -> Option<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_wide, pick_icon_image};
+    use super::{copy_wide, is_activation_message, pick_icon_image, WM_LBUTTONUP};
+
+    #[test]
+    fn single_left_click_activates_the_tray_icon() {
+        assert!(is_activation_message(WM_LBUTTONUP));
+        assert!(!is_activation_message(
+            windows::Win32::UI::WindowsAndMessaging::WM_LBUTTONDBLCLK
+        ));
+    }
 
     #[test]
     fn notification_text_is_terminated_and_truncated_to_fit() {
