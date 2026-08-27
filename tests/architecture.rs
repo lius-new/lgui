@@ -146,3 +146,27 @@ fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
         );
     }
 }
+
+#[test]
+fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let gdiplus = fs::read_to_string(root.join("src/platform/win32/gdiplus.rs"))
+        .expect("read Win32 GDI+ lifecycle");
+    for required in [
+        "GdiplusStartup",
+        "GdiplusShutdown",
+        "clear_decoded_image_cache",
+    ] {
+        assert!(
+            gdiplus.contains(required),
+            "GDI+ image lifecycle lost `{required}`"
+        );
+    }
+
+    let application = fs::read_to_string(root.join("src/platform/win32/application.rs"))
+        .expect("read Win32 application host");
+    assert!(
+        application.contains("GdiPlusRuntime::start()"),
+        "Win32 application no longer starts its image runtime"
+    );
+}

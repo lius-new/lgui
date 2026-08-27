@@ -18,6 +18,8 @@ pub mod enhanced;
 mod fonts;
 #[cfg(feature = "renderer-gdi")]
 mod gdi;
+#[cfg(feature = "images")]
+mod gdiplus;
 #[cfg(feature = "multi-window")]
 mod hidden_window;
 #[cfg(feature = "images")]

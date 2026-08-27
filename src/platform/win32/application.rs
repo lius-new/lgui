@@ -226,6 +226,8 @@ impl ApplicationBackend for Win32Application {
     type Error = Error;
 
     fn run(self, options: WindowOptions, view: AppView, context: ApplicationContext) -> Result<()> {
+        #[cfg(feature = "images")]
+        let _gdiplus = super::gdiplus::GdiPlusRuntime::start()?;
         if let Some(fonts) = context.try_resource::<crate::text::FontFamilies>() {
             super::set_ui_font_families(fonts.0);
         }
