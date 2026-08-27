@@ -78,7 +78,10 @@ impl DirtyTracker {
             | UiEvent::Backspace { target }
             | UiEvent::KeyDown { target, .. } => self.mark_id(target),
             UiEvent::PointerPressed { hit, .. } => self.mark_id(hit.id),
-            UiEvent::PointerMoved { hit, .. } => self.mark_id(hit.id),
+            // Pointer coordinates are not paint state. Handlers that derive visuals from a move
+            // enqueue their own state update; moving inside an unchanged hover target must not
+            // schedule a frame by itself.
+            UiEvent::PointerMoved { .. } => {}
             UiEvent::PointerDragged { hit, .. } => self.mark_id(hit.id),
             UiEvent::PointerReleased { hit, .. } => self.mark_id(hit.id),
             UiEvent::FocusChanged { previous, current } => {

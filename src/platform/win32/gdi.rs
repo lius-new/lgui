@@ -3,14 +3,17 @@ use windows::{
     Win32::{
         Foundation::{COLORREF, RECT},
         Graphics::Gdi::{
-            CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, Ellipse, FillRect,
-            IntersectClipRect, LineTo, MoveToEx, RestoreDC, RoundRect, SaveDC, SelectObject,
-            SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
-            DEFAULT_QUALITY, DT_CENTER, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
-            FF_DONTCARE, HDC, HGDIOBJ, OUT_TT_ONLY_PRECIS, PS_SOLID, TRANSPARENT,
+            BitBlt, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, Ellipse,
+            FillRect, IntersectClipRect, LineTo, MoveToEx, RestoreDC, RoundRect, SaveDC,
+            SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
+            DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DT_LEFT, DT_NOPREFIX, DT_RIGHT,
+            DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HDC, HGDIOBJ, OUT_TT_ONLY_PRECIS, PS_SOLID,
+            SRCCOPY, TRANSPARENT,
         },
     },
 };
+
+use super::backbuffer::LayeredBackbuffer;
 
 use crate::{
     core::{Color, Scene, ScenePrimitive, TextAlign, TextStyle, UiRect, VisualStyle},
@@ -19,11 +22,15 @@ use crate::{
 
 pub struct GdiRenderer {
     background: Color,
+    backbuffer: Option<LayeredBackbuffer>,
 }
 
 impl GdiRenderer {
     pub fn new(background: Color) -> Self {
-        Self { background }
+        Self {
+            background,
+            backbuffer: None,
+        }
     }
 
     pub fn clear(&self, target: HDC, rect: UiRect) {
@@ -73,6 +80,77 @@ impl GdiRenderer {
             | ScenePrimitive::BackdropBlurPath { .. }
             | ScenePrimitive::Overlay { .. } => {}
         }
+    }
+
+    /// Updates the retained off-screen surface only inside scene damage, then copies the result
+    /// to the destination DC. For exposure paints the caller supplies BeginPaint's clipped DC;
+    /// changed Host regions use an unclipped client DC so moved nodes can reach their new bounds.
+    pub(crate) fn draw_retained(
+        &mut self,
+        target: HDC,
+        scene: &Scene,
+        viewport: UiRect,
+        damage: &[UiRect],
+    ) -> bool {
+        let replace = self.backbuffer.as_ref().is_none_or(|buffer| {
+            buffer.width() != viewport.width() || buffer.height() != viewport.height()
+        });
+        if replace {
+            self.backbuffer = LayeredBackbuffer::new(target, viewport.width(), viewport.height());
+        }
+
+        let Some(mut backbuffer) = self.backbuffer.take() else {
+            self.draw_direct(target, scene, viewport, None);
+            return true;
+        };
+
+        let mut repaint = if backbuffer.is_valid() {
+            damage
+                .iter()
+                .filter_map(|rect| rect.intersect(viewport))
+                .collect::<Vec<_>>()
+        } else {
+            vec![viewport]
+        };
+
+        for rect in &repaint {
+            self.draw_direct(backbuffer.hdc(), scene, viewport, Some(*rect));
+        }
+        if !backbuffer.is_valid() || !repaint.is_empty() {
+            backbuffer.mark_valid();
+        }
+
+        // A clean Host commit may still be a Win32 exposure paint. In that case the retained
+        // surface is copied without rebuilding any scene pixels; the paint DC clips the blit to
+        // the actual update region.
+        if repaint.is_empty() {
+            repaint.push(viewport);
+        }
+        let presented = repaint.iter().all(|rect| unsafe {
+            BitBlt(
+                target,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                Some(backbuffer.hdc()),
+                rect.left,
+                rect.top,
+                SRCCOPY,
+            )
+            .is_ok()
+        });
+        self.backbuffer = Some(backbuffer);
+        presented
+    }
+
+    fn draw_direct(&mut self, target: HDC, scene: &Scene, viewport: UiRect, clip: Option<UiRect>) {
+        let clear = clip.unwrap_or(viewport);
+        self.clear(target, clear);
+        #[cfg(feature = "advanced-rendering")]
+        super::enhanced::GdiRenderer::draw_scene_clipped(target, scene, clip);
+        #[cfg(not(feature = "advanced-rendering"))]
+        crate::renderer::RenderBackend::draw_scene(self, target, scene, clip);
     }
 }
 

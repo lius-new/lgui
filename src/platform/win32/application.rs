@@ -40,21 +40,21 @@ use windows::{
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
                 GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
-                IsWindowVisible, IsZoomed, LoadCursorW, PostQuitMessage, RegisterClassExW,
-                SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
-                ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWL_STYLE,
-                HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP,
-                HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED,
-                SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CYSIZEFRAME, SWP_FRAMECHANGED,
-                SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE,
-                WINDOWPLACEMENT, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE,
-                WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
-                WM_GETMINMAXINFO, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-                WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-                WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT, WM_SIZE,
-                WNDCLASSEXW, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
-                WS_VISIBLE,
+                IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, PostQuitMessage,
+                RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW,
+                SetWindowPlacement, SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW,
+                CS_VREDRAW, CW_USEDEFAULT, GWL_STYLE, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT,
+                HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW,
+                LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED, SM_CXPADDEDBORDER, SM_CXSIZEFRAME,
+                SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
+                SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT, WINDOW_EX_STYLE, WINDOW_STYLE,
+                WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE,
+                WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_IME_COMPOSITION,
+                WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN,
+                WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE, WM_NCHITTEST,
+                WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+                WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
+                WS_THICKFRAME, WS_VISIBLE,
             },
         },
     },
@@ -101,6 +101,21 @@ pub trait Win32Renderer: 'static {
         scene: &crate::core::Scene,
         viewport: UiRect,
     ) -> bool;
+
+    /// Draws a retained scene using physical-pixel damage rectangles.
+    ///
+    /// Backends that cannot safely preserve previous pixels may keep the default full-draw
+    /// behavior. The platform still avoids invoking them for input that produced no damage.
+    fn draw_damage(
+        &mut self,
+        hwnd: HWND,
+        target: HDC,
+        scene: &crate::core::Scene,
+        viewport: UiRect,
+        _damage: &[UiRect],
+    ) -> bool {
+        self.draw(hwnd, target, scene, viewport)
+    }
 }
 
 pub trait Win32RendererFactory: Send + Sync + 'static {
@@ -126,12 +141,34 @@ impl Win32Renderer for GdiRenderer {
         scene: &crate::core::Scene,
         viewport: UiRect,
     ) -> bool {
-        self.clear(target, viewport);
-        #[cfg(feature = "advanced-rendering")]
-        super::enhanced::GdiRenderer::draw_scene(target, scene);
-        #[cfg(not(feature = "advanced-rendering"))]
-        crate::renderer::RenderBackend::draw_scene(self, target, scene, None);
-        true
+        self.draw_retained(target, scene, viewport, &[viewport])
+    }
+
+    fn draw_damage(
+        &mut self,
+        hwnd: HWND,
+        target: HDC,
+        scene: &crate::core::Scene,
+        viewport: UiRect,
+        damage: &[UiRect],
+    ) -> bool {
+        if damage.is_empty() {
+            // Exposure paints reuse the retained surface and let BeginPaint's native clip limit
+            // the copy to the region that Windows actually requested.
+            return self.draw_retained(target, scene, viewport, damage);
+        }
+        // BeginPaint clips its HDC to the update region that existed before rendering. Host diff
+        // can discover new damage outside that region (for example, the new bounds of a moved
+        // node), so present through an unclipped client DC after the retained commit is known.
+        let window_target = unsafe { GetDC(Some(hwnd)) };
+        if window_target.is_invalid() {
+            return self.draw_retained(target, scene, viewport, damage);
+        }
+        let presented = self.draw_retained(window_target, scene, viewport, damage);
+        unsafe {
+            let _ = ReleaseDC(Some(hwnd), window_target);
+        }
+        presented
     }
 }
 
@@ -291,7 +328,7 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "store")]
         context.stores().set_wake({
             let dispatcher = dispatcher.clone();
-            Arc::new(move || dispatcher.request_frame())
+            Arc::new(move || dispatcher.notify())
         });
         let manager = context.windows();
         let instance_value = instance.0 as isize;
@@ -964,7 +1001,7 @@ fn install_wake(hwnd: HWND) {
     STATE.with(|state| {
         if let Some(state) = state.borrow().get(&raw) {
             state.session.set_wake(Arc::new(move || unsafe {
-                let _ = InvalidateRect(Some(HWND(raw as _)), None, false);
+                let _ = PostMessageW(Some(HWND(raw as _)), WM_LGUI_DISPATCH, WPARAM(0), LPARAM(0));
             }));
         }
     });
@@ -1327,13 +1364,19 @@ fn drain_dispatcher(hwnd: HWND) {
         return;
     };
     let result = dispatcher.drain();
-    if result.tasks_executed || result.frame_requested {
-        let windows = STATE.with(|state| state.borrow().keys().copied().collect::<Vec<_>>());
-        for raw in windows {
-            unsafe {
-                let _ = InvalidateRect(Some(HWND(raw as _)), None, false);
-            }
+    let windows = STATE.with(|state| state.borrow().keys().copied().collect::<Vec<_>>());
+    for raw in windows {
+        let target = HWND(raw as _);
+        let mut repaint = apply_pending_window_updates(target);
+        if result.frame_requested {
+            STATE.with(|state| {
+                if let Some(window) = state.borrow_mut().get_mut(&raw) {
+                    window.session.invalidate_all();
+                }
+            });
+            repaint = WindowRepaint::Full;
         }
+        request_window_repaint(target, repaint);
     }
 }
 
@@ -1361,6 +1404,20 @@ fn render_window(hwnd: HWND, target: HDC) {
         let logical = dpi.scale.logical_size(physical);
         let viewport = UiRect::new(0, 0, logical.width, logical.height);
         let commit = state.session.render_view(&state.view, viewport, dpi.scale);
+        let physical_damage = commit
+            .damage
+            .dirty
+            .effective_rects()
+            .into_iter()
+            .filter_map(|rect| {
+                dpi.scale.physical_rect_outward(rect).intersect(UiRect::new(
+                    0,
+                    0,
+                    physical.width,
+                    physical.height,
+                ))
+            })
+            .collect::<Vec<_>>();
         let scene = commit.scene.project_to_physical(dpi.scale);
         let physical_viewport = UiRect::new(0, 0, physical.width, physical.height);
         if state.renderer.is_none() {
@@ -1377,14 +1434,13 @@ fn render_window(hwnd: HWND, target: HDC) {
                 return;
             };
             crate::assets::with_render_resources(resources, || {
-                renderer.draw(hwnd, target, &scene, physical_viewport)
+                renderer.draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage)
             })
         };
         #[cfg(not(feature = "images"))]
-        let presented = state
-            .renderer
-            .as_mut()
-            .is_some_and(|renderer| renderer.draw(hwnd, target, &scene, physical_viewport));
+        let presented = state.renderer.as_mut().is_some_and(|renderer| {
+            renderer.draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage)
+        });
         if presented {
             state.session.runtime().run_effects();
         }
@@ -1392,21 +1448,91 @@ fn render_window(hwnd: HWND, target: HDC) {
 }
 
 fn dispatch_input(hwnd: HWND, input: InputEvent) {
-    STATE.with(|state| {
+    let repaint = STATE.with(|state| {
         if let Some(state) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
             let output = state.session.handle_input(input);
             let session = &mut state.session;
-            let _ = dispatch_runtime_output(
+            let mut context_requested_frame = false;
+            let output = dispatch_runtime_output(
                 output,
                 &state.context,
                 &state.id,
                 |action| session.runtime_mut().handle_default_action(action),
-                |_| {},
+                |context| context_requested_frame |= context.flags().needs_frame,
             );
+            if output.route_changed || context_requested_frame {
+                session.invalidate_all();
+                return WindowRepaint::Full;
+            }
+            if let Some(bounds) = output.dirty_bounds {
+                session.invalidations_mut().invalidate_rect(bounds);
+                return WindowRepaint::Rect(bounds);
+            }
+            if output.animation_changed {
+                session.invalidate_all();
+                return WindowRepaint::Full;
+            }
         }
+        WindowRepaint::None
     });
-    unsafe {
-        let _ = InvalidateRect(Some(hwnd), None, false);
+    request_window_repaint(hwnd, repaint);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowRepaint {
+    None,
+    Rect(UiRect),
+    Full,
+}
+
+fn apply_pending_window_updates(hwnd: HWND) -> WindowRepaint {
+    STATE.with(|state| {
+        let mut windows = state.borrow_mut();
+        let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
+            return WindowRepaint::None;
+        };
+        let updates = window.session.apply_pending_updates();
+        if updates.focus_changed || updates.frame_requested {
+            return WindowRepaint::Full;
+        }
+        if updates.dirty_ids.is_empty() {
+            return WindowRepaint::None;
+        }
+        window
+            .session
+            .tree()
+            .paint_bounds(updates.dirty_ids)
+            .map(WindowRepaint::Rect)
+            .unwrap_or(WindowRepaint::Full)
+    })
+}
+
+fn request_window_repaint(hwnd: HWND, repaint: WindowRepaint) {
+    match repaint {
+        WindowRepaint::None => {}
+        WindowRepaint::Full => unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        },
+        WindowRepaint::Rect(logical) => {
+            let physical = STATE.with(|state| {
+                state.borrow().get(&(hwnd.0 as isize)).map(|window| {
+                    DpiContext::for_window(hwnd, window.logical_size)
+                        .scale
+                        .physical_rect_outward(logical)
+                })
+            });
+            if let Some(physical) = physical {
+                let native = RECT {
+                    left: physical.left,
+                    top: physical.top,
+                    right: physical.right,
+                    bottom: physical.bottom,
+                };
+                unsafe {
+                    let _ = InvalidateRect(Some(hwnd), Some(&native), false);
+                }
+            }
+        }
     }
 }
 

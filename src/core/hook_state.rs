@@ -2,7 +2,10 @@ use std::{
     any::Any,
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, RwLock,
+    },
 };
 
 use super::{ComponentId, ComponentTree, HookId, UiId};
@@ -115,6 +118,7 @@ impl HookStateStore {
 pub struct UiUpdateQueue {
     pending: Mutex<Vec<QueuedHookUpdate>>,
     focus_request: Mutex<Option<UiId>>,
+    frame_requested: AtomicBool,
     wake: RwLock<Option<UiWake>>,
 }
 
@@ -132,7 +136,12 @@ impl UiUpdateQueue {
     }
 
     pub fn request_frame(&self) {
+        self.frame_requested.store(true, Ordering::Release);
         self.wake();
+    }
+
+    pub fn take_frame_request(&self) -> bool {
+        self.frame_requested.swap(false, Ordering::AcqRel)
     }
 
     pub fn invalidate(&self, owner: ComponentId, invalidation_id: UiId) {
@@ -214,6 +223,7 @@ impl UiUpdateQueue {
                 .lock()
                 .expect("hook focus request lock poisoned")
                 .is_none()
+            && !self.frame_requested.load(Ordering::Acquire)
     }
 
     pub fn clear(&self) {
@@ -225,6 +235,7 @@ impl UiUpdateQueue {
             .lock()
             .expect("hook focus request lock poisoned")
             .take();
+        self.frame_requested.store(false, Ordering::Release);
     }
 
     fn wake(&self) {
@@ -279,6 +290,19 @@ mod tests {
 
         assert!(queue.apply(&store, &components).is_empty());
         assert!(!store.contains(hook));
+    }
+
+    #[test]
+    fn explicit_frame_requests_are_coalesced_and_consumed_separately_from_state_updates() {
+        let queue = UiUpdateQueue::new();
+
+        queue.request_frame();
+        queue.request_frame();
+
+        assert!(!queue.is_empty());
+        assert!(queue.take_frame_request());
+        assert!(!queue.take_frame_request());
+        assert!(queue.is_empty());
     }
 
     #[test]

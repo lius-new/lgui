@@ -71,6 +71,14 @@ impl Win32Dispatcher {
         self.wake();
     }
 
+    /// Wakes the UI thread without declaring that every window needs a frame.
+    ///
+    /// Retained state/store updates use this path because the affected component queues carry
+    /// their own invalidation identities.
+    pub fn notify(&self) {
+        self.wake();
+    }
+
     pub fn drain(&self) -> Win32DispatchResult {
         let tasks = std::mem::take(
             &mut *self

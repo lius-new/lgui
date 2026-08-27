@@ -122,14 +122,12 @@ impl UiSession {
         builder.finish()
     }
 
-    pub fn apply_pending_updates(&mut self) {
+    pub fn apply_pending_updates(&mut self) -> super::core::PendingUpdateOutput {
         let updates = self.runtime.apply_pending_updates();
-        for id in updates.dirty_ids {
-            self.invalidations.invalidate_node(id);
-        }
-        if updates.focus_changed {
+        if updates.focus_changed || updates.frame_requested {
             self.invalidate_all();
         }
+        updates
     }
 
     pub fn layout_metrics(&self) -> LayoutCommitMetrics {
@@ -173,7 +171,11 @@ impl UiSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::UiId;
+    use crate::{
+        application::AppView,
+        core::{group, text, Color, State, TextStyle, UiId},
+    };
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn full_invalidation_marks_retained_components_dirty() {
@@ -206,5 +208,53 @@ mod tests {
         assert!(!session.has_tree());
         assert!(session.runtime().component_tree().is_alive(root));
         assert!(session.runtime().component_tree().is_dirty(root));
+    }
+
+    #[test]
+    fn state_update_uses_host_diff_damage_instead_of_invalidating_the_component_bounds() {
+        let state = Arc::new(Mutex::new(None::<State<i32>>));
+        let captured = Arc::clone(&state);
+        let view: AppView = Arc::new(move |cx| {
+            let count = cx.state(0_i32);
+            *captured.lock().expect("captured state poisoned") = Some(count.clone());
+            group(UiRect::new(0, 0, 400, 300)).content((
+                text(
+                    UiRect::new(20, 20, 180, 60),
+                    "unchanged",
+                    TextStyle::new(Color::WHITE, 18, 400),
+                ),
+                text(
+                    UiRect::new(20, 80, 180, 120),
+                    format!("count={}", count.get()),
+                    TextStyle::new(Color::WHITE, 18, 400),
+                ),
+            ))
+        });
+        let viewport = UiRect::new(0, 0, 400, 300);
+        let mut session = UiSession::new();
+
+        let first = session.render_view(&view, viewport, UiScale::ONE);
+        assert!(first.damage.dirty.is_full());
+
+        state
+            .lock()
+            .expect("captured state poisoned")
+            .as_ref()
+            .expect("state handle missing")
+            .update(|count| *count += 1);
+        let pending = session.apply_pending_updates();
+        assert_eq!(pending.dirty_ids.len(), 1);
+
+        let second = session.render_view(&view, viewport, UiScale::ONE);
+
+        assert!(!second.damage.dirty.is_full());
+        assert!(!second.damage.dirty.is_empty());
+        assert!(second.damage.dirty.dirty_area() < second.damage.dirty.viewport_area() / 2);
+        assert!(second
+            .damage
+            .dirty
+            .effective_rects()
+            .iter()
+            .all(|rect| rect.intersect(UiRect::new(20, 20, 180, 60)).is_none()));
     }
 }

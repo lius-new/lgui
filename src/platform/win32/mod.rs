@@ -1,6 +1,6 @@
 #[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d"))]
 mod application;
-#[cfg(feature = "multi-window")]
+#[cfg(any(feature = "multi-window", feature = "renderer-gdi"))]
 mod backbuffer;
 #[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d"))]
 mod background;

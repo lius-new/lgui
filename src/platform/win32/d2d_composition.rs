@@ -3,7 +3,7 @@ use std::mem::ManuallyDrop;
 use windows::{
     core::{Error, Interface, Result, HRESULT},
     Win32::{
-        Foundation::{HMODULE, HWND},
+        Foundation::{HMODULE, HWND, RECT},
         Graphics::{
             Direct2D::{
                 Common::{D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT},
@@ -30,8 +30,9 @@ use windows::{
                     DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
                 },
                 CreateDXGIFactory1, IDXGIDevice, IDXGIFactory2, IDXGISurface, IDXGISwapChain,
-                IDXGISwapChain1, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
-                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                IDXGISwapChain1, DXGI_PRESENT, DXGI_PRESENT_PARAMETERS, DXGI_SCALING_STRETCH,
+                DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
             Gdi::HDC,
         },
@@ -88,13 +89,41 @@ impl D2dRenderer {
             .as_mut()
             .ok_or_else(|| Error::from_hresult(HRESULT(0x80004003_u32 as i32)))
     }
+
+    fn resources_need_reset(&self, viewport: UiRect) -> bool {
+        let size = (viewport.width().max(1), viewport.height().max(1));
+        self.resources.is_none() || self.size != size
+    }
 }
 
 impl Win32Renderer for D2dRenderer {
     fn draw(&mut self, _hwnd: HWND, _target: HDC, scene: &Scene, viewport: UiRect) -> bool {
         let result = self
             .ensure_resources(viewport)
-            .and_then(|resources| resources.draw_and_present(scene));
+            .and_then(|resources| resources.draw_and_present(scene, None));
+        if result.is_err() {
+            self.resources = None;
+        }
+        result.is_ok()
+    }
+
+    fn draw_damage(
+        &mut self,
+        _hwnd: HWND,
+        _target: HDC,
+        scene: &Scene,
+        viewport: UiRect,
+        damage: &[UiRect],
+    ) -> bool {
+        let reset = self.resources_need_reset(viewport);
+        if !reset && damage.is_empty() {
+            // DirectComposition retains the last presented surface for exposure paints.
+            return true;
+        }
+        let full = reset || damage_is_full(viewport, damage);
+        let result = self.ensure_resources(viewport).and_then(|resources| {
+            resources.draw_and_present(scene, if full { None } else { Some(damage) })
+        });
         if result.is_err() {
             self.resources = None;
         }
@@ -157,18 +186,76 @@ impl CompositionResources {
         })
     }
 
-    fn draw_and_present(&mut self, scene: &Scene) -> Result<()> {
-        self.renderer.draw_scene_full(scene)?;
-        self.renderer
-            .copy_scene_to_target(&self.target_bitmap, None)?;
+    fn draw_and_present(&mut self, scene: &Scene, damage: Option<&[UiRect]>) -> Result<()> {
+        match damage {
+            Some(rects) => {
+                self.renderer.draw_scene_dirty(scene, rects)?;
+                self.renderer
+                    .copy_scene_to_target(&self.target_bitmap, Some(rects))?;
+            }
+            None => {
+                self.renderer.draw_scene_full(scene)?;
+                self.renderer
+                    .copy_scene_to_target(&self.target_bitmap, None)?;
+            }
+        }
         unsafe {
-            self.swap_chain
-                .cast::<IDXGISwapChain>()?
-                .Present(1, DXGI_PRESENT(0))
-                .ok()?;
+            match damage {
+                Some(rects) => present_dirty(&self.swap_chain, rects)?,
+                None => self
+                    .swap_chain
+                    .cast::<IDXGISwapChain>()?
+                    .Present(1, DXGI_PRESENT(0))
+                    .ok()?,
+            }
             self.dcomp_device.Commit()?;
         }
         Ok(())
+    }
+}
+
+fn damage_is_full(viewport: UiRect, damage: &[UiRect]) -> bool {
+    damage.len() == 1 && damage[0] == viewport
+}
+
+unsafe fn present_dirty(swap_chain: &IDXGISwapChain1, damage: &[UiRect]) -> Result<()> {
+    let mut rects = damage
+        .iter()
+        .map(|rect| RECT {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        })
+        .collect::<Vec<_>>();
+    let parameters = DXGI_PRESENT_PARAMETERS {
+        DirtyRectsCount: rects.len() as u32,
+        pDirtyRects: rects.as_mut_ptr(),
+        ..Default::default()
+    };
+    unsafe { swap_chain.Present1(1, DXGI_PRESENT(0), &parameters).ok() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_viewport_damage_uses_the_full_present_path() {
+        let viewport = UiRect::new(0, 0, 1280, 720);
+
+        assert!(damage_is_full(viewport, &[viewport]));
+    }
+
+    #[test]
+    fn partial_or_split_damage_keeps_the_dirty_present_path() {
+        let viewport = UiRect::new(0, 0, 1280, 720);
+
+        assert!(!damage_is_full(viewport, &[UiRect::new(12, 20, 240, 180)]));
+        assert!(!damage_is_full(
+            viewport,
+            &[UiRect::new(0, 0, 640, 720), UiRect::new(640, 0, 1280, 720),]
+        ));
     }
 }
 

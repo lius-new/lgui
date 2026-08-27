@@ -23,6 +23,7 @@ pub struct RuntimeOutput {
 pub struct PendingUpdateOutput {
     pub dirty_ids: Vec<UiId>,
     pub focus_changed: bool,
+    pub frame_requested: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -112,14 +113,20 @@ impl UiRuntime {
         let dirty = self
             .hook_updates
             .apply(&self.hook_states, &self.component_tree);
-        self.dirty.mark_animation_ids(dirty.iter().cloned());
         let focus_changed = self
             .hook_updates
             .take_focus_request()
             .is_some_and(|target| self.focus_node(&target));
+        if focus_changed {
+            // The caller schedules focus damage from PendingUpdateOutput. Do not leak the same
+            // dirty event into the next unrelated native input pass.
+            let _ = self.dirty.take();
+        }
+        let frame_requested = self.hook_updates.take_frame_request();
         PendingUpdateOutput {
             dirty_ids: dirty,
             focus_changed,
+            frame_requested,
         }
     }
 
@@ -610,6 +617,25 @@ mod tests {
             runtime.animations().value(button_id, AnimProperty::Hover),
             0.0
         );
+    }
+
+    #[test]
+    fn pointer_motion_inside_the_same_hover_target_does_not_request_paint() {
+        let button_tree = interactive_button_tree(UiId::new("steady-hover"));
+        let mut runtime = UiRuntime::new();
+
+        let entered =
+            runtime.handle_input(&button_tree, InputEvent::PointerMove(Point::new(10, 10)));
+        assert!(entered.dirty_bounds.is_some());
+
+        let moved = runtime.handle_input(&button_tree, InputEvent::PointerMove(Point::new(11, 10)));
+
+        assert!(moved
+            .events
+            .iter()
+            .any(|event| matches!(event, UiEvent::PointerMoved { .. })));
+        assert_eq!(moved.dirty_bounds, None);
+        assert!(!moved.animation_changed);
     }
 
     #[test]
