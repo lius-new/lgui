@@ -40,6 +40,7 @@ pub enum InteractionRole {
     Navigation,
     Row,
     DragHandle,
+    WindowDragRegion,
     Custom(&'static str),
 }
 

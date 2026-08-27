@@ -549,14 +549,18 @@ pub struct WindowOptions {
     pub title: String,
     pub size: Size,
     pub minimum_size: Option<Size>,
+    pub maximum_size: Option<Size>,
     pub resizable: bool,
+    pub native_titlebar: bool,
     pub position: WindowPosition,
     pub transparent: bool,
     pub corner_radius: i32,
     pub topmost: bool,
     pub hide_on_deactivate: bool,
     pub snapshot_on_background: bool,
+    /// COMPATIBILITY: remove after consumers migrate to `Element::window_drag_region`.
     pub titlebar_drag_height: Option<i32>,
+    /// COMPATIBILITY: remove after consumers migrate to `Element::window_drag_region`.
     pub drag_exclusion: Option<WindowDragExclusion>,
     pub scale_reference_size: Option<Size>,
     pub scale_preference: ScalePreference,
@@ -573,7 +577,9 @@ impl PartialEq for WindowOptions {
             && self.title == other.title
             && self.size == other.size
             && self.minimum_size == other.minimum_size
+            && self.maximum_size == other.maximum_size
             && self.resizable == other.resizable
+            && self.native_titlebar == other.native_titlebar
             && self.position == other.position
             && self.transparent == other.transparent
             && self.corner_radius == other.corner_radius
@@ -638,8 +644,18 @@ impl WindowOptions {
         self
     }
 
+    pub fn maximum_size(mut self, size: Size) -> Self {
+        self.maximum_size = Some(size);
+        self
+    }
+
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
+        self
+    }
+
+    pub fn native_titlebar(mut self, enabled: bool) -> Self {
+        self.native_titlebar = enabled;
         self
     }
 
@@ -673,6 +689,9 @@ impl WindowOptions {
         self
     }
 
+    #[deprecated(
+        note = "geometry-based titlebar drag is a compatibility path; migrate immediately to Element::window_drag_region"
+    )]
     pub fn titlebar_drag(mut self, height: i32, exclusion: Option<WindowDragExclusion>) -> Self {
         self.titlebar_drag_height = Some(height.max(0));
         self.drag_exclusion = exclusion;
@@ -718,7 +737,9 @@ impl Default for WindowOptions {
             title: "lgui".to_owned(),
             size: Size::new(1024, 720),
             minimum_size: None,
+            maximum_size: None,
             resizable: true,
+            native_titlebar: true,
             position: WindowPosition::Centered,
             transparent: false,
             corner_radius: 0,
@@ -908,6 +929,7 @@ mod tests {
         let options = WindowOptions::new("counter")
             .size(Size::new(640, 480))
             .minimum_size(Size::new(320, 240))
+            .maximum_size(Size::new(1280, 960))
             .resizable(false);
 
         Application::with_backend(RecordingBackend(Arc::clone(&recorded)))
@@ -922,6 +944,30 @@ mod tests {
                 .clone(),
             Some(options)
         );
+    }
+
+    #[test]
+    fn native_titlebar_is_enabled_by_default_and_can_be_disabled() {
+        assert!(WindowOptions::default().native_titlebar);
+        assert!(WindowOptions::new("default").native_titlebar);
+        assert!(
+            !WindowOptions::new("custom")
+                .native_titlebar(false)
+                .native_titlebar
+        );
+    }
+
+    #[test]
+    fn window_size_constraints_are_optional_and_configurable() {
+        let defaults = WindowOptions::new("default");
+        assert_eq!(defaults.minimum_size, None);
+        assert_eq!(defaults.maximum_size, None);
+
+        let constrained = defaults
+            .minimum_size(Size::new(640, 360))
+            .maximum_size(Size::new(1920, 1080));
+        assert_eq!(constrained.minimum_size, Some(Size::new(640, 360)));
+        assert_eq!(constrained.maximum_size, Some(Size::new(1920, 1080)));
     }
 
     #[test]

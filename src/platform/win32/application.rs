@@ -10,7 +10,10 @@ use windows::{
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
-            HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+            HiDpi::{
+                GetDpiForWindow, GetSystemMetricsForDpi, SetProcessDpiAwarenessContext,
+                DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            },
             Input::{
                 Ime::{
                     ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, GCS_COMPSTR,
@@ -19,25 +22,33 @@ use windows::{
                 KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
             },
             WindowsAndMessaging::{
-                AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-                DestroyWindow, DispatchMessageW, GetClientRect, GetCursorPos, GetMessageW,
-                GetWindowPlacement, GetWindowRect, IsWindowVisible, LoadCursorW, LoadIconW,
-                PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetLayeredWindowAttributes,
-                SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, ShowWindow, TrackPopupMenu,
-                TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWL_STYLE, IDC_ARROW,
-                IDI_APPLICATION, LWA_ALPHA, MF_CHECKED, MF_GRAYED, MF_STRING, MINMAXINFO, MSG,
-                SIZE_MINIMIZED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
-                SW_SHOW, TPM_RIGHTBUTTON, WA_INACTIVE, WINDOWPLACEMENT, WINDOW_EX_STYLE,
-                WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_DESTROY,
-                WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
-                WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-                WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-                WM_MOVE, WM_PAINT, WM_RBUTTONUP, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_EX_LAYERED,
-                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED,
-                WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
+                GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
+                IsWindowVisible, IsZoomed, LoadCursorW, PostQuitMessage, RegisterClassExW,
+                SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
+                ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWL_STYLE,
+                HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP,
+                HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED,
+                SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CYSIZEFRAME, SWP_FRAMECHANGED,
+                SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_SHOW, WA_INACTIVE,
+                WINDOWPLACEMENT, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE,
+                WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
+                WM_GETMINMAXINFO, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+                WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+                WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT, WM_SIZE,
+                WNDCLASSEXW, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+                WS_VISIBLE,
             },
         },
     },
+};
+
+#[cfg(feature = "tray")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    AppendMenuW, CreatePopupMenu, DestroyMenu, LoadIconW, SetForegroundWindow, TrackPopupMenu,
+    IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_STRING, TPM_RIGHTBUTTON, WM_COMMAND,
+    WM_LBUTTONDBLCLK, WM_RBUTTONUP,
 };
 
 #[cfg(feature = "notifications")]
@@ -49,7 +60,7 @@ use crate::platform::{NotificationError, NotificationHandle};
 use crate::{
     application::{
         AppView, ApplicationBackend, ApplicationContext, ClosePolicy, WindowCloseHandler,
-        WindowCommand, WindowId, WindowMode, WindowOptions, WindowPosition,
+        WindowCommand, WindowDragExclusion, WindowId, WindowMode, WindowOptions, WindowPosition,
     },
     core::{
         dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton, Size,
@@ -150,6 +161,11 @@ struct WindowState {
     renderer: Box<dyn Win32Renderer>,
     logical_size: Size,
     minimum_size: Option<Size>,
+    maximum_size: Option<Size>,
+    resizable: bool,
+    native_titlebar: bool,
+    titlebar_drag_height: Option<i32>,
+    drag_exclusion: Option<WindowDragExclusion>,
     windowed_style: WINDOW_STYLE,
     windowed_placement: Option<WINDOWPLACEMENT>,
     mode: WindowMode,
@@ -450,11 +466,7 @@ fn create_window(
 ) -> Result<HWND> {
     let initial_mode = options.mode;
     let title = wide(&options.title);
-    let style = if options.resizable {
-        WS_OVERLAPPEDWINDOW
-    } else {
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
-    };
+    let style = window_style(&options);
     let owner = if let Some(owner_id) = options.owner.as_ref() {
         Some(
             hwnd_for_id(owner_id)
@@ -494,6 +506,9 @@ fn create_window(
             None,
         )
     }?;
+    if !options.native_titlebar {
+        set_runtime_window_style(hwnd, style);
+    }
     let renderer = renderer_factory.create(hwnd)?;
     let mut session = UiSession::new();
     if let Some(executor) = context.task_spawner() {
@@ -510,6 +525,11 @@ fn create_window(
                 renderer,
                 logical_size: options.size,
                 minimum_size: options.minimum_size,
+                maximum_size: options.maximum_size,
+                resizable: options.resizable,
+                native_titlebar: options.native_titlebar,
+                titlebar_drag_height: options.titlebar_drag_height,
+                drag_exclusion: options.drag_exclusion,
                 windowed_style: style,
                 windowed_placement: None,
                 mode: WindowMode::Windowed,
@@ -540,6 +560,29 @@ fn create_window(
     Ok(hwnd)
 }
 
+fn window_style(options: &WindowOptions) -> WINDOW_STYLE {
+    // A custom-framed window must be born as a popup. Creating an overlapped window and
+    // removing WS_CAPTION afterwards lets Windows paint the native frame for one frame.
+    let mut style = if options.native_titlebar {
+        WS_OVERLAPPED | WS_CAPTION
+    } else {
+        WS_POPUP
+    } | WS_SYSMENU
+        | WS_MINIMIZEBOX;
+    if options.resizable {
+        style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
+    }
+    style
+}
+
+fn set_runtime_window_style(hwnd: HWND, style: WINDOW_STYLE) {
+    let current = WINDOW_STYLE(unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32);
+    let visibility = WINDOW_STYLE(current.0 & WS_VISIBLE.0);
+    unsafe {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, (style | visibility).0 as isize);
+    }
+}
+
 fn set_window_mode(hwnd: HWND, mode: WindowMode) {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
@@ -565,7 +608,7 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
                 };
                 if unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
                     unsafe {
-                        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP.0 as isize);
+                        set_runtime_window_style(hwnd, WS_POPUP);
                         let _ = SetWindowPos(
                             hwnd,
                             None,
@@ -579,7 +622,7 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
                 }
             }
             WindowMode::Windowed => unsafe {
-                SetWindowLongPtrW(hwnd, GWL_STYLE, window.windowed_style.0 as isize);
+                set_runtime_window_style(hwnd, window.windowed_style);
                 if let Some(placement) = window.windowed_placement.take() {
                     let _ = SetWindowPlacement(hwnd, &placement);
                 }
@@ -674,11 +717,15 @@ fn reposition_owned_windows(owner: HWND) {
 }
 
 fn position_window(hwnd: HWND) {
-    let Some((owner, position, logical_size)) = STATE.with(|state| {
-        state
-            .borrow()
-            .get(&(hwnd.0 as isize))
-            .map(|state| (state.owner, state.position, state.logical_size))
+    let Some((owner, position, logical_size, native_titlebar)) = STATE.with(|state| {
+        state.borrow().get(&(hwnd.0 as isize)).map(|state| {
+            (
+                state.owner,
+                state.position,
+                state.logical_size,
+                state.native_titlebar,
+            )
+        })
     }) else {
         return;
     };
@@ -727,7 +774,14 @@ fn position_window(hwnd: HWND) {
             origin.y,
             size.width,
             size.height,
-            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER,
+            SWP_NOACTIVATE
+                | SWP_NOOWNERZORDER
+                | SWP_NOZORDER
+                | if native_titlebar {
+                    windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(0)
+                } else {
+                    SWP_FRAMECHANGED
+                },
         );
     }
 }
@@ -741,6 +795,97 @@ fn install_wake(hwnd: HWND) {
             }));
         }
     });
+}
+
+fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
+    let screen_point = unpack_point(lparam);
+    let mut window_rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut window_rect) }.is_err() {
+        return Some(LRESULT(HTCLIENT as isize));
+    }
+    let mut client_point = POINT {
+        x: screen_point.x,
+        y: screen_point.y,
+    };
+    unsafe {
+        let _ = ScreenToClient(hwnd, &mut client_point);
+    }
+
+    STATE.with(|windows| {
+        let windows = windows.borrow();
+        let state = windows.get(&(hwnd.0 as isize))?;
+        if state.native_titlebar {
+            return None;
+        }
+
+        if state.resizable && !unsafe { IsZoomed(hwnd) }.as_bool() {
+            let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
+            let horizontal = unsafe {
+                GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi)
+                    + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+            }
+            .max(1);
+            let vertical = unsafe {
+                GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi)
+                    + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+            }
+            .max(1);
+            let hit = resize_border_hit(window_rect, screen_point, horizontal, vertical);
+            if hit != HTCLIENT {
+                return Some(LRESULT(hit as isize));
+            }
+        }
+
+        let dpi = DpiContext::for_window(hwnd, state.logical_size);
+        let logical_point = dpi
+            .scale
+            .logical_point(Point::new(client_point.x, client_point.y));
+        if let Some(hit) = state.session.tree().hit_test(logical_point) {
+            return Some(LRESULT(
+                if hit.interaction == crate::core::InteractionRole::WindowDragRegion {
+                    HTCAPTION as isize
+                } else {
+                    HTCLIENT as isize
+                },
+            ));
+        }
+
+        if let Some(height) = state.titlebar_drag_height {
+            let mut client = RECT::default();
+            let _ = unsafe { GetClientRect(hwnd, &mut client) };
+            let viewport = dpi
+                .scale
+                .logical_size(Size::new(client.right.max(1), client.bottom.max(1)));
+            let excluded = state
+                .drag_exclusion
+                .map(|exclusion| exclusion(viewport.width, viewport.height))
+                .is_some_and(|rect| rect.contains(logical_point));
+            if logical_point.y >= 0 && logical_point.y < height && !excluded {
+                return Some(LRESULT(HTCAPTION as isize));
+            }
+        }
+
+        Some(LRESULT(HTCLIENT as isize))
+    })
+}
+
+fn resize_border_hit(rect: RECT, point: Point, horizontal: i32, vertical: i32) -> u32 {
+    let left = point.x >= rect.left && point.x < rect.left + horizontal;
+    let right = point.x < rect.right && point.x >= rect.right - horizontal;
+    let top = point.y >= rect.top && point.y < rect.top + vertical;
+    let bottom = point.y < rect.bottom && point.y >= rect.bottom - vertical;
+
+    match (left, right, top, bottom) {
+        (true, _, true, _) => HTTOPLEFT,
+        (_, true, true, _) => HTTOPRIGHT,
+        (true, _, _, true) => HTBOTTOMLEFT,
+        (_, true, _, true) => HTBOTTOMRIGHT,
+        (true, _, _, _) => HTLEFT,
+        (_, true, _, _) => HTRIGHT,
+        (_, _, true, _) => HTTOP,
+        (_, _, _, true) => HTBOTTOM,
+        _ => HTCLIENT,
+    }
 }
 
 extern "system" fn window_proc(
@@ -772,6 +917,23 @@ extern "system" fn window_proc(
         return LRESULT(0);
     }
     match message {
+        WM_NCCALCSIZE => {
+            let custom_frame = STATE.with(|state| {
+                state
+                    .borrow()
+                    .get(&(hwnd.0 as isize))
+                    .is_some_and(|state| !state.native_titlebar)
+            });
+            if custom_frame {
+                // The full window rectangle belongs to the client when native decorations are
+                // disabled. Without handling this message Windows can retain a non-client caption
+                // even after WS_CAPTION has been removed.
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+        WM_NCHITTEST => custom_frame_hit_test(hwnd, lparam)
+            .unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }),
         WM_LGUI_DISPATCH => {
             drain_dispatcher(hwnd);
             LRESULT(0)
@@ -823,18 +985,21 @@ extern "system" fn window_proc(
         WM_GETMINMAXINFO => {
             STATE.with(|state| {
                 let state = state.borrow();
-                let Some((state, minimum)) = state
-                    .get(&(hwnd.0 as isize))
-                    .and_then(|state| state.minimum_size.map(|minimum| (state, minimum)))
-                else {
+                let Some(state) = state.get(&(hwnd.0 as isize)) else {
                     return;
                 };
-                let physical = DpiContext::for_window(hwnd, state.logical_size)
-                    .scale
-                    .physical_size(minimum);
+                let scale = DpiContext::for_window(hwnd, state.logical_size).scale;
                 let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
-                info.ptMinTrackSize.x = physical.width;
-                info.ptMinTrackSize.y = physical.height;
+                if let Some(minimum) = state.minimum_size {
+                    let physical = scale.physical_size(minimum);
+                    info.ptMinTrackSize.x = physical.width;
+                    info.ptMinTrackSize.y = physical.height;
+                }
+                if let Some(maximum) = state.maximum_size {
+                    let physical = scale.physical_size(maximum);
+                    info.ptMaxTrackSize.x = physical.width;
+                    info.ptMaxTrackSize.y = physical.height;
+                }
             });
             LRESULT(0)
         }
@@ -1267,7 +1432,55 @@ fn wide(value: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::OwnerVisibility;
+    use windows::Win32::Foundation::RECT;
+
+    use super::{
+        resize_border_hit, window_style, OwnerVisibility, Point, WindowOptions, HTBOTTOMRIGHT,
+        HTCLIENT, HTTOPLEFT, WS_CAPTION, WS_POPUP, WS_THICKFRAME,
+    };
+
+    #[test]
+    fn custom_frames_remove_the_caption_and_keep_only_requested_resize_capability() {
+        let decorated = window_style(&WindowOptions::new("decorated"));
+        let custom = window_style(&WindowOptions::new("custom").native_titlebar(false));
+        let fixed = window_style(
+            &WindowOptions::new("fixed")
+                .native_titlebar(false)
+                .resizable(false),
+        );
+
+        assert_ne!(decorated.0 & WS_CAPTION.0, 0);
+        assert_eq!(decorated.0 & WS_POPUP.0, 0);
+        assert_eq!(custom.0 & WS_CAPTION.0, 0);
+        assert_ne!(custom.0 & WS_POPUP.0, 0);
+        assert_ne!(custom.0 & WS_THICKFRAME.0, 0);
+        assert_eq!(fixed.0 & WS_CAPTION.0, 0);
+        assert_ne!(fixed.0 & WS_POPUP.0, 0);
+        assert_eq!(fixed.0 & WS_THICKFRAME.0, 0);
+    }
+
+    #[test]
+    fn custom_frame_resize_hit_testing_includes_edges_and_corners() {
+        let rect = RECT {
+            left: 100,
+            top: 200,
+            right: 900,
+            bottom: 700,
+        };
+
+        assert_eq!(
+            resize_border_hit(rect, Point::new(101, 201), 8, 8),
+            HTTOPLEFT
+        );
+        assert_eq!(
+            resize_border_hit(rect, Point::new(899, 699), 8, 8),
+            HTBOTTOMRIGHT
+        );
+        assert_eq!(
+            resize_border_hit(rect, Point::new(500, 400), 8, 8),
+            HTCLIENT
+        );
+    }
 
     #[test]
     fn owner_hide_and_restore_preserve_requested_visibility() {

@@ -167,6 +167,18 @@ impl UiElement {
         self
     }
 
+    /// Marks this element as a native window drag region.
+    ///
+    /// Interactive descendants remain clickable and automatically take precedence
+    /// over the drag region during platform hit testing.
+    pub fn window_drag_region(mut self) -> Self {
+        self.node = self
+            .node
+            .interaction(InteractionRole::WindowDragRegion)
+            .event_policy(EventPolicy::NONE);
+        self
+    }
+
     pub fn on_click<F>(mut self, handler: F) -> Self
     where
         F: Fn(&mut UiEventContext) + Send + Sync + 'static,

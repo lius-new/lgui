@@ -642,4 +642,41 @@ mod tests {
             .expect("popup should be hittable outside its ancestor clip");
         assert_eq!(hit.id, popup_id);
     }
+
+    #[test]
+    fn interactive_titlebar_children_take_precedence_over_the_drag_region() {
+        let drag_id = UiId::new("titlebar");
+        let button_id = UiId::new("close");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                drag_id.clone(),
+                UiNodeKind::Group,
+                UiRect::new(0, 0, 400, 64),
+            )
+            .interaction(InteractionRole::WindowDragRegion)
+            .event_policy(crate::core::EventPolicy::NONE),
+        );
+        tree.push(
+            UiNode::new(
+                button_id.clone(),
+                UiNodeKind::Button,
+                UiRect::new(350, 0, 400, 64),
+            )
+            .parent(drag_id.clone())
+            .interaction(InteractionRole::Button),
+        );
+
+        let drag = tree
+            .hit_test(Point::new(100, 32))
+            .expect("titlebar background should be draggable");
+        assert_eq!(drag.id, drag_id);
+        assert_eq!(drag.interaction, InteractionRole::WindowDragRegion);
+
+        let button = tree
+            .hit_test(Point::new(375, 32))
+            .expect("titlebar button should remain interactive");
+        assert_eq!(button.id, button_id);
+        assert_eq!(button.interaction, InteractionRole::Button);
+    }
 }

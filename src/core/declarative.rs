@@ -184,6 +184,15 @@ impl Element {
         self
     }
 
+    /// Marks this element as a native window drag region.
+    ///
+    /// Interactive descendants are excluded automatically by hit testing.
+    pub fn window_drag_region(mut self) -> Self {
+        self.interaction = Some(InteractionRole::WindowDragRegion);
+        self.event_policy = Some(EventPolicy::NONE);
+        self
+    }
+
     pub fn on_click_handler(mut self, handler: UiEventHandler) -> Self {
         self.click_handler = Some(handler);
         self
