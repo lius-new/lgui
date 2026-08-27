@@ -329,6 +329,10 @@ impl UiRuntime {
         for event in events.iter().cloned() {
             self.dirty.mark_event(event);
         }
+        // Components may derive visuals directly from `interaction_flags` without declaring an
+        // animation. Hover, press and focus changes therefore invalidate their component owners
+        // independently from animation target updates. Raw pointer coordinates remain excluded.
+        self.mark_component_owners(tree, events.iter().flat_map(interaction_state_target_ids));
         let animation_changed =
             apply_events_to_animations(tree, &mut self.animations, events.iter().cloned());
         if animation_changed {
@@ -578,6 +582,33 @@ fn event_target_ids(event: &UiEvent) -> Vec<&UiId> {
             .chain(current.iter().map(|hit| &hit.id))
             .collect(),
         UiEvent::PointerLeft { previous } => previous.iter().collect(),
+    }
+}
+
+fn interaction_state_target_ids(event: &UiEvent) -> Vec<&UiId> {
+    match event {
+        UiEvent::HoverChanged { previous, current }
+        | UiEvent::PressedChanged { previous, current } => previous
+            .iter()
+            .chain(current.iter().map(|hit| &hit.id))
+            .collect(),
+        UiEvent::FocusChanged { previous, current } => previous
+            .iter()
+            .chain(current.iter().map(|hit| &hit.id))
+            .collect(),
+        UiEvent::PointerLeft { previous } => previous.iter().collect(),
+        UiEvent::Clicked(_)
+        | UiEvent::Wheel { .. }
+        | UiEvent::TextInput { .. }
+        | UiEvent::ImeStarted { .. }
+        | UiEvent::ImeUpdated { .. }
+        | UiEvent::ImeEnded { .. }
+        | UiEvent::Backspace { .. }
+        | UiEvent::KeyDown { .. }
+        | UiEvent::PointerPressed { .. }
+        | UiEvent::PointerMoved { .. }
+        | UiEvent::PointerDragged { .. }
+        | UiEvent::PointerReleased { .. } => Vec::new(),
     }
 }
 

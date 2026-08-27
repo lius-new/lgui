@@ -173,9 +173,15 @@ mod tests {
     use super::*;
     use crate::{
         application::AppView,
-        core::{group, text, Color, State, TextStyle, UiId},
+        core::{
+            component, group, text, Color, Element, ElementRenderCx, InputEvent, InteractionRole,
+            Point, PointerButton, State, TextStyle, UiElement, UiId, VisualStyle,
+        },
     };
-    use std::sync::{Arc, Mutex};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     #[test]
     fn full_invalidation_marks_retained_components_dirty() {
@@ -256,5 +262,126 @@ mod tests {
             .effective_rects()
             .iter()
             .all(|rect| rect.intersect(UiRect::new(20, 20, 180, 60)).is_none()));
+    }
+
+    #[test]
+    fn pointer_focus_reexecutes_components_losing_and_gaining_focus() {
+        let first_executions = Arc::new(AtomicUsize::new(0));
+        let second_executions = Arc::new(AtomicUsize::new(0));
+        let first_observed_focus = Arc::new(Mutex::new(Vec::new()));
+        let second_observed_focus = Arc::new(Mutex::new(Vec::new()));
+        let first_id = Arc::new(Mutex::new(None::<UiId>));
+        let second_id = Arc::new(Mutex::new(None::<UiId>));
+        let view: AppView = Arc::new({
+            let first_executions = Arc::clone(&first_executions);
+            let second_executions = Arc::clone(&second_executions);
+            let first_observed_focus = Arc::clone(&first_observed_focus);
+            let second_observed_focus = Arc::clone(&second_observed_focus);
+            let first_id = Arc::clone(&first_id);
+            let second_id = Arc::clone(&second_id);
+            move |_cx| {
+                let field = |rect: UiRect,
+                             executions: Arc<AtomicUsize>,
+                             observed_focus: Arc<Mutex<Vec<bool>>>,
+                             field_id: Arc<Mutex<Option<UiId>>>| {
+                    component((), move |_cx, _props| {
+                        executions.fetch_add(1, Ordering::SeqCst);
+                        Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+                            let focused = cx.context.interaction_flags(&cx.id).focused;
+                            observed_focus
+                                .lock()
+                                .expect("observed focus poisoned")
+                                .push(focused);
+                            *field_id.lock().expect("field id poisoned") = Some(cx.id.clone());
+                            UiElement::panel(
+                                cx.id,
+                                rect,
+                                VisualStyle::filled(if focused {
+                                    Color(0x00FF00)
+                                } else {
+                                    Color(0xFF0000)
+                                }),
+                            )
+                            .interaction(InteractionRole::Button)
+                        })
+                    })
+                };
+                group(UiRect::new(0, 0, 240, 120)).content((
+                    field(
+                        UiRect::new(0, 0, 120, 40),
+                        Arc::clone(&first_executions),
+                        Arc::clone(&first_observed_focus),
+                        Arc::clone(&first_id),
+                    ),
+                    field(
+                        UiRect::new(0, 60, 120, 100),
+                        Arc::clone(&second_executions),
+                        Arc::clone(&second_observed_focus),
+                        Arc::clone(&second_id),
+                    ),
+                ))
+            }
+        });
+        let viewport = UiRect::new(0, 0, 240, 120);
+        let mut session = UiSession::new();
+
+        session.render_view(&view, viewport, UiScale::ONE);
+        let first_id = first_id
+            .lock()
+            .expect("first id poisoned")
+            .clone()
+            .expect("first id missing");
+        let second_id = second_id
+            .lock()
+            .expect("second id poisoned")
+            .clone()
+            .expect("second id missing");
+
+        click(&mut session, Point::new(10, 10));
+        assert_eq!(
+            session.runtime().interaction_state().focused,
+            Some(first_id)
+        );
+        session.render_view(&view, viewport, UiScale::ONE);
+
+        click(&mut session, Point::new(10, 70));
+        assert_eq!(
+            session.runtime().interaction_state().focused,
+            Some(second_id)
+        );
+        session.render_view(&view, viewport, UiScale::ONE);
+
+        assert_eq!(first_executions.load(Ordering::SeqCst), 3);
+        assert_eq!(second_executions.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *first_observed_focus
+                .lock()
+                .expect("first observed focus poisoned"),
+            vec![false, true, false]
+        );
+        assert_eq!(
+            *second_observed_focus
+                .lock()
+                .expect("second observed focus poisoned"),
+            vec![false, true]
+        );
+    }
+
+    fn click(session: &mut UiSession, point: Point) {
+        for input in [
+            InputEvent::PointerDown {
+                point,
+                button: PointerButton::Left,
+            },
+            InputEvent::PointerUp {
+                point,
+                button: PointerButton::Left,
+            },
+        ] {
+            let output = session.handle_input(input);
+            if let Some(bounds) = output.dirty_bounds {
+                session.invalidations_mut().invalidate_rect(bounds);
+            }
+        }
     }
 }
