@@ -39,14 +39,21 @@ use windows::{
     },
 };
 
-use crate::core::{Scene, UiRect};
+use crate::{
+    application::RenderErrorStage,
+    core::{Scene, UiRect},
+};
 
-use super::super::{enhanced, Win32Renderer, Win32RendererFactory};
+use super::super::{enhanced, Win32RenderError, Win32Renderer, Win32RendererFactory};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct D2dRendererFactory;
 
 impl Win32RendererFactory for D2dRendererFactory {
+    fn name(&self) -> &'static str {
+        "d2d"
+    }
+
     fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
         Ok(Box::new(D2dRenderer::new(hwnd)))
     }
@@ -97,14 +104,27 @@ impl D2dRenderer {
 }
 
 impl Win32Renderer for D2dRenderer {
-    fn draw(&mut self, _hwnd: HWND, _target: HDC, scene: &Scene, viewport: UiRect) -> bool {
+    fn draw(
+        &mut self,
+        _hwnd: HWND,
+        _target: HDC,
+        scene: &Scene,
+        viewport: UiRect,
+    ) -> std::result::Result<(), Win32RenderError> {
         let result = self
             .ensure_resources(viewport)
+            .map_err(|source| {
+                Win32RenderError::new(
+                    RenderErrorStage::Create,
+                    "create_composition_resources",
+                    source,
+                )
+            })
             .and_then(|resources| resources.draw_and_present(scene, None));
         if result.is_err() {
             self.resources = None;
         }
-        result.is_ok()
+        result
     }
 
     fn draw_damage(
@@ -114,20 +134,29 @@ impl Win32Renderer for D2dRenderer {
         scene: &Scene,
         viewport: UiRect,
         damage: &[UiRect],
-    ) -> bool {
+    ) -> std::result::Result<(), Win32RenderError> {
         let reset = self.resources_need_reset(viewport);
         if !reset && damage.is_empty() {
             // DirectComposition retains the last presented surface for exposure paints.
-            return true;
+            return Ok(());
         }
         let full = reset || damage_is_full(viewport, damage);
-        let result = self.ensure_resources(viewport).and_then(|resources| {
-            resources.draw_and_present(scene, if full { None } else { Some(damage) })
-        });
+        let result = self
+            .ensure_resources(viewport)
+            .map_err(|source| {
+                Win32RenderError::new(
+                    RenderErrorStage::Create,
+                    "create_composition_resources",
+                    source,
+                )
+            })
+            .and_then(|resources| {
+                resources.draw_and_present(scene, if full { None } else { Some(damage) })
+            });
         if result.is_err() {
             self.resources = None;
         }
-        result.is_ok()
+        result
     }
 }
 
@@ -186,29 +215,71 @@ impl CompositionResources {
         })
     }
 
-    fn draw_and_present(&mut self, scene: &Scene, damage: Option<&[UiRect]>) -> Result<()> {
+    fn draw_and_present(
+        &mut self,
+        scene: &Scene,
+        damage: Option<&[UiRect]>,
+    ) -> std::result::Result<(), Win32RenderError> {
         match damage {
             Some(rects) => {
-                self.renderer.draw_scene_dirty(scene, rects)?;
                 self.renderer
-                    .copy_scene_to_target(&self.target_bitmap, Some(rects))?;
+                    .draw_scene_dirty(scene, rects)
+                    .map_err(|source| {
+                        Win32RenderError::new(RenderErrorStage::Draw, "draw_scene_dirty", source)
+                    })?;
+                self.renderer
+                    .copy_scene_to_target(&self.target_bitmap, Some(rects))
+                    .map_err(|source| {
+                        Win32RenderError::new(
+                            RenderErrorStage::Copy,
+                            "copy_dirty_scene_to_swap_chain",
+                            source,
+                        )
+                    })?;
             }
             None => {
-                self.renderer.draw_scene_full(scene)?;
+                self.renderer.draw_scene_full(scene).map_err(|source| {
+                    Win32RenderError::new(RenderErrorStage::Draw, "draw_scene_full", source)
+                })?;
                 self.renderer
-                    .copy_scene_to_target(&self.target_bitmap, None)?;
+                    .copy_scene_to_target(&self.target_bitmap, None)
+                    .map_err(|source| {
+                        Win32RenderError::new(
+                            RenderErrorStage::Copy,
+                            "copy_full_scene_to_swap_chain",
+                            source,
+                        )
+                    })?;
             }
         }
         unsafe {
             match damage {
-                Some(rects) => present_dirty(&self.swap_chain, rects)?,
+                Some(rects) => present_dirty(&self.swap_chain, rects).map_err(|source| {
+                    Win32RenderError::new(RenderErrorStage::Present, "present_dirty", source)
+                })?,
                 None => self
                     .swap_chain
-                    .cast::<IDXGISwapChain>()?
+                    .cast::<IDXGISwapChain>()
+                    .map_err(|source| {
+                        Win32RenderError::new(
+                            RenderErrorStage::Present,
+                            "resolve_swap_chain_for_present",
+                            source,
+                        )
+                    })?
                     .Present(1, DXGI_PRESENT(0))
-                    .ok()?,
+                    .ok()
+                    .map_err(|source| {
+                        Win32RenderError::new(RenderErrorStage::Present, "present_full", source)
+                    })?,
             }
-            self.dcomp_device.Commit()?;
+            self.dcomp_device.Commit().map_err(|source| {
+                Win32RenderError::new(
+                    RenderErrorStage::Commit,
+                    "commit_direct_composition",
+                    source,
+                )
+            })?;
         }
         Ok(())
     }

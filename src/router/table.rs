@@ -2,13 +2,16 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     application::AppView,
-    core::{component, context_provider, group, Element, RenderCx},
+    core::{
+        component, context_provider, group, Element, Observable, ObservableListener, RenderCx,
+        UiEffect,
+    },
 };
 
 use super::{
-    matches::{CurrentRouteMatch, ErasedRouteHandle},
+    matches::{CurrentRouteMatch, ErasedRouteHandle, RouteMatchesObservable},
     pattern::{MatchStep, PathPattern},
-    Location, PathParams, RouteId, RouteMatch, RouteMatches, RouterHooks as _,
+    Location, PathParams, RouteId, RouteMatch, RouteMatches, Router,
 };
 
 type RouteMatcher<R> = Arc<dyn Fn(&R, usize) -> Option<MatchStep> + Send + Sync + 'static>;
@@ -250,17 +253,13 @@ where
 
     pub fn outlet(&self, cx: &mut RenderCx<'_, '_>) -> Element {
         let router = cx.application().router::<R>();
-        let context = cx.use_router(router);
-        let current = context.current().clone();
-        let branch = Arc::new(
-            self.resolve(&current)
-                .unwrap_or_else(|| panic!("current location has no declarative component")),
-        );
-        let matches = branch.matches.clone();
-        let navigation_id = context.navigation_id();
+        let resolver: Arc<dyn OutletResolver> = Arc::new(TypedOutletResolver {
+            routes: self.clone(),
+            router,
+        });
         context_provider(
-            context,
-            context_provider(matches, render_branch(branch, 0, navigation_id)),
+            route_matches_observable(Arc::clone(&resolver)),
+            context_provider(OutletContext { resolver, depth: 0 }, outlet()),
         )
     }
 
@@ -282,6 +281,104 @@ pub fn outlet() -> Element {
     component((), |cx, _| cx.use_context::<OutletContext>().render(cx)).key("router.outlet")
 }
 
+type OutletView = Arc<
+    dyn for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
+        + Send
+        + Sync
+        + 'static,
+>;
+
+#[derive(Clone, PartialEq, Eq)]
+struct OutletIdentity {
+    matched: Option<RouteMatch>,
+    leaf_location: Option<Location>,
+}
+
+#[derive(Clone)]
+struct OutletSelection {
+    identity: OutletIdentity,
+    view: OutletView,
+}
+
+impl PartialEq for OutletSelection {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity
+    }
+}
+
+trait OutletResolver: Send + Sync {
+    fn id(&self) -> u64;
+    fn matches(&self) -> RouteMatches;
+    fn select(self: Arc<Self>, depth: usize) -> OutletSelection;
+    fn subscribe(&self, listener: ObservableListener) -> UiEffect;
+}
+
+struct TypedOutletResolver<R> {
+    routes: DeclarativeRouter<R>,
+    router: Router<R>,
+}
+
+impl<R> OutletResolver for TypedOutletResolver<R>
+where
+    R: Default + Clone + PartialEq + Send + Sync + 'static,
+{
+    fn id(&self) -> u64 {
+        let table = Arc::as_ptr(&self.routes.routes) as usize as u64;
+        self.router
+            .observable_id()
+            .wrapping_mul(0x517C_C1B7_2722_0A95)
+            ^ table.rotate_left(17)
+    }
+
+    fn matches(&self) -> RouteMatches {
+        self.routes
+            .resolve(&self.router.current())
+            .unwrap_or_else(|| panic!("current location has no declarative component"))
+            .matches
+    }
+
+    fn select(self: Arc<Self>, depth: usize) -> OutletSelection {
+        let snapshot = self.router.snapshot();
+        let branch = Arc::new(
+            self.routes
+                .resolve(snapshot.current())
+                .unwrap_or_else(|| panic!("current location has no declarative component")),
+        );
+        let matched = branch.nodes.get(depth).map(|node| node.matched.clone());
+        let leaf_location = (depth + 1 == branch.nodes.len())
+            .then(|| branch.matches.location.clone())
+            .flatten();
+        let identity = OutletIdentity {
+            matched,
+            leaf_location,
+        };
+        let router_context = self.router.context_from(snapshot);
+        let resolver: Arc<dyn OutletResolver> = self;
+        let view = if depth >= branch.nodes.len() {
+            Arc::new(|cx: &mut RenderCx<'_, '_>| group(cx.viewport())) as OutletView
+        } else {
+            Arc::new(move |_cx: &mut RenderCx<'_, '_>| {
+                context_provider(
+                    router_context.clone(),
+                    context_provider(
+                        branch.matches.clone(),
+                        render_branch(Arc::clone(&branch), depth, Arc::clone(&resolver)),
+                    ),
+                )
+            })
+        };
+        OutletSelection { identity, view }
+    }
+
+    fn subscribe(&self, listener: ObservableListener) -> UiEffect {
+        let cleanup_router = self.router.clone();
+        let token = self.router.subscribe(move |_| listener());
+        Box::new(move || {
+            cleanup_router.unsubscribe(token);
+        })
+    }
+}
+
 struct ResolvedNode {
     matched: RouteMatch,
     view: AppView,
@@ -300,42 +397,63 @@ struct ResolvedCandidate {
 
 #[derive(Clone)]
 struct OutletContext {
-    branch: Arc<ResolvedBranch>,
+    resolver: Arc<dyn OutletResolver>,
     depth: usize,
-    navigation_id: u64,
 }
 
 impl OutletContext {
     fn render(&self, cx: &mut RenderCx<'_, '_>) -> Element {
-        if self.depth >= self.branch.nodes.len() {
-            return group(cx.viewport());
-        }
-        render_branch(Arc::clone(&self.branch), self.depth, self.navigation_id)
+        let read_resolver = Arc::clone(&self.resolver);
+        let subscribe_resolver = Arc::clone(&self.resolver);
+        let depth = self.depth;
+        let observable = Observable::new(
+            outlet_observable_id(self.resolver.id(), depth),
+            move || Arc::clone(&read_resolver).select(depth),
+            move |listener| subscribe_resolver.subscribe(listener),
+        );
+        let selection = cx.use_observable(observable, clone_outlet_selection);
+        (selection.view)(cx)
     }
 }
 
 impl PartialEq for OutletContext {
     fn eq(&self, other: &Self) -> bool {
-        self.depth == other.depth
-            && self.navigation_id == other.navigation_id
-            && self.branch.nodes.get(self.depth).map(|node| &node.matched)
-                == other
-                    .branch
-                    .nodes
-                    .get(other.depth)
-                    .map(|node| &node.matched)
+        self.depth == other.depth && self.resolver.id() == other.resolver.id()
     }
 }
 
-fn render_branch(branch: Arc<ResolvedBranch>, depth: usize, navigation_id: u64) -> Element {
+fn clone_outlet_selection(selection: &OutletSelection) -> OutletSelection {
+    selection.clone()
+}
+
+fn route_matches_observable(resolver: Arc<dyn OutletResolver>) -> RouteMatchesObservable {
+    let read_resolver = Arc::clone(&resolver);
+    let subscribe_resolver = Arc::clone(&resolver);
+    RouteMatchesObservable(Observable::new(
+        resolver.id().wrapping_add(0xA11C_E5A7_0000_0000),
+        move || read_resolver.matches(),
+        move |listener| subscribe_resolver.subscribe(listener),
+    ))
+}
+
+fn outlet_observable_id(router_id: u64, depth: usize) -> u64 {
+    router_id
+        .wrapping_mul(0x9E37_79B1_85EB_CA87)
+        .wrapping_add(depth as u64)
+}
+
+fn render_branch(
+    branch: Arc<ResolvedBranch>,
+    depth: usize,
+    resolver: Arc<dyn OutletResolver>,
+) -> Element {
     let node = &branch.nodes[depth];
     let matched = node.matched.clone();
     let view = Arc::clone(&node.view);
     let key = format!("router.route.{}", matched.id().get());
     let child_outlet = OutletContext {
-        branch,
+        resolver,
         depth: depth + 1,
-        navigation_id,
     };
     context_provider(
         CurrentRouteMatch(matched),
@@ -612,8 +730,14 @@ mod tests {
     };
 
     use crate::{
-        application::ApplicationContext,
-        core::{context_provider, HostTreeBuilder, RootComponent, UiRect, UiRuntime, UiScale},
+        application::{AppView, ApplicationContext},
+        core::{
+            component, context_provider, text, Color, HostTree, HostTreeBuilder, InputEvent,
+            InteractionRole, Point, PointerButton, RootComponent, TextStyle, UiElement, UiRect,
+            UiRuntime, UiScale, VisualStyle,
+        },
+        router::RouteMatchHooks as _,
+        session::UiSession,
     };
 
     use super::*;
@@ -780,10 +904,11 @@ mod tests {
         ui: &UiRuntime,
         application: ApplicationContext,
         routes: DeclarativeRouter<Location>,
-    ) {
+    ) -> HostTree {
         let viewport = UiRect::new(0, 0, 100, 100);
         let interaction = ui.interaction_state();
-        HostTreeBuilder::new().mount(
+        let mut builder = HostTreeBuilder::new();
+        builder.mount(
             NestedRouterRoot {
                 application,
                 routes,
@@ -800,6 +925,7 @@ mod tests {
             ui.effects(),
             UiScale::ONE,
         );
+        builder.finish()
     }
 
     #[test]
@@ -863,6 +989,149 @@ mod tests {
         assert_eq!(layout_mounts.load(Ordering::SeqCst), 1);
         assert_eq!(layout_cleanups.load(Ordering::SeqCst), 0);
         assert_eq!(event_renders.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn navigation_invalidates_the_outlet_bounds_instead_of_the_window() {
+        let outlet_bounds = UiRect::new(18, 24, 82, 76);
+        let routes = create_router((
+            route("/", move |_| group(outlet_bounds)),
+            route("/dialog", move |_| group(outlet_bounds)),
+        ));
+        let application = ApplicationContext::empty();
+        let router = application.router::<Location>();
+        let mut ui = UiRuntime::new();
+        let old_tree = mount_nested_router(&ui, application, routes);
+        ui.run_effects();
+
+        router.navigate(Location::new("/dialog"));
+        let updates = ui.apply_pending_updates();
+
+        assert!(!updates.dirty_ids.is_empty());
+        assert_eq!(
+            old_tree.paint_bounds(updates.dirty_ids),
+            Some(outlet_bounds)
+        );
+        assert_ne!(outlet_bounds, UiRect::new(0, 0, 100, 100));
+    }
+
+    #[test]
+    fn navigation_commits_the_new_nested_outlet_in_the_first_retained_frame() {
+        let viewport = UiRect::new(0, 0, 320, 200);
+        let outlet_bounds = UiRect::new(80, 40, 280, 180);
+        let login_link_bounds = UiRect::new(180, 140, 260, 170);
+        let application = ApplicationContext::empty();
+        let router = application.router::<Location>();
+        let view: AppView = Arc::new({
+            let application = application.clone();
+            move |_cx| {
+                let routes = create_router(layout(
+                    move |_| group(viewport).content(outlet()),
+                    (
+                        route("/", move |_| {
+                            group(outlet_bounds).content((
+                                text(
+                                    outlet_bounds,
+                                    "login",
+                                    TextStyle::new(Color::WHITE, 16, 400),
+                                ),
+                                Element::new(move |cx| {
+                                    UiElement::panel(
+                                        cx.id,
+                                        login_link_bounds,
+                                        VisualStyle::filled(Color(0xCC3344)),
+                                    )
+                                    .interaction(InteractionRole::Navigation)
+                                }),
+                            ))
+                        }),
+                        route("/register", move |_| {
+                            text(
+                                outlet_bounds,
+                                "register",
+                                TextStyle::new(Color::WHITE, 16, 400),
+                            )
+                        }),
+                    ),
+                ));
+                context_provider(
+                    application.clone(),
+                    component((), move |cx, _| routes.outlet(cx)).key("test.router"),
+                )
+            }
+        });
+        let mut session = UiSession::new();
+
+        session.render_view(&view, viewport, UiScale::ONE);
+        session.runtime().run_effects();
+        assert!(session
+            .tree()
+            .nodes()
+            .iter()
+            .any(|node| node.text.as_deref() == Some("login")));
+
+        session.handle_input(InputEvent::PointerDown {
+            point: Point::new(login_link_bounds.left + 1, login_link_bounds.top + 1),
+            button: PointerButton::Left,
+        });
+        assert!(session.runtime().interaction_state().focused.is_some());
+        router.navigate(Location::new("/register"));
+        assert!(!session.apply_pending_updates().dirty_ids.is_empty());
+        let commit = session.render_view(&view, viewport, UiScale::ONE);
+
+        assert!(session
+            .tree()
+            .nodes()
+            .iter()
+            .any(|node| node.text.as_deref() == Some("register")));
+        assert!(!session
+            .tree()
+            .nodes()
+            .iter()
+            .any(|node| node.text.as_deref() == Some("login")));
+        assert!(commit
+            .damage
+            .dirty
+            .effective_rects()
+            .iter()
+            .any(|dirty| dirty.intersect(outlet_bounds).is_some()));
+    }
+
+    #[test]
+    fn route_match_consumers_refresh_alongside_the_changed_outlet() {
+        let metadata_renders = Arc::new(AtomicUsize::new(0));
+        let routes = create_router(layout(
+            {
+                let metadata_renders = Arc::clone(&metadata_renders);
+                move |cx| {
+                    let metadata_renders = Arc::clone(&metadata_renders);
+                    group(cx.viewport()).content((
+                        component((), move |cx, _| {
+                            metadata_renders.fetch_add(1, Ordering::SeqCst);
+                            let _matches = cx.use_route_matches();
+                            group(UiRect::new(0, 0, 100, 20))
+                        })
+                        .key("route.metadata"),
+                        outlet(),
+                    ))
+                }
+            },
+            (
+                route("/", |_| group(UiRect::new(0, 20, 100, 100))),
+                route("/dialog", |_| group(UiRect::new(0, 20, 100, 100))),
+            ),
+        ));
+        let application = ApplicationContext::empty();
+        let router = application.router::<Location>();
+        let mut ui = UiRuntime::new();
+
+        mount_nested_router(&ui, application.clone(), routes.clone());
+        ui.run_effects();
+        router.navigate(Location::new("/dialog"));
+        assert!(!ui.apply_pending_updates().dirty_ids.is_empty());
+        mount_nested_router(&ui, application, routes);
+
+        assert_eq!(metadata_renders.load(Ordering::SeqCst), 2);
     }
 
     #[test]

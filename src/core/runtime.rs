@@ -445,6 +445,7 @@ impl UiRuntime {
     ) -> (bool, bool, bool) {
         let outcome = self.component_states.handle_action(target, action);
         if outcome.changed {
+            self.mark_component_owners(tree, std::iter::once(target));
             self.dirty.mark_id(target.clone());
         }
         for action in outcome.events {
@@ -961,6 +962,43 @@ mod tests {
             output.action_events[0].action.payload_value(),
             Some("chosen")
         );
+    }
+
+    #[test]
+    fn changed_component_actions_dirty_only_the_owning_component() {
+        let target = UiId::owned("local-state-target");
+        let mut runtime = UiRuntime::new();
+        let components = runtime.component_tree();
+        components.begin_render();
+        let owner = components.root(UiId::owned("local-state-owner"), "local-state-owner");
+        components.begin_component_execution(owner);
+        components.finish_component(owner);
+        components.end_render();
+        assert!(!components.is_dirty(owner));
+
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                target.clone(),
+                UiNodeKind::Button,
+                UiRect::new(20, 30, 120, 70),
+            )
+            .component_owner(owner),
+        );
+        runtime.reconcile_tree(&tree);
+        runtime
+            .component_states()
+            .with_mut(&target, |_state: &mut SemanticActionState| {});
+
+        let output = runtime.handle_default_action(UiDefaultAction {
+            event_target: target.clone(),
+            action_target: target,
+            action: UiAction::new("component.choose"),
+        });
+
+        assert!(output.animation_changed);
+        assert_eq!(output.dirty_bounds, Some(UiRect::new(20, 30, 120, 70)));
+        assert!(runtime.component_tree().is_dirty(owner));
     }
 
     #[test]

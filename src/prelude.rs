@@ -1,7 +1,7 @@
 pub use crate::application::{
     AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle, ClosePolicy,
-    WindowCloseHandler, WindowHandle, WindowId, WindowManager, WindowMode, WindowOptions,
-    WindowPosition,
+    RenderError, RenderErrorStage, WindowCloseHandler, WindowHandle, WindowId, WindowManager,
+    WindowMode, WindowOptions, WindowPosition,
 };
 #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
 pub use crate::application::{RendererKind, RendererProbeError};

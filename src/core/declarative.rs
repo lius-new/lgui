@@ -588,11 +588,26 @@ where
                     .contexts()
                     .provide(cx.component_id, value, cx.context.component_tree());
             let children = cx.compile_deferred_children();
-            UiElement::group(cx.id, cx.context.viewport()).children(children)
+            let bounds = children
+                .iter()
+                .map(ui_element_paint_bounds)
+                .reduce(UiRect::union)
+                .unwrap_or_else(|| UiRect::new(0, 0, 0, 0));
+            UiElement::group(cx.id, cx.context.viewport())
+                .paint_bounds(bounds)
+                .children(children)
         })
         .defer_children_compile()
         .children(children)
     })
+}
+
+fn ui_element_paint_bounds(element: &UiElement) -> UiRect {
+    element
+        .children_ref()
+        .iter()
+        .map(ui_element_paint_bounds)
+        .fold(element.node().paint_bounds, UiRect::union)
 }
 
 pub fn ellipse(rect: UiRect, style: VisualStyle) -> Element {

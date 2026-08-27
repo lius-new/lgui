@@ -69,8 +69,8 @@ use crate::platform::{NotificationError, NotificationHandle};
 use crate::{
     application::{
         application_root_view, AppView, ApplicationBackend, ApplicationContext, ClosePolicy,
-        WindowCloseHandler, WindowCommand, WindowDragExclusion, WindowId, WindowMode,
-        WindowOptions, WindowPosition,
+        RenderError, RenderErrorStage, WindowCloseHandler, WindowCommand, WindowDragExclusion,
+        WindowId, WindowMode, WindowOptions, WindowPosition,
     },
     core::{
         dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton, Size,
@@ -93,6 +93,49 @@ thread_local! {
     static STATE: RefCell<HashMap<isize, WindowState>> = RefCell::new(HashMap::new());
 }
 
+#[derive(Debug)]
+pub struct Win32RenderError {
+    stage: RenderErrorStage,
+    operation: &'static str,
+    source: Error,
+}
+
+impl Win32RenderError {
+    pub fn new(stage: RenderErrorStage, operation: &'static str, source: Error) -> Self {
+        Self {
+            stage,
+            operation,
+            source,
+        }
+    }
+
+    pub const fn stage(&self) -> RenderErrorStage {
+        self.stage
+    }
+
+    pub const fn operation(&self) -> &'static str {
+        self.operation
+    }
+
+    pub fn source_error(&self) -> &Error {
+        &self.source
+    }
+}
+
+impl std::fmt::Display for Win32RenderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} failed during {}: {}",
+            self.operation,
+            self.stage.as_str(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for Win32RenderError {}
+
 pub trait Win32Renderer: 'static {
     fn draw(
         &mut self,
@@ -100,7 +143,7 @@ pub trait Win32Renderer: 'static {
         target: HDC,
         scene: &crate::core::Scene,
         viewport: UiRect,
-    ) -> bool;
+    ) -> std::result::Result<(), Win32RenderError>;
 
     /// Draws a retained scene using physical-pixel damage rectangles.
     ///
@@ -113,12 +156,16 @@ pub trait Win32Renderer: 'static {
         scene: &crate::core::Scene,
         viewport: UiRect,
         _damage: &[UiRect],
-    ) -> bool {
+    ) -> std::result::Result<(), Win32RenderError> {
         self.draw(hwnd, target, scene, viewport)
     }
 }
 
 pub trait Win32RendererFactory: Send + Sync + 'static {
+    fn name(&self) -> &'static str {
+        "custom"
+    }
+
     fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>>;
 }
 
@@ -127,6 +174,10 @@ pub struct GdiRendererFactory;
 
 #[cfg(feature = "renderer-gdi")]
 impl Win32RendererFactory for GdiRendererFactory {
+    fn name(&self) -> &'static str {
+        "gdi"
+    }
+
     fn create(&self, _hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
         Ok(Box::new(GdiRenderer::default()))
     }
@@ -140,7 +191,7 @@ impl Win32Renderer for GdiRenderer {
         target: HDC,
         scene: &crate::core::Scene,
         viewport: UiRect,
-    ) -> bool {
+    ) -> std::result::Result<(), Win32RenderError> {
         self.draw_retained(target, scene, viewport, &[viewport])
     }
 
@@ -151,7 +202,7 @@ impl Win32Renderer for GdiRenderer {
         scene: &crate::core::Scene,
         viewport: UiRect,
         damage: &[UiRect],
-    ) -> bool {
+    ) -> std::result::Result<(), Win32RenderError> {
         if damage.is_empty() {
             // Exposure paints reuse the retained surface and let BeginPaint's native clip limit
             // the copy to the region that Windows actually requested.
@@ -218,6 +269,7 @@ struct WindowState {
     close_policy: ClosePolicy,
     close_handler: Option<WindowCloseHandler>,
     dispatcher: Win32Dispatcher,
+    render_retry_used: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -564,7 +616,18 @@ fn create_window(
         hwnd,
         options.rounded_corners && initial_mode == WindowMode::Windowed,
     );
-    let renderer = renderer_factory.create(hwnd)?;
+    let renderer_name = renderer_factory.name();
+    let renderer = renderer_factory.create(hwnd).map_err(|source| {
+        context.report_render_error(RenderError::new(
+            options.id.clone(),
+            renderer_name,
+            RenderErrorStage::Create,
+            "create_renderer",
+            source.code().0,
+            source.to_string(),
+        ));
+        source
+    })?;
     let mut session = UiSession::new();
     if let Some(executor) = context.task_spawner() {
         session.set_task_spawner(executor);
@@ -602,6 +665,7 @@ fn create_window(
                 close_policy: options.close_policy,
                 close_handler: options.close_handler,
                 dispatcher,
+                render_retry_used: false,
             },
         );
     });
@@ -1390,14 +1454,20 @@ fn paint(hwnd: HWND) {
 }
 
 fn render_window(hwnd: HWND, target: HDC) {
-    STATE.with(|state| {
+    let retry = STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(state) = state.get_mut(&(hwnd.0 as isize)) else {
-            return;
+            return false;
         };
         let mut client = RECT::default();
-        if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-            return;
+        if let Err(source) = unsafe { GetClientRect(hwnd, &mut client) } {
+            report_render_error(
+                state,
+                RenderErrorStage::Prepare,
+                "read_client_bounds",
+                &source,
+            );
+            return schedule_render_retry(state);
         }
         let physical = Size::new(client.right.max(1), client.bottom.max(1));
         let dpi = DpiContext::for_window(hwnd, state.logical_size);
@@ -1421,30 +1491,89 @@ fn render_window(hwnd: HWND, target: HDC) {
         let scene = commit.scene.project_to_physical(dpi.scale);
         let physical_viewport = UiRect::new(0, 0, physical.width, physical.height);
         if state.renderer.is_none() {
-            state.renderer = state.renderer_factory.create(hwnd).ok();
+            match state.renderer_factory.create(hwnd) {
+                Ok(renderer) => state.renderer = Some(renderer),
+                Err(source) => {
+                    report_render_error(
+                        state,
+                        RenderErrorStage::Create,
+                        "recreate_renderer",
+                        &source,
+                    );
+                    return schedule_render_retry(state);
+                }
+            }
         }
         #[cfg(feature = "images")]
-        let presented = {
+        let result = {
             let resources = state
                 .context
                 .try_resource::<crate::assets::RenderResources>()
                 .map(|resources| (*resources).clone())
                 .unwrap_or_default();
             let Some(renderer) = state.renderer.as_mut() else {
-                return;
+                return false;
             };
             crate::assets::with_render_resources(resources, || {
                 renderer.draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage)
             })
         };
         #[cfg(not(feature = "images"))]
-        let presented = state.renderer.as_mut().is_some_and(|renderer| {
-            renderer.draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage)
-        });
-        if presented {
-            state.session.runtime().run_effects();
+        let result = state
+            .renderer
+            .as_mut()
+            .expect("renderer was created before drawing")
+            .draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage);
+        match result {
+            Ok(()) => {
+                state.render_retry_used = false;
+                state.session.runtime().run_effects();
+                false
+            }
+            Err(error) => {
+                let source = error.source_error();
+                state.context.report_render_error(RenderError::new(
+                    state.id.clone(),
+                    state.renderer_factory.name(),
+                    error.stage(),
+                    error.operation(),
+                    source.code().0,
+                    source.to_string(),
+                ));
+                schedule_render_retry(state)
+            }
         }
     });
+    if retry {
+        unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+    }
+}
+
+fn report_render_error(
+    state: &WindowState,
+    stage: RenderErrorStage,
+    operation: &'static str,
+    source: &Error,
+) {
+    state.context.report_render_error(RenderError::new(
+        state.id.clone(),
+        state.renderer_factory.name(),
+        stage,
+        operation,
+        source.code().0,
+        source.to_string(),
+    ));
+}
+
+fn schedule_render_retry(state: &mut WindowState) -> bool {
+    state.session.invalidate_all();
+    if state.render_retry_used {
+        return false;
+    }
+    state.render_retry_used = true;
+    true
 }
 
 fn dispatch_input(hwnd: HWND, input: InputEvent) {
@@ -1460,18 +1589,23 @@ fn dispatch_input(hwnd: HWND, input: InputEvent) {
                 |action| session.runtime_mut().handle_default_action(action),
                 |context| context_requested_frame |= context.flags().needs_frame,
             );
-            if output.route_changed || context_requested_frame {
+            if context_requested_frame {
                 session.invalidate_all();
                 return WindowRepaint::Full;
             }
+            // Router and Store observables synchronously queue the component that owns their
+            // outlet/content boundary. Consume that queue now so this input pass invalidates the
+            // old boundary; Host diff adds the new boundary after the local component rerenders.
+            let mut repaint = pending_session_repaint(session);
             if let Some(bounds) = output.dirty_bounds {
                 session.invalidations_mut().invalidate_rect(bounds);
-                return WindowRepaint::Rect(bounds);
+                repaint = repaint.union(WindowRepaint::Rect(bounds));
             }
-            if output.animation_changed {
+            if output.animation_changed && repaint == WindowRepaint::None {
                 session.invalidate_all();
                 return WindowRepaint::Full;
             }
+            return repaint;
         }
         WindowRepaint::None
     });
@@ -1485,29 +1619,50 @@ enum WindowRepaint {
     Full,
 }
 
+impl WindowRepaint {
+    fn union(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::Rect(left), Self::Rect(right)) => Self::Rect(left.union(right)),
+            (Self::Rect(rect), Self::None) | (Self::None, Self::Rect(rect)) => Self::Rect(rect),
+            (Self::None, Self::None) => Self::None,
+        }
+    }
+}
+
+fn pending_session_repaint(session: &mut UiSession) -> WindowRepaint {
+    let updates = session.apply_pending_updates();
+    if updates.focus_changed || updates.frame_requested {
+        return WindowRepaint::Full;
+    }
+    if updates.dirty_ids.is_empty() {
+        return WindowRepaint::None;
+    }
+    session
+        .tree()
+        .paint_bounds(updates.dirty_ids)
+        .map(WindowRepaint::Rect)
+        .unwrap_or(WindowRepaint::Full)
+}
+
 fn apply_pending_window_updates(hwnd: HWND) -> WindowRepaint {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
             return WindowRepaint::None;
         };
-        let updates = window.session.apply_pending_updates();
-        if updates.focus_changed || updates.frame_requested {
-            return WindowRepaint::Full;
-        }
-        if updates.dirty_ids.is_empty() {
-            return WindowRepaint::None;
-        }
-        window
-            .session
-            .tree()
-            .paint_bounds(updates.dirty_ids)
-            .map(WindowRepaint::Rect)
-            .unwrap_or(WindowRepaint::Full)
+        pending_session_repaint(&mut window.session)
     })
 }
 
 fn request_window_repaint(hwnd: HWND, repaint: WindowRepaint) {
+    if repaint != WindowRepaint::None {
+        STATE.with(|state| {
+            if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+                window.render_retry_used = false;
+            }
+        });
+    }
     match repaint {
         WindowRepaint::None => {}
         WindowRepaint::Full => unsafe {

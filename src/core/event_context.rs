@@ -161,7 +161,6 @@ impl UiEventContext {
         self.flags.consumed = true;
         self.flags.changed = true;
         self.flags.route_changed |= route_changed;
-        self.flags.needs_frame = true;
     }
 
     pub fn request_frame(&mut self) {
@@ -199,5 +198,27 @@ impl UiAsyncContext {
         T: crate::store::StoreUnit,
     {
         self.application.update_store(reason, update)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reactive_changes_do_not_implicitly_request_a_global_frame() {
+        let mut context = UiEventContext::new(
+            ApplicationContext::empty(),
+            WindowId::new("reactive-change"),
+        );
+
+        context.mark_changed(true);
+
+        assert!(context.flags().changed);
+        assert!(context.flags().route_changed);
+        assert!(!context.flags().needs_frame);
+
+        context.request_frame();
+        assert!(context.flags().needs_frame);
     }
 }

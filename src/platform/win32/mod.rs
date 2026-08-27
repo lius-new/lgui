@@ -36,7 +36,9 @@ mod system_usage;
 mod tray;
 
 #[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d"))]
-pub use application::{GdiRendererFactory, Win32Application, Win32Renderer, Win32RendererFactory};
+pub use application::{
+    GdiRendererFactory, Win32Application, Win32RenderError, Win32Renderer, Win32RendererFactory,
+};
 #[cfg(feature = "multi-window")]
 pub use backbuffer::{rect_size, AlphaPolicy, LayeredBackbuffer};
 #[cfg(feature = "clipboard")]

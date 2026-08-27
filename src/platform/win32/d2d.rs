@@ -31,16 +31,21 @@ mod basic {
     };
     use windows_numerics::Vector2;
 
-    use crate::core::{
-        Color, Scene, ScenePrimitive, Stroke, TextAlign, TextStyle, UiRect, VisualStyle,
+    use crate::{
+        application::RenderErrorStage,
+        core::{Color, Scene, ScenePrimitive, Stroke, TextAlign, TextStyle, UiRect, VisualStyle},
     };
 
-    use super::{Win32Renderer, Win32RendererFactory};
+    use super::{Win32RenderError, Win32Renderer, Win32RendererFactory};
 
     #[derive(Clone, Copy, Debug, Default)]
     pub struct D2dRendererFactory;
 
     impl Win32RendererFactory for D2dRendererFactory {
+        fn name(&self) -> &'static str {
+            "d2d"
+        }
+
         fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
             Ok(Box::new(D2dRenderer::new(hwnd)?))
         }
@@ -247,17 +252,28 @@ mod basic {
     }
 
     impl Win32Renderer for D2dRenderer {
-        fn draw(&mut self, _hwnd: HWND, _target: HDC, scene: &Scene, viewport: UiRect) -> bool {
-            if self.resize(viewport).is_err() {
-                return false;
-            }
+        fn draw(
+            &mut self,
+            _hwnd: HWND,
+            _target: HDC,
+            scene: &Scene,
+            viewport: UiRect,
+        ) -> std::result::Result<(), Win32RenderError> {
+            self.resize(viewport).map_err(|source| {
+                Win32RenderError::new(RenderErrorStage::Prepare, "resize_d2d_target", source)
+            })?;
             unsafe {
                 self.target.BeginDraw();
                 self.target.Clear(Some(&d2d_color(Color(0x111418), 0xFF)));
             }
-            let result = self.draw_commands(scene.commands());
-            let presented = unsafe { self.target.EndDraw(None, None) };
-            result.and(presented).is_ok()
+            let draw_result = self.draw_commands(scene.commands());
+            let present_result = unsafe { self.target.EndDraw(None, None) };
+            draw_result.map_err(|source| {
+                Win32RenderError::new(RenderErrorStage::Draw, "draw_scene", source)
+            })?;
+            present_result.map_err(|source| {
+                Win32RenderError::new(RenderErrorStage::Present, "end_d2d_draw", source)
+            })
         }
     }
 

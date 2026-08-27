@@ -34,6 +34,13 @@ pub type ApplicationTask = Box<dyn FnOnce() + Send + 'static>;
 
 type WindowCommandHandler = Arc<dyn Fn(WindowCommand) + Send + Sync>;
 
+type RenderErrorHandler = Arc<dyn Fn(&RenderError) + Send + Sync + 'static>;
+
+#[derive(Clone)]
+pub(crate) struct RenderErrorRegistration {
+    handler: RenderErrorHandler,
+}
+
 #[cfg(feature = "tray")]
 pub(crate) type TrayCommandHandler = Arc<dyn Fn(&ApplicationContext, &str) + Send + Sync + 'static>;
 
@@ -405,6 +412,14 @@ impl ApplicationContext {
         self.inner.windows.clone()
     }
 
+    pub(crate) fn report_render_error(&self, error: RenderError) {
+        if let Some(registration) = self.try_resource::<RenderErrorRegistration>() {
+            (registration.handler)(&error);
+        } else {
+            eprintln!("{error}");
+        }
+    }
+
     #[cfg(feature = "notifications")]
     pub fn notifications(&self) -> Option<Arc<NotificationHandle>> {
         self.try_resource::<NotificationHandle>()
@@ -515,6 +530,105 @@ impl From<String> for WindowId {
         Self::new(value)
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderErrorStage {
+    Create,
+    Prepare,
+    Draw,
+    Copy,
+    Present,
+    Commit,
+}
+
+impl RenderErrorStage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Prepare => "prepare",
+            Self::Draw => "draw",
+            Self::Copy => "copy",
+            Self::Present => "present",
+            Self::Commit => "commit",
+        }
+    }
+}
+
+/// A renderer failure reported at the application boundary.
+///
+/// Rendering backends remain independent from the application's logging stack. Applications can
+/// install a handler with [`Application::on_render_error`] and decide whether a failure belongs in
+/// a local log, diagnostics UI, telemetry, or another reporting destination.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderError {
+    window: WindowId,
+    renderer: &'static str,
+    stage: RenderErrorStage,
+    operation: &'static str,
+    code: i32,
+    message: String,
+}
+
+impl RenderError {
+    pub(crate) fn new(
+        window: WindowId,
+        renderer: &'static str,
+        stage: RenderErrorStage,
+        operation: &'static str,
+        code: i32,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            window,
+            renderer,
+            stage,
+            operation,
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn window(&self) -> &WindowId {
+        &self.window
+    }
+
+    pub const fn renderer(&self) -> &'static str {
+        self.renderer
+    }
+
+    pub const fn stage(&self) -> RenderErrorStage {
+        self.stage
+    }
+
+    pub const fn operation(&self) -> &'static str {
+        self.operation
+    }
+
+    pub const fn code(&self) -> i32 {
+        self.code
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for RenderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "renderer '{}' failed to {} window '{}' during {} (0x{:08X}): {}",
+            self.renderer,
+            self.operation,
+            self.window.as_str(),
+            self.stage.as_str(),
+            self.code as u32,
+            self.message
+        )
+    }
+}
+
+impl std::error::Error for RenderError {}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WindowPosition {
@@ -885,6 +999,13 @@ impl<B> Application<B> {
         self
     }
 
+    pub fn on_render_error(self, handler: impl Fn(&RenderError) + Send + Sync + 'static) -> Self {
+        self.resources.provide(RenderErrorRegistration {
+            handler: Arc::new(handler),
+        });
+        self
+    }
+
     #[cfg(feature = "backend-win32")]
     pub fn font_families(self, families: &'static [&'static str]) -> Self {
         self.resources.provide(crate::text::FontFamilies(families));
@@ -974,6 +1095,8 @@ mod tests {
 
     struct RecordingBackend(Arc<Mutex<Option<WindowOptions>>>);
 
+    struct ReportingBackend;
+
     impl ApplicationBackend for RecordingBackend {
         type Error = ();
 
@@ -986,6 +1109,52 @@ mod tests {
             *self.0.lock().expect("window options lock poisoned") = Some(options);
             Ok(())
         }
+    }
+
+    impl ApplicationBackend for ReportingBackend {
+        type Error = ();
+
+        fn run(
+            self,
+            _options: WindowOptions,
+            _view: AppView,
+            context: ApplicationContext,
+        ) -> Result<(), Self::Error> {
+            context.report_render_error(RenderError::new(
+                WindowId::new("reporting-window"),
+                "test",
+                RenderErrorStage::Present,
+                "present_test_frame",
+                0x80004005_u32 as i32,
+                "synthetic present failure",
+            ));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn render_errors_are_delivered_with_structured_context() {
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&errors);
+
+        Application::with_backend(ReportingBackend)
+            .on_render_error(move |error| {
+                captured
+                    .lock()
+                    .expect("render error capture poisoned")
+                    .push(error.clone());
+            })
+            .run(|cx| crate::core::group(cx.viewport()))
+            .expect("reporting backend should run");
+
+        let errors = errors.lock().expect("render error capture poisoned");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].window().as_str(), "reporting-window");
+        assert_eq!(errors[0].renderer(), "test");
+        assert_eq!(errors[0].stage(), RenderErrorStage::Present);
+        assert_eq!(errors[0].operation(), "present_test_frame");
+        assert_eq!(errors[0].code(), 0x80004005_u32 as i32);
+        assert_eq!(errors[0].message(), "synthetic present failure");
     }
 
     #[test]

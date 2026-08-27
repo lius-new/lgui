@@ -91,20 +91,27 @@ impl UiSession {
     pub fn render_view(&mut self, view: &AppView, viewport: UiRect, scale: UiScale) -> HostCommit {
         self.apply_pending_updates();
         self.prepare_render(viewport, scale);
-        let mut tree = self.build_view_tree(Arc::clone(view), viewport, scale);
+        let mut tree =
+            self.build_view_tree_from(self.render_tree(), Arc::clone(view), viewport, scale);
         if self.runtime.sync_tree_focus(&tree) {
-            tree = self.build_view_tree(Arc::clone(view), viewport, scale);
+            tree = self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
         }
         if self.runtime.sync_tree_animation_targets(&tree) {
-            tree = self.build_view_tree(Arc::clone(view), viewport, scale);
+            tree = self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
         }
         self.replace_tree(tree);
         self.commit(viewport)
     }
 
-    fn build_view_tree(&self, view: AppView, viewport: UiRect, scale: UiScale) -> HostTree {
+    fn build_view_tree_from(
+        &self,
+        retained: HostTree,
+        view: AppView,
+        viewport: UiRect,
+        scale: UiScale,
+    ) -> HostTree {
         let interaction = self.runtime.interaction_state();
-        let mut builder = HostTreeBuilder::from_retained(self.render_tree());
+        let mut builder = HostTreeBuilder::from_retained(retained);
         builder.mount(
             view,
             viewport,

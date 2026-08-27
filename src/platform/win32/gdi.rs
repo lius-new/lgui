@@ -13,9 +13,11 @@ use windows::{
     },
 };
 
+use super::application::Win32RenderError;
 use super::backbuffer::LayeredBackbuffer;
 
 use crate::{
+    application::RenderErrorStage,
     core::{Color, Scene, ScenePrimitive, TextAlign, TextStyle, UiRect, VisualStyle},
     renderer::RenderBackend,
 };
@@ -91,7 +93,7 @@ impl GdiRenderer {
         scene: &Scene,
         viewport: UiRect,
         damage: &[UiRect],
-    ) -> bool {
+    ) -> Result<(), Win32RenderError> {
         let replace = self.backbuffer.as_ref().is_none_or(|buffer| {
             buffer.width() != viewport.width() || buffer.height() != viewport.height()
         });
@@ -101,7 +103,7 @@ impl GdiRenderer {
 
         let Some(mut backbuffer) = self.backbuffer.take() else {
             self.draw_direct(target, scene, viewport, None);
-            return true;
+            return Ok(());
         };
 
         let mut repaint = if backbuffer.is_valid() {
@@ -126,7 +128,7 @@ impl GdiRenderer {
         if repaint.is_empty() {
             repaint.push(viewport);
         }
-        let presented = repaint.iter().all(|rect| unsafe {
+        let presented = repaint.iter().try_for_each(|rect| unsafe {
             BitBlt(
                 target,
                 rect.left,
@@ -138,7 +140,9 @@ impl GdiRenderer {
                 rect.top,
                 SRCCOPY,
             )
-            .is_ok()
+            .map_err(|source| {
+                Win32RenderError::new(RenderErrorStage::Present, "bitblt_backbuffer", source)
+            })
         });
         self.backbuffer = Some(backbuffer);
         presented

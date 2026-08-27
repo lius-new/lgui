@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::core::RenderCx;
+use crate::core::{Observable, RenderCx};
 
 use super::{location::resolve_path, Location, PathParams};
 
@@ -143,6 +143,15 @@ impl RouteMatches {
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct CurrentRouteMatch(pub RouteMatch);
 
+#[derive(Clone)]
+pub(super) struct RouteMatchesObservable(pub Observable<RouteMatches>);
+
+impl PartialEq for RouteMatchesObservable {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.id() == other.0.id()
+    }
+}
+
 pub trait RouteMatchHooks {
     fn use_route_matches(&mut self) -> RouteMatches;
     fn use_route_match(&mut self) -> RouteMatch;
@@ -151,7 +160,8 @@ pub trait RouteMatchHooks {
 
 impl RouteMatchHooks for RenderCx<'_, '_> {
     fn use_route_matches(&mut self) -> RouteMatches {
-        self.use_context::<RouteMatches>()
+        let source = self.use_context::<RouteMatchesObservable>().0;
+        self.use_observable(source, clone_route_matches)
     }
 
     fn use_route_match(&mut self) -> RouteMatch {
@@ -161,4 +171,8 @@ impl RouteMatchHooks for RenderCx<'_, '_> {
     fn use_path_params(&mut self) -> PathParams {
         self.use_route_match().params
     }
+}
+
+fn clone_route_matches(matches: &RouteMatches) -> RouteMatches {
+    matches.clone()
 }
