@@ -288,6 +288,7 @@ impl Default for HostTreeBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -295,7 +296,28 @@ mod tests {
     };
 
     use super::*;
-    use crate::core::{component, context_provider, group, UiRuntime};
+    use crate::core::{compile_scope, component, context_provider, group, UiRuntime};
+
+    thread_local! {
+        static TEST_COMPILE_SCOPE_DEPTH: Cell<u32> = const { Cell::new(0) };
+    }
+
+    struct TestCompileScopeGuard;
+
+    fn enter_test_compile_scope() -> TestCompileScopeGuard {
+        TEST_COMPILE_SCOPE_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        TestCompileScopeGuard
+    }
+
+    fn test_compile_scope_is_active() -> bool {
+        TEST_COMPILE_SCOPE_DEPTH.with(|depth| depth.get() > 0)
+    }
+
+    impl Drop for TestCompileScopeGuard {
+        fn drop(&mut self) {
+            TEST_COMPILE_SCOPE_DEPTH.with(|depth| depth.set(depth.get() - 1));
+        }
+    }
 
     struct CountingRoot {
         executions: Arc<AtomicUsize>,
@@ -500,6 +522,32 @@ mod tests {
         observed: Arc<Mutex<Vec<u32>>>,
     }
 
+    struct CompileScopeRoot {
+        observed: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl RootComponent for CompileScopeRoot {
+        fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+            let observed = self.observed;
+            compile_scope(enter_test_compile_scope, || {
+                assert!(test_compile_scope_is_active());
+                observed
+                    .lock()
+                    .expect("compile scope observation poisoned")
+                    .push("content");
+                let observed = Arc::clone(&observed);
+                component((), move |_cx, _| {
+                    assert!(test_compile_scope_is_active());
+                    observed
+                        .lock()
+                        .expect("compile scope observation poisoned")
+                        .push("deferred component");
+                    group(UiRect::new(0, 0, 10, 10))
+                })
+            })
+        }
+    }
+
     impl RootComponent for ContextRoot {
         fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
             let observed = Arc::clone(&self.observed);
@@ -544,6 +592,37 @@ mod tests {
             &*observed.lock().expect("context observation poisoned"),
             &[7]
         );
+    }
+
+    #[test]
+    fn compile_scope_covers_content_creation_and_deferred_descendants() {
+        let runtime = UiRuntime::new();
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let viewport = UiRect::new(0, 0, 10, 10);
+        let interaction = runtime.interaction_state();
+        let mut builder = HostTreeBuilder::new();
+        builder.mount(
+            CompileScopeRoot {
+                observed: Arc::clone(&observed),
+            },
+            viewport,
+            &interaction,
+            runtime.animations(),
+            runtime.component_states(),
+            runtime.component_tree(),
+            runtime.contexts(),
+            runtime.hook_states(),
+            runtime.hook_updates(),
+            runtime.task_spawner(),
+            runtime.effects(),
+            UiScale::ONE,
+        );
+
+        assert_eq!(
+            &*observed.lock().expect("compile scope observation poisoned"),
+            &["content", "deferred component"]
+        );
+        assert!(!test_compile_scope_is_active());
     }
 
     struct KeyedListRoot {

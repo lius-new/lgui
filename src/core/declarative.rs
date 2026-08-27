@@ -558,6 +558,35 @@ pub fn fragment(content: impl IntoElementContent) -> Fragment {
     Fragment { children }
 }
 
+// COMPATIBILITY(ambient-compile-scope): scheduled for removal. Migrate ambient
+// render state to `context_provider` + `RenderCx::use_context` immediately; do
+// not introduce new callers of this bridge.
+/// Enters a legacy ambient scope while content is created and descendants compile.
+///
+/// The framework owns deferred-child compilation so application code never has
+/// to reproduce that lifecycle boundary. New code should use typed contexts.
+#[doc(hidden)]
+#[track_caller]
+pub fn compile_scope<G, C>(enter: impl Fn() -> G + 'static, render: impl FnOnce() -> C) -> Element
+where
+    C: IntoElementContent,
+{
+    let content = {
+        let _guard = enter();
+        render()
+    };
+    let mut children = Vec::new();
+    content.append_to(&mut children);
+
+    Element::new(move |mut cx| {
+        let _guard = enter();
+        let children = cx.compile_deferred_children();
+        UiElement::group(cx.id, cx.context.viewport()).children(children)
+    })
+    .defer_children_compile()
+    .children(children)
+}
+
 /// Provides a typed context value while its declarative descendants are compiled.
 ///
 /// The provider is itself a retained component boundary. This keeps the provider stack

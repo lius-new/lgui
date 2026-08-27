@@ -199,16 +199,22 @@ impl HostRuntime {
             .into_iter()
             .filter_map(|source| self.sources.get(&source).copied().map(|id| (source, id)))
             .collect::<Vec<_>>();
-        for (source, id) in removed {
-            let old_bounds = self.node(id).paint_bounds;
-            if let Some(owner) = self.scene_owner_source(id) {
+        // Snapshot every removal while the old parent graph is still intact.
+        // A projection may remove a parent and its descendants in the same
+        // commit, so releasing either one before this pass would leave stale
+        // HostNodeIds in the remaining nodes' ancestry.
+        for (source, id) in &removed {
+            let old_bounds = self.node(*id).paint_bounds;
+            if let Some(owner) = self.scene_owner_source(*id) {
                 dirty_scene_sources.insert(owner);
             }
             mutations.push(HostMutation::RemoveNode {
-                id,
-                source,
+                id: *id,
+                source: source.clone(),
                 old_bounds,
             });
+        }
+        for (_, id) in removed {
             self.remove(id);
         }
 
@@ -785,6 +791,41 @@ mod tests {
             mutation => panic!("unexpected mutation: {mutation:?}"),
         };
         assert_ne!(first_id, second_id);
+    }
+
+    #[test]
+    fn removing_a_parent_and_its_child_in_one_commit_keeps_the_old_graph_readable() {
+        for iteration in 0..32 {
+            let mut host = HostRuntime::new();
+            let interaction = UiInteractionState::default();
+            let viewport = UiRect::new(0, 0, 100, 100);
+            let parent = UiId::owned(format!("parent-{iteration}"));
+            let child = UiId::owned(format!("child-{iteration}"));
+            let mut tree = HostTree::new();
+            tree.push(UiNode::new(parent.clone(), UiNodeKind::Clip, viewport).clip(viewport, 0, 0));
+            tree.push(
+                UiNode::new(child, UiNodeKind::Panel, viewport)
+                    .parent(parent)
+                    .style(VisualStyle::filled(crate::core::Color::WHITE)),
+            );
+            host.commit(&tree, &interaction, viewport, &mut InvalidationSet::new());
+
+            let commit = host.commit(
+                &HostTree::new(),
+                &interaction,
+                viewport,
+                &mut InvalidationSet::new(),
+            );
+
+            assert_eq!(
+                commit
+                    .mutations
+                    .iter()
+                    .filter(|mutation| matches!(mutation, HostMutation::RemoveNode { .. }))
+                    .count(),
+                2
+            );
+        }
     }
 
     #[test]
