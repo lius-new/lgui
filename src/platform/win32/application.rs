@@ -13,10 +13,16 @@ use windows::{
     core::{Error, Result, HRESULT, PCWSTR},
     Win32::{
         Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
-        Graphics::Gdi::{
-            BeginPaint, EndPaint, GetDC, GetMonitorInfoW, InvalidateRect, MonitorFromWindow,
-            ReleaseDC, ScreenToClient, UpdateWindow, HDC, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-            PAINTSTRUCT,
+        Graphics::{
+            Dwm::{
+                DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+                DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
+            },
+            Gdi::{
+                BeginPaint, EndPaint, GetDC, GetMonitorInfoW, InvalidateRect, MonitorFromWindow,
+                ReleaseDC, ScreenToClient, UpdateWindow, HDC, MONITORINFO,
+                MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
+            },
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -160,6 +166,7 @@ struct WindowState {
     maximum_size: Option<Size>,
     resizable: bool,
     native_titlebar: bool,
+    rounded_corners: bool,
     titlebar_drag_height: Option<i32>,
     drag_exclusion: Option<WindowDragExclusion>,
     windowed_style: WINDOW_STYLE,
@@ -514,6 +521,10 @@ fn create_window(
     if !options.native_titlebar {
         set_runtime_window_style(hwnd, style);
     }
+    set_window_corner_preference(
+        hwnd,
+        options.rounded_corners && initial_mode == WindowMode::Windowed,
+    );
     let renderer = renderer_factory.create(hwnd)?;
     let mut session = UiSession::new();
     if let Some(executor) = context.task_spawner() {
@@ -534,6 +545,7 @@ fn create_window(
                 maximum_size: options.maximum_size,
                 resizable: options.resizable,
                 native_titlebar: options.native_titlebar,
+                rounded_corners: options.rounded_corners,
                 titlebar_drag_height: options.titlebar_drag_height,
                 drag_exclusion: options.drag_exclusion,
                 windowed_style: style,
@@ -609,6 +621,28 @@ fn set_runtime_window_style(hwnd: HWND, style: WINDOW_STYLE) {
     }
 }
 
+fn set_window_corner_preference(hwnd: HWND, rounded: bool) {
+    let preference = window_corner_preference(rounded);
+    unsafe {
+        // Windows versions before Windows 11 do not expose this attribute. The request is a
+        // progressive enhancement, so an unsupported DWM attribute must not block creation.
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&preference as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
+            size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        );
+    }
+}
+
+fn window_corner_preference(rounded: bool) -> DWM_WINDOW_CORNER_PREFERENCE {
+    if rounded {
+        DWMWCP_ROUND
+    } else {
+        DWMWCP_DONOTROUND
+    }
+}
+
 fn set_window_mode(hwnd: HWND, mode: WindowMode) {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
@@ -620,6 +654,7 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
         }
         match mode {
             WindowMode::Fullscreen => {
+                set_window_corner_preference(hwnd, false);
                 let mut placement = WINDOWPLACEMENT {
                     length: size_of::<WINDOWPLACEMENT>() as u32,
                     ..Default::default()
@@ -647,26 +682,29 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
                     }
                 }
             }
-            WindowMode::Windowed => unsafe {
-                set_runtime_window_style(hwnd, window.windowed_style);
-                if let Some(placement) = window.windowed_placement.take() {
-                    let _ = SetWindowPlacement(hwnd, &placement);
+            WindowMode::Windowed => {
+                set_window_corner_preference(hwnd, window.rounded_corners);
+                unsafe {
+                    set_runtime_window_style(hwnd, window.windowed_style);
+                    if let Some(placement) = window.windowed_placement.take() {
+                        let _ = SetWindowPlacement(hwnd, &placement);
+                    }
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_FRAMECHANGED
+                            | SWP_NOACTIVATE
+                            | SWP_NOOWNERZORDER
+                            | SWP_NOZORDER
+                            | windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE
+                            | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+                    );
                 }
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_FRAMECHANGED
-                        | SWP_NOACTIVATE
-                        | SWP_NOOWNERZORDER
-                        | SWP_NOZORDER
-                        | windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE
-                        | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
-                );
-            },
+            }
         }
         window.mode = mode;
     });
@@ -1449,9 +1487,16 @@ mod tests {
     use windows::Win32::Foundation::RECT;
 
     use super::{
-        resize_border_hit, window_style, OwnerVisibility, Point, WindowOptions, HTBOTTOMRIGHT,
-        HTCLIENT, HTTOPLEFT, WS_CAPTION, WS_POPUP, WS_THICKFRAME,
+        resize_border_hit, window_corner_preference, window_style, OwnerVisibility, Point,
+        WindowOptions, DWMWCP_DONOTROUND, DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT,
+        WS_CAPTION, WS_POPUP, WS_THICKFRAME,
     };
+
+    #[test]
+    fn corner_preferences_map_to_explicit_dwm_requests() {
+        assert_eq!(window_corner_preference(true), DWMWCP_ROUND);
+        assert_eq!(window_corner_preference(false), DWMWCP_DONOTROUND);
+    }
 
     #[test]
     fn custom_frames_remove_the_caption_and_keep_only_requested_resize_capability() {

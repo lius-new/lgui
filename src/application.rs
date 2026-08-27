@@ -606,6 +606,8 @@ pub struct WindowOptions {
     pub native_titlebar: bool,
     pub position: WindowPosition,
     pub transparent: bool,
+    /// Requests the platform's standard rounded top-level window corners.
+    pub rounded_corners: bool,
     pub corner_radius: i32,
     pub topmost: bool,
     pub hide_on_deactivate: bool,
@@ -635,6 +637,7 @@ impl PartialEq for WindowOptions {
             && self.native_titlebar == other.native_titlebar
             && self.position == other.position
             && self.transparent == other.transparent
+            && self.rounded_corners == other.rounded_corners
             && self.corner_radius == other.corner_radius
             && self.topmost == other.topmost
             && self.hide_on_deactivate == other.hide_on_deactivate
@@ -727,6 +730,11 @@ impl WindowOptions {
         self
     }
 
+    pub fn rounded_corners(mut self, enabled: bool) -> Self {
+        self.rounded_corners = enabled;
+        self
+    }
+
     pub fn corner_radius(mut self, radius: i32) -> Self {
         self.corner_radius = radius.max(0);
         self
@@ -804,6 +812,7 @@ impl Default for WindowOptions {
             native_titlebar: true,
             position: WindowPosition::Centered,
             transparent: false,
+            rounded_corners: true,
             corner_radius: 0,
             topmost: false,
             hide_on_deactivate: false,
@@ -1010,6 +1019,17 @@ mod tests {
             !WindowOptions::new("custom")
                 .native_titlebar(false)
                 .native_titlebar
+        );
+    }
+
+    #[test]
+    fn rounded_corners_are_enabled_by_default_and_can_be_disabled() {
+        assert!(WindowOptions::default().rounded_corners);
+        assert!(WindowOptions::new("default").rounded_corners);
+        assert!(
+            !WindowOptions::new("square")
+                .rounded_corners(false)
+                .rounded_corners
         );
     }
 
