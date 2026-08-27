@@ -18,17 +18,16 @@ use windows::{
             NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
         },
         UI::WindowsAndMessaging::{
-            CreateIconFromResourceEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-            DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW,
-            InsertMenuItemW, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage,
-            RegisterClassExW, RegisterWindowMessageW, SetForegroundWindow, SetWindowPos,
-            ShowWindowAsync, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
-            CW_USEDEFAULT, HICON, HWND_TOPMOST, IDC_ARROW, IDI_APPLICATION, MENUITEMINFOW,
-            MFS_CHECKED, MFS_DISABLED, MFS_ENABLED, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP,
-            MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, SM_CXSMICON, SWP_NOACTIVATE,
-            SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, TPM_NONOTIFY, TPM_RETURNCMD,
-            TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-            WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+            CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
+            DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, InsertMenuItemW,
+            LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
+            RegisterWindowMessageW, SetForegroundWindow, SetWindowPos, ShowWindowAsync,
+            TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HICON,
+            HWND_TOPMOST, IDC_ARROW, IDI_APPLICATION, MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED,
+            MFS_ENABLED, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE,
+            MIIM_STRING, MSG, SM_CXSMICON, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
+            SW_SHOW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_DESTROY,
+            WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
         },
     },
 };
@@ -37,6 +36,8 @@ use crate::{
     application::{ApplicationContext, TrayAction, TrayRegistration},
     platform::TrayMenuEntry,
 };
+
+use super::ico::create_icon_from_ico_bytes;
 
 #[cfg(feature = "svg")]
 use crate::core::{Color, IconStyle, UiRect};
@@ -120,20 +121,7 @@ impl Win32TrayIcon {
         size: i32,
         tooltip: impl Into<String>,
     ) -> io::Result<Self> {
-        let (offset, length) = pick_icon_image(bytes, size.max(1) as u32)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid ICO data"))?;
-        let image = &bytes[offset..offset + length];
-        let icon = unsafe {
-            CreateIconFromResourceEx(
-                image,
-                true,
-                0x0003_0000,
-                size.max(1),
-                size.max(1),
-                Default::default(),
-            )
-        }
-        .map_err(|error| io::Error::other(error.to_string()))?;
+        let icon = create_icon_from_ico_bytes(bytes, size, size)?;
         let mut tray = Self::new(hwnd, icon, tooltip);
         tray.owns_icon = true;
         Ok(tray)
@@ -674,59 +662,9 @@ fn copy_wide(buffer: &mut [u16], value: &str) {
     }
 }
 
-fn pick_icon_image(bytes: &[u8], desired_size: u32) -> Option<(usize, usize)> {
-    if bytes.len() < 6 {
-        return None;
-    }
-
-    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
-    if bytes.len() < 6 + count * 16 {
-        return None;
-    }
-
-    let mut best: Option<(u32, u32, usize, usize)> = None;
-    for index in 0..count {
-        let entry = 6 + index * 16;
-        let width = if bytes[entry] == 0 {
-            256
-        } else {
-            bytes[entry] as u32
-        };
-        let height = if bytes[entry + 1] == 0 {
-            256
-        } else {
-            bytes[entry + 1] as u32
-        };
-        let edge = width.max(height);
-        let length = u32::from_le_bytes([
-            bytes[entry + 8],
-            bytes[entry + 9],
-            bytes[entry + 10],
-            bytes[entry + 11],
-        ]) as usize;
-        let offset = u32::from_le_bytes([
-            bytes[entry + 12],
-            bytes[entry + 13],
-            bytes[entry + 14],
-            bytes[entry + 15],
-        ]) as usize;
-        if offset.checked_add(length)? > bytes.len() {
-            continue;
-        }
-
-        let score = edge.abs_diff(desired_size);
-        match best {
-            Some((best_score, best_edge, _, _))
-                if score > best_score || (score == best_score && edge <= best_edge) => {}
-            _ => best = Some((score, edge, offset, length)),
-        }
-    }
-    best.map(|(_, _, offset, length)| (offset, length))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{copy_wide, is_activation_message, pick_icon_image, WM_LBUTTONUP};
+    use super::{copy_wide, is_activation_message, WM_LBUTTONUP};
 
     #[test]
     fn single_left_click_activates_the_tray_icon() {
@@ -741,21 +679,5 @@ mod tests {
         let mut buffer = [9_u16; 4];
         copy_wide(&mut buffer, "ABCDE");
         assert_eq!(buffer, ['A' as u16, 'B' as u16, 'C' as u16, 0]);
-    }
-
-    #[test]
-    fn icon_directory_selects_the_closest_larger_image_on_a_tie() {
-        let mut bytes = vec![0_u8; 6 + 2 * 16 + 8];
-        bytes[4..6].copy_from_slice(&2_u16.to_le_bytes());
-        bytes[6] = 16;
-        bytes[7] = 16;
-        bytes[14..18].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[18..22].copy_from_slice(&(38_u32).to_le_bytes());
-        bytes[22] = 32;
-        bytes[23] = 32;
-        bytes[30..34].copy_from_slice(&4_u32.to_le_bytes());
-        bytes[34..38].copy_from_slice(&(42_u32).to_le_bytes());
-
-        assert_eq!(pick_icon_image(&bytes, 24), Some((42, 4)));
     }
 }

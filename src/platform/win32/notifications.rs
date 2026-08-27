@@ -15,15 +15,19 @@ pub struct Win32NotificationService {
 
 impl Win32NotificationService {
     pub fn new(app_user_model_id: impl Into<String>) -> io::Result<Self> {
-        let app_user_model_id = app_user_model_id.into();
-        unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(&app_user_model_id)) }
-            .map_err(windows_error)?;
-        Ok(Self { app_user_model_id })
+        Ok(Self {
+            app_user_model_id: app_user_model_id.into(),
+        })
     }
 
     pub fn show(&self, title: &str, body: &str) -> io::Result<()> {
         <Self as NotificationService>::show(self, &Notification::new(title, body))
     }
+}
+
+pub(super) fn initialize_process_identity(app_user_model_id: &str) -> io::Result<()> {
+    unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(app_user_model_id)) }
+        .map_err(windows_error)
 }
 
 impl NotificationService for Win32NotificationService {

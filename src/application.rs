@@ -711,6 +711,8 @@ pub struct WindowOptions {
     pub id: WindowId,
     pub owner: Option<WindowId>,
     pub class_name: Option<String>,
+    /// ICO data used by the registered window class and every window created from it.
+    pub icon_bytes: Option<&'static [u8]>,
     pub title: String,
     pub visible: bool,
     pub size: Size,
@@ -742,6 +744,7 @@ impl PartialEq for WindowOptions {
         self.id == other.id
             && self.owner == other.owner
             && self.class_name == other.class_name
+            && self.icon_bytes == other.icon_bytes
             && self.title == other.title
             && self.visible == other.visible
             && self.size == other.size
@@ -806,6 +809,11 @@ impl WindowOptions {
 
     pub fn class_name(mut self, class_name: impl Into<String>) -> Self {
         self.class_name = Some(class_name.into());
+        self
+    }
+
+    pub fn icon_bytes(mut self, bytes: &'static [u8]) -> Self {
+        self.icon_bytes = Some(bytes);
         self
     }
 
@@ -917,6 +925,7 @@ impl Default for WindowOptions {
             id: WindowId::new("main"),
             owner: None,
             class_name: None,
+            icon_bytes: None,
             title: "lgui".to_owned(),
             visible: true,
             size: Size::new(1024, 720),
@@ -1206,6 +1215,17 @@ mod tests {
     fn windows_are_visible_by_default_and_can_start_hidden() {
         assert!(WindowOptions::default().visible);
         assert!(!WindowOptions::new("background").visible(false).visible);
+    }
+
+    #[test]
+    fn window_icon_bytes_are_optional_and_configurable() {
+        static ICON: &[u8] = b"icon";
+
+        assert_eq!(WindowOptions::default().icon_bytes, None);
+        assert_eq!(
+            WindowOptions::new("branded").icon_bytes(ICON).icon_bytes,
+            Some(ICON)
+        );
     }
 
     #[test]

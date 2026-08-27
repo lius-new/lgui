@@ -22,6 +22,7 @@ mod gdi;
 mod gdiplus;
 #[cfg(feature = "multi-window")]
 mod hidden_window;
+mod ico;
 #[cfg(feature = "images")]
 mod image_cache;
 #[cfg(feature = "notifications")]

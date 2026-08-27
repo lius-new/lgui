@@ -38,23 +38,25 @@ use windows::{
                 KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
-                GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
-                IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, PostQuitMessage,
-                RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW,
-                SetWindowPlacement, SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW,
-                CS_VREDRAW, CW_USEDEFAULT, GWL_STYLE, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT,
-                HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW,
-                LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED, SM_CXPADDEDBORDER, SM_CXSIZEFRAME,
-                SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
-                SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT, WINDOW_EX_STYLE, WINDOW_STYLE,
-                WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE,
-                WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_IME_COMPOSITION,
-                WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN,
-                WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE, WM_NCHITTEST,
-                WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-                WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
-                WS_THICKFRAME, WS_VISIBLE,
+                CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, DispatchMessageW,
+                GetClassLongPtrW, GetClientRect, GetCursorPos, GetMessageW, GetSystemMetrics,
+                GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, IsWindowVisible, IsZoomed,
+                LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassExW,
+                SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
+                ShowWindow, TranslateMessage, UnregisterClassW, CS_HREDRAW, CS_VREDRAW,
+                CW_USEDEFAULT, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, HICON, HTBOTTOM, HTBOTTOMLEFT,
+                HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+                ICON_BIG, ICON_SMALL, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED,
+                SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SM_CYICON,
+                SM_CYSIZEFRAME, SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
+                SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT, WINDOW_EX_STYLE,
+                WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
+                WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
+                WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE,
+                WM_NCHITTEST, WM_PAINT, WM_SETICON, WM_SIZE, WNDCLASSEXW, WS_CAPTION,
+                WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+                WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
             },
         },
     },
@@ -79,6 +81,7 @@ use crate::{
     session::UiSession,
 };
 
+use super::ico::create_icon_from_ico_bytes;
 #[cfg(feature = "renderer-gdi")]
 use super::GdiRenderer;
 #[cfg(feature = "tray")]
@@ -227,6 +230,84 @@ pub struct Win32Application {
     renderer_factory: Arc<dyn Win32RendererFactory>,
 }
 
+struct OwnedIcon(HICON);
+
+impl OwnedIcon {
+    fn from_ico_bytes(bytes: &[u8], width: i32, height: i32) -> Result<Self> {
+        create_icon_from_ico_bytes(bytes, width, height)
+            .map(Self)
+            .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))
+    }
+
+    const fn handle(&self) -> HICON {
+        self.0
+    }
+}
+
+impl Drop for OwnedIcon {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyIcon(self.0);
+        }
+    }
+}
+
+#[derive(Default)]
+struct WindowClassIcons {
+    large: Option<OwnedIcon>,
+    small: Option<OwnedIcon>,
+}
+
+impl WindowClassIcons {
+    fn from_ico_bytes(bytes: Option<&[u8]>) -> Result<Self> {
+        let Some(bytes) = bytes else {
+            return Ok(Self::default());
+        };
+        let large =
+            OwnedIcon::from_ico_bytes(bytes, unsafe { GetSystemMetrics(SM_CXICON) }, unsafe {
+                GetSystemMetrics(SM_CYICON)
+            })?;
+        let small =
+            OwnedIcon::from_ico_bytes(bytes, unsafe { GetSystemMetrics(SM_CXSMICON) }, unsafe {
+                GetSystemMetrics(SM_CYSMICON)
+            })?;
+        Ok(Self {
+            large: Some(large),
+            small: Some(small),
+        })
+    }
+
+    fn large(&self) -> HICON {
+        self.large
+            .as_ref()
+            .map_or_else(HICON::default, OwnedIcon::handle)
+    }
+
+    fn small(&self) -> HICON {
+        self.small
+            .as_ref()
+            .map_or_else(HICON::default, OwnedIcon::handle)
+    }
+}
+
+struct RegisteredWindowClass {
+    instance: HINSTANCE,
+    class_name: Vec<u16>,
+    icons: WindowClassIcons,
+}
+
+impl Drop for RegisteredWindowClass {
+    fn drop(&mut self) {
+        if unsafe { UnregisterClassW(PCWSTR(self.class_name.as_ptr()), Some(self.instance)) }
+            .is_err()
+        {
+            // A surviving class/window can still dereference these handles. Keep them valid until
+            // process exit rather than destroying resources that Windows continues to own.
+            std::mem::forget(std::mem::take(&mut self.icons));
+        }
+    }
+}
+
 impl Win32Application {
     pub fn with_renderer(factory: impl Win32RendererFactory) -> Self {
         Self {
@@ -335,21 +416,36 @@ impl ApplicationBackend for Win32Application {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
         set_scale_preference(options.scale_preference);
+        #[cfg(feature = "notifications")]
+        let notification_registration = context.try_resource::<NotificationRegistration>();
+        #[cfg(feature = "notifications")]
+        if let Some(registration) = notification_registration.as_ref() {
+            super::notifications::initialize_process_identity(&registration.identity)
+                .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
+        }
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None) }?.0);
         let class_name = wide(options.class_name.as_deref().unwrap_or(WINDOW_CLASS));
         let cursor = unsafe { LoadCursorW(None, IDC_ARROW) }?;
+        let class_icons = WindowClassIcons::from_ico_bytes(options.icon_bytes)?;
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
+            hIcon: class_icons.large(),
             hCursor: cursor,
+            hIconSm: class_icons.small(),
             lpszClassName: PCWSTR(class_name.as_ptr()),
             ..Default::default()
         };
         if unsafe { RegisterClassExW(&class) } == 0 {
             return Err(Error::from_thread());
         }
+        let _window_class = RegisteredWindowClass {
+            instance,
+            class_name: class_name.clone(),
+            icons: class_icons,
+        };
 
         let dispatcher = Win32Dispatcher::new();
         let factory = Arc::clone(&self.renderer_factory);
@@ -366,7 +462,7 @@ impl ApplicationBackend for Win32Application {
         dispatcher.attach(hwnd);
         context.resources().provide(dispatcher.application_handle());
         #[cfg(feature = "notifications")]
-        if let Some(registration) = context.try_resource::<NotificationRegistration>() {
+        if let Some(registration) = notification_registration {
             let service = super::Win32NotificationService::new(&registration.identity)
                 .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
             context
@@ -609,6 +705,7 @@ fn create_window(
             None,
         )
     }?;
+    install_window_icons(hwnd);
     if !options.native_titlebar {
         set_runtime_window_style(hwnd, style);
     }
@@ -688,6 +785,22 @@ fn create_window(
         render_hidden_window_once(hwnd);
     }
     Ok(hwnd)
+}
+
+fn install_window_icons(hwnd: HWND) {
+    for (kind, class_index) in [(ICON_BIG, GCLP_HICON), (ICON_SMALL, GCLP_HICONSM)] {
+        let icon = unsafe { GetClassLongPtrW(hwnd, class_index) };
+        if icon != 0 {
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(kind as usize)),
+                    Some(LPARAM(icon as isize)),
+                );
+            }
+        }
+    }
 }
 
 fn render_hidden_window_once(hwnd: HWND) {
