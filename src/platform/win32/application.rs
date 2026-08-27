@@ -746,71 +746,117 @@ fn window_corner_preference(rounded: bool) -> DWM_WINDOW_CORNER_PREFERENCE {
     }
 }
 
+enum WindowModeTransition {
+    Fullscreen,
+    Windowed {
+        rounded_corners: bool,
+        style: WINDOW_STYLE,
+        placement: Option<WINDOWPLACEMENT>,
+    },
+}
+
 fn set_window_mode(hwnd: HWND, mode: WindowMode) {
-    STATE.with(|state| {
-        let mut windows = state.borrow_mut();
-        let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
-            return;
+    let current_mode = STATE.with(|state| {
+        state
+            .borrow()
+            .get(&(hwnd.0 as isize))
+            .map(|window| window.mode)
+    });
+    if current_mode.is_none() || current_mode == Some(mode) {
+        return;
+    }
+
+    // Query native state before borrowing STATE because Win32 calls may synchronously re-enter
+    // window_proc on this thread.
+    let placement = if mode == WindowMode::Fullscreen {
+        let mut placement = WINDOWPLACEMENT {
+            length: size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
         };
+        unsafe { GetWindowPlacement(hwnd, &mut placement) }
+            .is_ok()
+            .then_some(placement)
+    } else {
+        None
+    };
+
+    // Commit the Rust-side transition first. Native calls stay below this closure so any window
+    // messages they dispatch can borrow STATE normally.
+    let transition = STATE.with(|state| {
+        let mut windows = state.borrow_mut();
+        let window = windows.get_mut(&(hwnd.0 as isize))?;
         if window.mode == mode {
-            return;
+            return None;
         }
-        match mode {
+        let transition = match mode {
             WindowMode::Fullscreen => {
-                set_window_corner_preference(hwnd, false);
-                let mut placement = WINDOWPLACEMENT {
-                    length: size_of::<WINDOWPLACEMENT>() as u32,
-                    ..Default::default()
-                };
-                if unsafe { GetWindowPlacement(hwnd, &mut placement) }.is_ok() {
-                    window.windowed_placement = Some(placement);
-                }
-                let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-                let mut monitor_info = MONITORINFO {
-                    cbSize: size_of::<MONITORINFO>() as u32,
-                    ..Default::default()
-                };
-                if unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
-                    unsafe {
-                        set_runtime_window_style(hwnd, WS_POPUP);
-                        let _ = SetWindowPos(
-                            hwnd,
-                            None,
-                            monitor_info.rcMonitor.left,
-                            monitor_info.rcMonitor.top,
-                            monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
-                            monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
-                            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER,
-                        );
-                    }
-                }
+                window.windowed_placement = placement;
+                WindowModeTransition::Fullscreen
             }
-            WindowMode::Windowed => {
-                set_window_corner_preference(hwnd, window.rounded_corners);
+            WindowMode::Windowed => WindowModeTransition::Windowed {
+                rounded_corners: window.rounded_corners,
+                style: window.windowed_style,
+                placement: window.windowed_placement.take(),
+            },
+        };
+        window.mode = mode;
+        Some(transition)
+    });
+    let Some(transition) = transition else {
+        return;
+    };
+
+    match transition {
+        WindowModeTransition::Fullscreen => {
+            set_window_corner_preference(hwnd, false);
+            let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+            let mut monitor_info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
                 unsafe {
-                    set_runtime_window_style(hwnd, window.windowed_style);
-                    if let Some(placement) = window.windowed_placement.take() {
-                        let _ = SetWindowPlacement(hwnd, &placement);
-                    }
+                    set_runtime_window_style(hwnd, WS_POPUP);
                     let _ = SetWindowPos(
                         hwnd,
                         None,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_FRAMECHANGED
-                            | SWP_NOACTIVATE
-                            | SWP_NOOWNERZORDER
-                            | SWP_NOZORDER
-                            | windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE
-                            | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+                        monitor_info.rcMonitor.left,
+                        monitor_info.rcMonitor.top,
+                        monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
+                        monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
+                        SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER,
                     );
                 }
             }
         }
-        window.mode = mode;
-    });
+        WindowModeTransition::Windowed {
+            rounded_corners,
+            style,
+            placement,
+        } => {
+            set_window_corner_preference(hwnd, rounded_corners);
+            unsafe {
+                set_runtime_window_style(hwnd, style);
+                if let Some(placement) = placement {
+                    let _ = SetWindowPlacement(hwnd, &placement);
+                }
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED
+                        | SWP_NOACTIVATE
+                        | SWP_NOOWNERZORDER
+                        | SWP_NOZORDER
+                        | windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE
+                        | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+                );
+            }
+        }
+    }
 }
 
 fn hwnd_for_id(id: &WindowId) -> Option<HWND> {
