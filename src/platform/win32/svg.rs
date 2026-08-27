@@ -140,6 +140,10 @@ thread_local! {
     static SVG_CACHE: RefCell<HashMap<SvgCacheKey, SvgBitmap>> = RefCell::new(HashMap::new());
 }
 
+pub(crate) fn clear_svg_bitmap_cache() {
+    SVG_CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
 pub fn draw_svg_icon(hdc: HDC, key: &'static str, rect: UiRect, style: IconStyle) {
     if let Some(bitmap) = rasterize_svg_icon_bgra(key, rect, style) {
         draw_bitmap(hdc, rect, &bitmap);

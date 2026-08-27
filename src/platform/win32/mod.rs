@@ -2,6 +2,8 @@
 mod application;
 #[cfg(feature = "multi-window")]
 mod backbuffer;
+#[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d"))]
+mod background;
 #[cfg(feature = "clipboard")]
 mod clipboard;
 #[cfg(feature = "renderer-d2d")]

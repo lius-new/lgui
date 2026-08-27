@@ -72,6 +72,7 @@ pub use layout::{
 pub use node::{EventPolicy, InteractionRole, UiImageSource, UiNode, UiNodeKind};
 pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
+pub(crate) use render::clear_scroll_raster_command_cache;
 pub use render::{
     commands_for_phase, compile_scene, compile_scene_root, scene_root_ids,
     scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene, ScenePrimitive,

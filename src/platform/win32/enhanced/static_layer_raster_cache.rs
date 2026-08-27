@@ -9,6 +9,13 @@ use crate::core::{StaticLayerSpec, UiId};
 static RASTER_CACHE: LazyLock<Mutex<HashMap<String, StaticLayerRaster>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+pub fn clear() {
+    RASTER_CACHE
+        .lock()
+        .expect("static layer raster cache poisoned")
+        .clear();
+}
+
 #[derive(Clone)]
 pub struct StaticLayerRaster {
     pub width: i32,

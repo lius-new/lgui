@@ -598,6 +598,7 @@ pub struct WindowOptions {
     pub owner: Option<WindowId>,
     pub class_name: Option<String>,
     pub title: String,
+    pub visible: bool,
     pub size: Size,
     pub minimum_size: Option<Size>,
     pub maximum_size: Option<Size>,
@@ -608,7 +609,7 @@ pub struct WindowOptions {
     pub corner_radius: i32,
     pub topmost: bool,
     pub hide_on_deactivate: bool,
-    pub snapshot_on_background: bool,
+    pub background_memory_optimization: bool,
     /// COMPATIBILITY: remove after consumers migrate to `Element::window_drag_region`.
     pub titlebar_drag_height: Option<i32>,
     /// COMPATIBILITY: remove after consumers migrate to `Element::window_drag_region`.
@@ -626,6 +627,7 @@ impl PartialEq for WindowOptions {
             && self.owner == other.owner
             && self.class_name == other.class_name
             && self.title == other.title
+            && self.visible == other.visible
             && self.size == other.size
             && self.minimum_size == other.minimum_size
             && self.maximum_size == other.maximum_size
@@ -636,7 +638,7 @@ impl PartialEq for WindowOptions {
             && self.corner_radius == other.corner_radius
             && self.topmost == other.topmost
             && self.hide_on_deactivate == other.hide_on_deactivate
-            && self.snapshot_on_background == other.snapshot_on_background
+            && self.background_memory_optimization == other.background_memory_optimization
             && self.titlebar_drag_height == other.titlebar_drag_height
             && drag_exclusions_equal(self.drag_exclusion, other.drag_exclusion)
             && self.scale_reference_size == other.scale_reference_size
@@ -672,6 +674,11 @@ impl WindowOptions {
 
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into();
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
         self
     }
 
@@ -735,8 +742,11 @@ impl WindowOptions {
         self
     }
 
-    pub fn snapshot_on_background(mut self, enabled: bool) -> Self {
-        self.snapshot_on_background = enabled;
+    /// Releases reconstructible render state while hidden. When all top-level windows are
+    /// hidden, shared caches and the process working set are also trimmed. Component state,
+    /// effects and background tasks remain alive.
+    pub fn background_memory_optimization(mut self, enabled: bool) -> Self {
+        self.background_memory_optimization = enabled;
         self
     }
 
@@ -786,6 +796,7 @@ impl Default for WindowOptions {
             owner: None,
             class_name: None,
             title: "lgui".to_owned(),
+            visible: true,
             size: Size::new(1024, 720),
             minimum_size: None,
             maximum_size: None,
@@ -796,7 +807,7 @@ impl Default for WindowOptions {
             corner_radius: 0,
             topmost: false,
             hide_on_deactivate: false,
-            snapshot_on_background: false,
+            background_memory_optimization: false,
             titlebar_drag_height: None,
             drag_exclusion: None,
             scale_reference_size: None,
@@ -1003,6 +1014,12 @@ mod tests {
     }
 
     #[test]
+    fn windows_are_visible_by_default_and_can_start_hidden() {
+        assert!(WindowOptions::default().visible);
+        assert!(!WindowOptions::new("background").visible(false).visible);
+    }
+
+    #[test]
     fn window_size_constraints_are_optional_and_configurable() {
         let defaults = WindowOptions::new("default");
         assert_eq!(defaults.minimum_size, None);
@@ -1054,13 +1071,13 @@ mod tests {
             .position(WindowPosition::AdjacentToOwner { gap: 1 })
             .transparent(true)
             .corner_radius(8)
-            .snapshot_on_background(true);
+            .background_memory_optimization(true);
 
         assert_eq!(options.id.as_str(), "friends");
         assert_eq!(options.owner.as_ref().map(WindowId::as_str), Some("main"));
         assert_eq!(options.position, WindowPosition::AdjacentToOwner { gap: 1 });
         assert!(options.transparent);
-        assert!(options.snapshot_on_background);
+        assert!(options.background_memory_optimization);
     }
 
     #[test]

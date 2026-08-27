@@ -1,12 +1,22 @@
-use std::{cell::RefCell, collections::HashMap, mem::size_of, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    mem::size_of,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use windows::{
     core::{Error, Result, HRESULT, PCWSTR},
     Win32::{
         Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{
-            BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MonitorFromWindow,
-            ScreenToClient, UpdateWindow, HDC, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
+            BeginPaint, EndPaint, GetDC, GetMonitorInfoW, InvalidateRect, MonitorFromWindow,
+            ReleaseDC, ScreenToClient, UpdateWindow, HDC, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+            PAINTSTRUCT,
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -70,6 +80,8 @@ use super::Win32TrayHost;
 use super::{dispatcher::WM_LGUI_DISPATCH, set_scale_preference, DpiContext, Win32Dispatcher};
 
 const WINDOW_CLASS: &str = "LguiApplicationWindow";
+const BACKGROUND_RETRIM_DELAY: Duration = Duration::from_secs(3);
+static BACKGROUND_TRIM_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     static STATE: RefCell<HashMap<isize, WindowState>> = RefCell::new(HashMap::new());
@@ -141,7 +153,8 @@ struct WindowState {
     view: AppView,
     context: ApplicationContext,
     session: UiSession,
-    renderer: Box<dyn Win32Renderer>,
+    renderer: Option<Box<dyn Win32Renderer>>,
+    renderer_factory: Arc<dyn Win32RendererFactory>,
     logical_size: Size,
     minimum_size: Option<Size>,
     maximum_size: Option<Size>,
@@ -155,6 +168,8 @@ struct WindowState {
     owner: Option<HWND>,
     position: WindowPosition,
     hide_on_deactivate: bool,
+    background_memory_optimization: bool,
+    rendering_suspended: bool,
     visibility: OwnerVisibility,
     close_policy: ClosePolicy,
     close_handler: Option<WindowCloseHandler>,
@@ -168,6 +183,7 @@ struct OwnerVisibility {
 }
 
 impl OwnerVisibility {
+    #[cfg(test)]
     fn visible() -> Self {
         Self {
             desired_visible: true,
@@ -297,15 +313,10 @@ impl ApplicationBackend for Win32Application {
                 Win32TrayHost::spawn(registration, context.clone(), hwnd, move |visible| {
                     let dispatcher = visibility_dispatcher.clone();
                     dispatcher.post(move || {
-                        let hwnd = HWND(main_hwnd as _);
-                        set_desired_visibility(hwnd, visible);
-                        unsafe {
-                            let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
-                        }
                         if visible {
-                            restore_owned_windows(hwnd);
+                            show_window(HWND(main_hwnd as _));
                         } else {
-                            hide_owned_windows(hwnd);
+                            hide_window(HWND(main_hwnd as _));
                         }
                     });
                 })
@@ -314,6 +325,7 @@ impl ApplicationBackend for Win32Application {
         } else {
             None
         };
+        suspend_application_if_backgrounded();
         debug_assert_eq!(hwnd_for_id(&main_id), Some(hwnd));
 
         let mut message = MSG::default();
@@ -343,11 +355,7 @@ fn execute_window_command(
     match command {
         WindowCommand::Show { options, view } => {
             if let Some(hwnd) = hwnd_for_id(&options.id) {
-                set_desired_visibility(hwnd, true);
-                unsafe {
-                    let _ = ShowWindow(hwnd, SW_SHOW);
-                }
-                restore_owned_windows(hwnd);
+                show_window(hwnd);
             } else if let Ok(hwnd) = create_window(
                 HINSTANCE(instance as _),
                 class_name,
@@ -364,17 +372,10 @@ fn execute_window_command(
         }
         WindowCommand::Toggle { options, view } => {
             if let Some(hwnd) = hwnd_for_id(&options.id) {
-                unsafe {
-                    let command = if IsWindowVisible(hwnd).as_bool() {
-                        set_desired_visibility(hwnd, false);
-                        hide_owned_windows(hwnd);
-                        windows::Win32::UI::WindowsAndMessaging::SW_HIDE
-                    } else {
-                        set_desired_visibility(hwnd, true);
-                        restore_owned_windows(hwnd);
-                        SW_SHOW
-                    };
-                    let _ = ShowWindow(hwnd, command);
+                if unsafe { IsWindowVisible(hwnd).as_bool() } {
+                    hide_window(hwnd);
+                } else {
+                    show_window(hwnd);
                 }
             } else {
                 let _ = create_window(
@@ -390,11 +391,7 @@ fn execute_window_command(
         }
         WindowCommand::Hide(id) => {
             if let Some(hwnd) = hwnd_for_id(&id) {
-                set_desired_visibility(hwnd, false);
-                hide_owned_windows(hwnd);
-                unsafe {
-                    let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
-                }
+                hide_window(hwnd);
             }
         }
         WindowCommand::Close(id) => {
@@ -472,6 +469,7 @@ fn create_window(
     dispatcher: Win32Dispatcher,
 ) -> Result<HWND> {
     let initial_mode = options.mode;
+    let initially_visible = options.visible;
     let title = wide(&options.title);
     let style = window_style(&options);
     let owner = if let Some(owner_id) = options.owner.as_ref() {
@@ -529,7 +527,8 @@ fn create_window(
                 view,
                 context,
                 session,
-                renderer,
+                renderer: Some(renderer),
+                renderer_factory,
                 logical_size: options.size,
                 minimum_size: options.minimum_size,
                 maximum_size: options.maximum_size,
@@ -543,7 +542,12 @@ fn create_window(
                 owner,
                 position: options.position,
                 hide_on_deactivate: options.hide_on_deactivate,
-                visibility: OwnerVisibility::visible(),
+                background_memory_optimization: options.background_memory_optimization,
+                rendering_suspended: false,
+                visibility: OwnerVisibility {
+                    desired_visible: initially_visible,
+                    hidden_for_owner: false,
+                },
                 close_policy: options.close_policy,
                 close_handler: options.close_handler,
                 dispatcher,
@@ -560,11 +564,26 @@ fn create_window(
     if initial_mode == WindowMode::Fullscreen {
         set_window_mode(hwnd, WindowMode::Fullscreen);
     }
-    unsafe {
-        let _ = ShowWindow(hwnd, SW_SHOW);
-        let _ = UpdateWindow(hwnd);
+    if initially_visible {
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = UpdateWindow(hwnd);
+        }
+    } else {
+        render_hidden_window_once(hwnd);
     }
     Ok(hwnd)
+}
+
+fn render_hidden_window_once(hwnd: HWND) {
+    let target = unsafe { GetDC(Some(hwnd)) };
+    if target.is_invalid() {
+        return;
+    }
+    render_window(hwnd, target);
+    unsafe {
+        let _ = ReleaseDC(Some(hwnd), target);
+    }
 }
 
 fn window_style(options: &WindowOptions) -> WINDOW_STYLE {
@@ -670,6 +689,110 @@ fn set_desired_visibility(hwnd: HWND, visible: bool) {
     });
 }
 
+fn hide_window(hwnd: HWND) {
+    set_desired_visibility(hwnd, false);
+    hide_owned_windows(hwnd);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_HIDE);
+    }
+    suspend_window_rendering(hwnd, false);
+    suspend_application_if_backgrounded();
+}
+
+fn show_window(hwnd: HWND) {
+    set_desired_visibility(hwnd, true);
+    if !application_is_backgrounded() {
+        BACKGROUND_TRIM_GENERATION.fetch_add(1, Ordering::AcqRel);
+    }
+    resume_window_rendering(hwnd);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOW);
+    }
+    restore_owned_windows(hwnd);
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        let _ = UpdateWindow(hwnd);
+    }
+}
+
+fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
+    STATE.with(|state| {
+        let mut windows = state.borrow_mut();
+        let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
+            return false;
+        };
+        if window.rendering_suspended || (!force && !window.background_memory_optimization) {
+            return false;
+        }
+        window.renderer.take();
+        window.session.suspend_rendering();
+        window.rendering_suspended = true;
+        true
+    })
+}
+
+fn resume_window_rendering(hwnd: HWND) {
+    STATE.with(|state| {
+        if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+            window.rendering_suspended = false;
+        }
+    });
+}
+
+fn suspend_application_if_backgrounded() {
+    if !application_is_backgrounded() {
+        return;
+    }
+
+    let windows = STATE.with(|state| state.borrow().keys().copied().collect::<Vec<_>>());
+    for raw in windows {
+        suspend_window_rendering(HWND(raw as _), true);
+    }
+    super::background::release_visual_caches();
+    super::background::trim_process_working_set();
+    schedule_background_retrim();
+}
+
+fn application_is_backgrounded() -> bool {
+    STATE.with(|state| {
+        let windows = state.borrow();
+        let mut has_opted_in_root = false;
+        for window in windows.values().filter(|window| window.owner.is_none()) {
+            if window.visibility.desired_visible {
+                return false;
+            }
+            has_opted_in_root |= window.background_memory_optimization;
+        }
+        has_opted_in_root
+    })
+}
+
+fn schedule_background_retrim() {
+    let generation = BACKGROUND_TRIM_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let dispatcher = STATE.with(|state| {
+        state
+            .borrow()
+            .values()
+            .find(|window| window.owner.is_none())
+            .map(|window| window.dispatcher.clone())
+    });
+    let Some(dispatcher) = dispatcher else {
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("lgui-background-trim".to_owned())
+        .spawn(move || {
+            std::thread::sleep(BACKGROUND_RETRIM_DELAY);
+            dispatcher.post(move || {
+                if BACKGROUND_TRIM_GENERATION.load(Ordering::Acquire) == generation
+                    && application_is_backgrounded()
+                {
+                    super::background::trim_process_working_set();
+                }
+            });
+        });
+}
+
 fn hide_owned_windows(owner: HWND) {
     let owned = STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -685,6 +808,7 @@ fn hide_owned_windows(owner: HWND) {
         unsafe {
             let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
         }
+        suspend_window_rendering(hwnd, false);
     }
 }
 
@@ -701,8 +825,10 @@ fn restore_owned_windows(owner: HWND) {
     });
     for hwnd in owned {
         position_window(hwnd);
+        resume_window_rendering(hwnd);
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = InvalidateRect(Some(hwnd), None, false);
         }
     }
 }
@@ -959,10 +1085,7 @@ extern "system" fn window_proc(
                         .is_some_and(|state| state.hide_on_deactivate)
                 });
                 if hide {
-                    set_desired_visibility(hwnd, false);
-                    unsafe {
-                        let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
-                    }
+                    hide_window(hwnd);
                 }
             }
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
@@ -1137,11 +1260,7 @@ fn request_window_close(hwnd: HWND) {
             let _ = DestroyWindow(hwnd);
         },
         ClosePolicy::Hide => {
-            set_desired_visibility(hwnd, false);
-            hide_owned_windows(hwnd);
-            unsafe {
-                let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
-            }
+            hide_window(hwnd);
         }
         ClosePolicy::Notify => {
             if let Some(handler) = handler {
@@ -1181,6 +1300,13 @@ fn drain_dispatcher(hwnd: HWND) {
 fn paint(hwnd: HWND) {
     let mut paint = PAINTSTRUCT::default();
     let target = unsafe { BeginPaint(hwnd, &mut paint) };
+    render_window(hwnd, target);
+    unsafe {
+        let _ = EndPaint(hwnd, &paint);
+    }
+}
+
+fn render_window(hwnd: HWND, target: HDC) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(state) = state.get_mut(&(hwnd.0 as isize)) else {
@@ -1197,6 +1323,9 @@ fn paint(hwnd: HWND) {
         let commit = state.session.render_view(&state.view, viewport, dpi.scale);
         let scene = commit.scene.project_to_physical(dpi.scale);
         let physical_viewport = UiRect::new(0, 0, physical.width, physical.height);
+        if state.renderer.is_none() {
+            state.renderer = state.renderer_factory.create(hwnd).ok();
+        }
         #[cfg(feature = "images")]
         let presented = {
             let resources = state
@@ -1204,19 +1333,22 @@ fn paint(hwnd: HWND) {
                 .try_resource::<crate::assets::RenderResources>()
                 .map(|resources| (*resources).clone())
                 .unwrap_or_default();
+            let Some(renderer) = state.renderer.as_mut() else {
+                return;
+            };
             crate::assets::with_render_resources(resources, || {
-                state.renderer.draw(hwnd, target, &scene, physical_viewport)
+                renderer.draw(hwnd, target, &scene, physical_viewport)
             })
         };
         #[cfg(not(feature = "images"))]
-        let presented = state.renderer.draw(hwnd, target, &scene, physical_viewport);
+        let presented = state
+            .renderer
+            .as_mut()
+            .is_some_and(|renderer| renderer.draw(hwnd, target, &scene, physical_viewport));
         if presented {
             state.session.runtime().run_effects();
         }
     });
-    unsafe {
-        let _ = EndPaint(hwnd, &paint);
-    }
 }
 
 fn dispatch_input(hwnd: HWND, input: InputEvent) {

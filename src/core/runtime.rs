@@ -154,6 +154,13 @@ impl UiRuntime {
         self.hook_states.clear();
     }
 
+    pub(crate) fn suspend_rendering(&mut self) {
+        self.clear_interaction_state();
+        self.previous_bounds.clear();
+        self.current_tree = HostTree::new();
+        self.dirty = DirtyTracker::default();
+    }
+
     pub fn handle_input(&mut self, tree: &HostTree, input: InputEvent) -> RuntimeOutput {
         self.reconcile_tree(tree);
         let focus_traversal = match &input {

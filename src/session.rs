@@ -149,6 +149,13 @@ impl UiSession {
         self.invalidations = InvalidationSet::new();
     }
 
+    /// Releases retained drawing data while preserving state, hooks, effects and tasks.
+    pub(crate) fn suspend_rendering(&mut self) {
+        self.runtime.suspend_rendering();
+        self.clear_host();
+        self.invalidate_all();
+    }
+
     pub fn reset(&mut self) {
         self.runtime.reset();
         self.clear_host();
@@ -181,6 +188,23 @@ mod tests {
 
         session.invalidate_all();
 
+        assert!(session.runtime().component_tree().is_dirty(root));
+    }
+
+    #[test]
+    fn suspending_rendering_releases_the_host_and_preserves_component_state() {
+        let mut session = UiSession::new();
+        let components = session.runtime().component_tree();
+        components.begin_render();
+        let root = components.root(UiId::owned("session-root"), "session-root");
+        components.begin_component_execution(root);
+        components.finish_component(root);
+        components.end_render();
+
+        session.suspend_rendering();
+
+        assert!(!session.has_tree());
+        assert!(session.runtime().component_tree().is_alive(root));
         assert!(session.runtime().component_tree().is_dirty(root));
     }
 }

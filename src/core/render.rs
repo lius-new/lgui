@@ -271,6 +271,12 @@ fn scroll_raster_command_cache() -> &'static Mutex<ScrollRasterCommandCache> {
     CACHE.get_or_init(|| Mutex::new(ScrollRasterCommandCache::default()))
 }
 
+pub(crate) fn clear_scroll_raster_command_cache() {
+    *scroll_raster_command_cache()
+        .lock()
+        .expect("scroll raster command cache poisoned") = ScrollRasterCommandCache::default();
+}
+
 impl Scene {
     pub fn new() -> Self {
         Self {
