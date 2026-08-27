@@ -87,3 +87,30 @@ fn win32_backend_has_no_application_dependencies() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn tray_host_owns_a_message_loop_outside_the_application_window_thread() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tray =
+        fs::read_to_string(root.join("src/platform/win32/tray.rs")).expect("read Win32 tray host");
+    for required in [
+        ".name(\"lgui-tray\".to_string())",
+        "run_tray_thread(",
+        "GetMessageW(&mut message",
+        "TrackPopupMenu(",
+    ] {
+        assert!(
+            tray.contains(required),
+            "independent tray host lost `{required}`"
+        );
+    }
+
+    let application = fs::read_to_string(root.join("src/platform/win32/application.rs"))
+        .expect("read Win32 application host");
+    for forbidden in ["handle_tray_message", "show_tray_menu", "TRAY_MESSAGE_ID"] {
+        assert!(
+            !application.contains(forbidden),
+            "application UI thread reclaimed tray responsibility through `{forbidden}`"
+        );
+    }
+}

@@ -30,7 +30,7 @@ use windows::{
                 HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP,
                 HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED,
                 SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CYSIZEFRAME, SWP_FRAMECHANGED,
-                SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_SHOW, WA_INACTIVE,
+                SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE,
                 WINDOWPLACEMENT, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE,
                 WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
                 WM_GETMINMAXINFO, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
@@ -44,13 +44,6 @@ use windows::{
     },
 };
 
-#[cfg(feature = "tray")]
-use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, LoadIconW, SetForegroundWindow, TrackPopupMenu,
-    IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_STRING, TPM_RIGHTBUTTON, WM_COMMAND,
-    WM_LBUTTONDBLCLK, WM_RBUTTONUP,
-};
-
 #[cfg(feature = "notifications")]
 use crate::application::NotificationRegistration;
 #[cfg(feature = "tray")]
@@ -59,8 +52,9 @@ use crate::application::TrayRegistration;
 use crate::platform::{NotificationError, NotificationHandle};
 use crate::{
     application::{
-        AppView, ApplicationBackend, ApplicationContext, ClosePolicy, WindowCloseHandler,
-        WindowCommand, WindowDragExclusion, WindowId, WindowMode, WindowOptions, WindowPosition,
+        application_root_view, AppView, ApplicationBackend, ApplicationContext, ClosePolicy,
+        WindowCloseHandler, WindowCommand, WindowDragExclusion, WindowId, WindowMode,
+        WindowOptions, WindowPosition,
     },
     core::{
         dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton, Size,
@@ -71,25 +65,14 @@ use crate::{
 
 #[cfg(feature = "renderer-gdi")]
 use super::GdiRenderer;
-use super::{dispatcher::WM_LGUI_DISPATCH, set_scale_preference, DpiContext, Win32Dispatcher};
 #[cfg(feature = "tray")]
-use super::{taskbar_created_message, Win32TrayIcon, TRAY_MESSAGE_ID};
+use super::Win32TrayHost;
+use super::{dispatcher::WM_LGUI_DISPATCH, set_scale_preference, DpiContext, Win32Dispatcher};
 
 const WINDOW_CLASS: &str = "LguiApplicationWindow";
-#[cfg(feature = "tray")]
-const TRAY_COMMAND_BASE: usize = 0x4000;
 
 thread_local! {
     static STATE: RefCell<HashMap<isize, WindowState>> = RefCell::new(HashMap::new());
-    #[cfg(feature = "tray")]
-    static TRAY: RefCell<Option<ApplicationTray>> = const { RefCell::new(None) };
-}
-
-#[cfg(feature = "tray")]
-struct ApplicationTray {
-    icon: Win32TrayIcon,
-    registration: Arc<TrayRegistration>,
-    context: ApplicationContext,
 }
 
 pub trait Win32Renderer: 'static {
@@ -280,10 +263,6 @@ impl ApplicationBackend for Win32Application {
                         .map_err(|error| NotificationError::new(error.to_string()))
                 }));
         }
-        #[cfg(feature = "tray")]
-        if let Some(registration) = context.try_resource::<TrayRegistration>() {
-            install_tray(hwnd, registration, context.clone())?;
-        }
         #[cfg(feature = "store")]
         context.stores().set_wake({
             let dispatcher = dispatcher.clone();
@@ -292,11 +271,12 @@ impl ApplicationBackend for Win32Application {
         let manager = context.windows();
         let instance_value = instance.0 as isize;
         let command_dispatcher = dispatcher.clone();
+        let command_context = context.clone();
         manager.install(move |command| {
             let dispatcher = command_dispatcher.clone();
             let task_dispatcher = dispatcher.clone();
             let class_name = class_name.clone();
-            let context = context.clone();
+            let context = command_context.clone();
             let factory = Arc::clone(&factory);
             dispatcher.post(move || {
                 execute_window_command(
@@ -309,6 +289,31 @@ impl ApplicationBackend for Win32Application {
                 );
             });
         });
+        #[cfg(feature = "tray")]
+        let mut tray_host = if let Some(registration) = context.try_resource::<TrayRegistration>() {
+            let visibility_dispatcher = dispatcher.clone();
+            let main_hwnd = hwnd.0 as isize;
+            Some(
+                Win32TrayHost::spawn(registration, context.clone(), hwnd, move |visible| {
+                    let dispatcher = visibility_dispatcher.clone();
+                    dispatcher.post(move || {
+                        let hwnd = HWND(main_hwnd as _);
+                        set_desired_visibility(hwnd, visible);
+                        unsafe {
+                            let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+                        }
+                        if visible {
+                            restore_owned_windows(hwnd);
+                        } else {
+                            hide_owned_windows(hwnd);
+                        }
+                    });
+                })
+                .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?,
+            )
+        } else {
+            None
+        };
         debug_assert_eq!(hwnd_for_id(&main_id), Some(hwnd));
 
         let mut message = MSG::default();
@@ -318,9 +323,11 @@ impl ApplicationBackend for Win32Application {
                 DispatchMessageW(&message);
             }
         }
-        STATE.with(|state| state.borrow_mut().clear());
         #[cfg(feature = "tray")]
-        TRAY.with(|tray| *tray.borrow_mut() = None);
+        if let Some(host) = tray_host.as_mut() {
+            host.shutdown();
+        }
+        STATE.with(|state| state.borrow_mut().clear());
         Ok(())
     }
 }
@@ -345,7 +352,7 @@ fn execute_window_command(
                 HINSTANCE(instance as _),
                 class_name,
                 options,
-                view,
+                application_root_view(context.clone(), view),
                 context,
                 factory,
                 dispatcher,
@@ -374,7 +381,7 @@ fn execute_window_command(
                     HINSTANCE(instance as _),
                     class_name,
                     options,
-                    view,
+                    application_root_view(context.clone(), view),
                     context,
                     factory,
                     dispatcher,
@@ -894,28 +901,6 @@ extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    #[cfg(feature = "tray")]
-    if message == TRAY_MESSAGE_ID {
-        handle_tray_message(hwnd, lparam.0 as u32);
-        return LRESULT(0);
-    }
-    #[cfg(feature = "tray")]
-    if message == WM_COMMAND {
-        let command_id = wparam.0 & 0xFFFF;
-        if command_id >= TRAY_COMMAND_BASE {
-            dispatch_tray_command(command_id - TRAY_COMMAND_BASE);
-            return LRESULT(0);
-        }
-    }
-    #[cfg(feature = "tray")]
-    if message == taskbar_created_message() {
-        TRAY.with(|tray| {
-            if let Some(tray) = tray.borrow_mut().as_mut() {
-                let _ = tray.icon.restore();
-            }
-        });
-        return LRESULT(0);
-    }
     match message {
         WM_NCCALCSIZE => {
             let custom_frame = STATE.with(|state| {
@@ -1123,8 +1108,6 @@ extern "system" fn window_proc(
                 }
             }
             if empty {
-                #[cfg(feature = "tray")]
-                TRAY.with(|tray| *tray.borrow_mut() = None);
                 unsafe {
                     PostQuitMessage(0);
                 }
@@ -1322,107 +1305,6 @@ fn read_ime_string(
         }
         let _ = ImmReleaseContext(hwnd, context);
         Some(String::from_utf16_lossy(&units))
-    }
-}
-
-#[cfg(feature = "tray")]
-fn install_tray(
-    hwnd: HWND,
-    registration: Arc<TrayRegistration>,
-    context: ApplicationContext,
-) -> Result<()> {
-    let icon = unsafe { LoadIconW(None, IDI_APPLICATION) }?;
-    let mut tray = Win32TrayIcon::new(hwnd, icon, registration.options.tooltip.clone());
-    tray.install().map_err(|_| Error::from_thread())?;
-    TRAY.with(|slot| {
-        *slot.borrow_mut() = Some(ApplicationTray {
-            icon: tray,
-            registration,
-            context,
-        });
-    });
-    Ok(())
-}
-
-#[cfg(feature = "tray")]
-fn handle_tray_message(hwnd: HWND, event: u32) {
-    match event {
-        WM_LBUTTONDBLCLK => {
-            let command = TRAY.with(|tray| {
-                tray.borrow()
-                    .as_ref()
-                    .and_then(|tray| tray.registration.options.activate_command.clone())
-            });
-            if let Some(command) = command {
-                dispatch_tray_command_value(command);
-            }
-        }
-        WM_RBUTTONUP => show_tray_menu(hwnd),
-        _ => {}
-    }
-}
-
-#[cfg(feature = "tray")]
-fn show_tray_menu(hwnd: HWND) {
-    let items = TRAY.with(|tray| {
-        tray.borrow()
-            .as_ref()
-            .map(|tray| tray.registration.options.items.clone())
-            .unwrap_or_default()
-    });
-    let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
-        return;
-    };
-    for (index, item) in items.iter().enumerate() {
-        let mut flags = MF_STRING;
-        if !item.enabled {
-            flags |= MF_GRAYED;
-        }
-        if item.checked {
-            flags |= MF_CHECKED;
-        }
-        let label = wide(&item.label);
-        let _ = unsafe {
-            AppendMenuW(
-                menu,
-                flags,
-                TRAY_COMMAND_BASE + index,
-                PCWSTR(label.as_ptr()),
-            )
-        };
-    }
-    let mut point = POINT::default();
-    unsafe {
-        let _ = GetCursorPos(&mut point);
-        let _ = SetForegroundWindow(hwnd);
-        let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, point.x, point.y, None, hwnd, None);
-        let _ = DestroyMenu(menu);
-    }
-}
-
-#[cfg(feature = "tray")]
-fn dispatch_tray_command(index: usize) {
-    let command = TRAY.with(|tray| {
-        tray.borrow()
-            .as_ref()
-            .and_then(|tray| tray.registration.options.items.get(index))
-            .filter(|item| item.enabled)
-            .map(|item| item.command.clone())
-    });
-    if let Some(command) = command {
-        dispatch_tray_command_value(command);
-    }
-}
-
-#[cfg(feature = "tray")]
-fn dispatch_tray_command_value(command: String) {
-    let invocation = TRAY.with(|tray| {
-        tray.borrow()
-            .as_ref()
-            .map(|tray| (Arc::clone(&tray.registration.handler), tray.context.clone()))
-    });
-    if let Some((handler, context)) = invocation {
-        handler(&context, &command);
     }
 }
 

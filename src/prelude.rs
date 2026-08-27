@@ -1,5 +1,3 @@
-#[cfg(feature = "tray")]
-pub use crate::application::TrayOptions;
 pub use crate::application::{
     AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle, ClosePolicy,
     WindowCloseHandler, WindowHandle, WindowId, WindowManager, WindowMode, WindowOptions,
@@ -7,6 +5,8 @@ pub use crate::application::{
 };
 #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
 pub use crate::application::{RendererKind, RendererProbeError};
+#[cfg(feature = "tray")]
+pub use crate::application::{TrayAction, TrayOptions};
 #[cfg(feature = "svg")]
 pub use crate::assets::SvgRenderer;
 #[cfg(feature = "images")]
@@ -27,7 +27,7 @@ pub use crate::diagnostics::{
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
     Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationError,
-    NotificationHandle, NotificationService, TrayMenuItem, TrayService, WakeHandle,
+    NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService, WakeHandle,
 };
 pub use crate::renderer::{ClipRegion, RenderBackend};
 pub use crate::resources::Resources;

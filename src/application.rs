@@ -9,7 +9,7 @@ use crate::platform::dpi::ScalePreference;
 #[cfg(feature = "notifications")]
 use crate::platform::NotificationHandle;
 #[cfg(feature = "tray")]
-use crate::platform::TrayMenuItem;
+use crate::platform::{TrayMenuEntry, TrayMenuItem};
 use crate::{
     core::{
         component, context_provider, Element, RenderCx, RootComponent, Size, UiExecutor, UiRect,
@@ -39,10 +39,40 @@ pub(crate) type TrayCommandHandler = Arc<dyn Fn(&ApplicationContext, &str) + Sen
 
 #[cfg(feature = "tray")]
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TrayAction {
+    ShowMainWindow,
+    HideMainWindow,
+    Exit,
+    Command {
+        name: String,
+        show_main_window: bool,
+    },
+}
+
+#[cfg(feature = "tray")]
+impl TrayAction {
+    pub fn command(command: impl Into<String>) -> Self {
+        Self::Command {
+            name: command.into(),
+            show_main_window: false,
+        }
+    }
+
+    pub fn command_and_show_main(command: impl Into<String>) -> Self {
+        Self::Command {
+            name: command.into(),
+            show_main_window: true,
+        }
+    }
+}
+
+#[cfg(feature = "tray")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrayOptions {
-    pub tooltip: String,
-    pub items: Vec<TrayMenuItem<String>>,
-    pub activate_command: Option<String>,
+    pub(crate) tooltip: String,
+    pub(crate) icon_bytes: Option<&'static [u8]>,
+    pub(crate) items: Vec<TrayMenuEntry<TrayAction>>,
+    pub(crate) activate: Option<TrayAction>,
 }
 
 #[cfg(feature = "tray")]
@@ -50,18 +80,29 @@ impl TrayOptions {
     pub fn new(tooltip: impl Into<String>) -> Self {
         Self {
             tooltip: tooltip.into(),
+            icon_bytes: None,
             items: Vec::new(),
-            activate_command: None,
+            activate: None,
         }
     }
 
-    pub fn item(mut self, item: TrayMenuItem<String>) -> Self {
-        self.items.push(item);
+    pub fn icon_bytes(mut self, bytes: &'static [u8]) -> Self {
+        self.icon_bytes = Some(bytes);
         self
     }
 
-    pub fn activate_command(mut self, command: impl Into<String>) -> Self {
-        self.activate_command = Some(command.into());
+    pub fn item(mut self, item: TrayMenuItem<TrayAction>) -> Self {
+        self.items.push(item.into());
+        self
+    }
+
+    pub fn separator(mut self) -> Self {
+        self.items.push(TrayMenuEntry::Separator);
+        self
+    }
+
+    pub fn activate(mut self, action: TrayAction) -> Self {
+        self.activate = Some(action);
         self
     }
 }
@@ -401,6 +442,16 @@ impl RootComponent for ApplicationRoot {
         );
         context_provider(self.context, content)
     }
+}
+
+pub(crate) fn application_root_view(context: ApplicationContext, view: AppView) -> AppView {
+    Arc::new(move |cx| {
+        ApplicationRoot {
+            context: context.clone(),
+            view: Arc::clone(&view),
+        }
+        .render_root(cx)
+    })
 }
 
 /// Cloneable, platform-neutral access to the running application event loop.
@@ -887,13 +938,7 @@ where
         let context = ApplicationContext::new(self.resources, self.executor);
         let backend_context = context.clone();
         let view: AppView = Arc::new(view);
-        let root: AppView = Arc::new(move |cx| {
-            ApplicationRoot {
-                context: context.clone(),
-                view: Arc::clone(&view),
-            }
-            .render_root(cx)
-        });
+        let root = application_root_view(context, view);
         self.backend.run(self.window, root, backend_context)
     }
 }

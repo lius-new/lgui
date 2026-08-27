@@ -70,6 +70,8 @@ pub use svg::{
     SvgBitmap, SvgFontRegistry, SvgIconRegistry, SvgIconSource,
 };
 #[cfg(feature = "tray")]
+pub(crate) use tray::Win32TrayHost;
+#[cfg(feature = "tray")]
 pub use tray::{taskbar_created_message, TrayIconHandle, Win32TrayIcon, TRAY_MESSAGE_ID};
 
 #[cfg(feature = "open-url")]
