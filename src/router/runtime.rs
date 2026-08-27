@@ -308,4 +308,19 @@ mod tests {
         assert!(!second.unsubscribe(token.clone()));
         assert!(first.unsubscribe(token));
     }
+
+    #[test]
+    fn location_history_preserves_dynamic_query_and_fragment_state() {
+        let router = Router::new(crate::router::Location::new("/community"));
+        router.navigate(crate::router::Location::new(
+            "/community/articles/42?tab=comments#reply",
+        ));
+        router.navigate(crate::router::Location::new("/store/items/7"));
+
+        assert_eq!(
+            router.back().unwrap().current.href(),
+            "/community/articles/42?tab=comments#reply"
+        );
+        assert_eq!(router.back().unwrap().current.path(), "/community");
+    }
 }

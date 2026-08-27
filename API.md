@@ -33,9 +33,42 @@ invalidation types.
 
 ## Router
 
-`create_router((route(path, value, component), ...))` defines a typed route table. `.outlet(cx)`
-renders the active component and provides navigate, replace, and back actions through the lgui
-Router Context. Route lifecycle side effects belong in component Effects.
+`create_router` defines a retained route tree. Routers use `Location`, `route`, `layout`,
+`scope`, `index`, and `outlet`; child patterns are relative to their parent. Path parameters use
+`:name`, a final `*name` captures a remaining path, and `RouteMatchHooks` exposes the decoded
+parameters and complete match chain.
+
+```rust,ignore
+create_router((
+    layout(auth_layout, (
+        route("/", login_page),
+        route("/register", register_page),
+    )),
+    layout(app_layout, (
+        route("/match", match_page),
+        scope("/community", (
+            index(community_feed),
+            route("events", community_events),
+            route("articles/:article_id", community_article),
+        )),
+        not_found(not_found_page),
+    )),
+))
+.outlet(cx)
+```
+
+Layout components place `outlet()` where their selected descendant should render. Each Outlet is
+a retained component boundary, so changing a leaf preserves ancestor State and Effects. Route
+matching ranks complete branches by specificity; static segments beat parameters and wildcards
+regardless of declaration order.
+
+`Route::handle` attaches opaque application metadata. `RouteMatches::deepest_handle` reads the
+nearest value with parent inheritance, allowing an application layout to select navigation UI
+without lgui depending on business types. `Location` history preserves paths, dynamic parameters,
+queries, and fragments. `RouteMatches::resolve` performs route-tree-relative resolution.
+
+`route(pattern, component)` has one path-based meaning; the old exact-value flat router no longer
+exists. Route lifecycle side effects belong in component Effects.
 
 ## Rendering And Resources
 

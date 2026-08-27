@@ -14,8 +14,10 @@ successful present and clean up on dependency changes and unmount.
 
 Stores are Application-scoped pure data. A Store type creates itself lazily on first use. Selector
 equality controls component invalidation; mutations do not return UI invalidation values. Router
-history and declarative route tables are also Application-scoped, and an outlet subscribes only
-the component boundary that renders the current route.
+history and declarative route trees are also Application-scoped. History stores complete Locations;
+route matching produces an ancestor-to-leaf chain with decoded parameters and opaque application
+metadata. Every nested Outlet is its own retained component boundary, preserving parent component
+identity and lifecycle while invalidating only the branch selected by navigation.
 
 `WindowManager` handles typed IDs, explicit owner relationships, show/hide/toggle/close, owner
 movement and visibility restoration, DPI changes, input, and native resource release. Auxiliary

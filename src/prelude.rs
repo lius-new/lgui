@@ -33,8 +33,10 @@ pub use crate::renderer::{ClipRegion, RenderBackend};
 pub use crate::resources::Resources;
 #[cfg(feature = "router")]
 pub use crate::router::{
-    create_router, route, Back, DeclarativeRouter, Navigate, Replace, Route, RouteAction,
-    RouteChange, RouteSubscriptionToken, Router, RouterContext, RouterHooks, RouterSnapshot,
+    create_router, index, layout, not_found, outlet, redirect, route, scope, Back,
+    DeclarativeRouter, Location, Navigate, PathParams, Replace, Route, RouteAction, RouteChange,
+    RouteId, RouteMatch, RouteMatchHooks, RouteMatches, RouteSubscriptionToken, Router,
+    RouterContext, RouterHooks, RouterSnapshot,
 };
 pub use crate::session::UiSession;
 #[cfg(feature = "store")]
