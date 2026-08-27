@@ -43,11 +43,11 @@ pub use component_tree::{
     ComponentId, ComponentRuntimeMetrics, ComponentTree, HookId, HookSlotKind,
 };
 pub use context::UiRenderContext;
-pub use context_value::{ContextProviderGuard, ContextRegistry};
+pub use context_value::{try_use_context, use_context, ContextProviderGuard, ContextRegistry};
 pub use declarative::{
-    clip, clip_path, compile_scope, component, content_text, context_provider, ellipse, fragment,
-    glow, group, line, overlay, path, precompiled, text, DeclarativeView, Element, ElementKey,
-    ElementRenderCx, Fragment, IntoClickHandler, IntoElementContent,
+    clip, clip_path, component, content_text, context_provider, ellipse, fragment, glow, group,
+    line, overlay, path, precompiled, text, DeclarativeView, Element, ElementKey, ElementRenderCx,
+    Fragment, IntoClickHandler, IntoElementContent,
 };
 pub use dirty::{DirtySet, DirtyTracker};
 pub use dispatch::{dispatch_event_handlers, dispatch_hit_handlers, dispatch_runtime_output};

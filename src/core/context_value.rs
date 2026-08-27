@@ -2,6 +2,7 @@ use std::{
     any::{type_name, Any, TypeId},
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
+    rc::Rc,
 };
 
 use super::{ComponentId, ComponentTree};
@@ -12,8 +13,23 @@ struct ProviderKey {
     value_type: TypeId,
 }
 
-#[derive(Default)]
+thread_local! {
+    static CURRENT_CONTEXT: RefCell<Vec<CurrentContext>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Clone)]
+struct CurrentContext {
+    registry: ContextRegistry,
+    consumer: ComponentId,
+}
+
+#[derive(Clone, Default)]
 pub struct ContextRegistry {
+    inner: Rc<ContextRegistryState>,
+}
+
+#[derive(Default)]
+struct ContextRegistryState {
     providers: RefCell<HashMap<ProviderKey, Box<dyn Any>>>,
     active: RefCell<HashMap<TypeId, Vec<ProviderKey>>>,
     consumers: RefCell<HashMap<ProviderKey, HashSet<ComponentId>>>,
@@ -27,6 +43,32 @@ pub struct ContextProviderGuard<'a> {
     value_type: TypeId,
 }
 
+pub(crate) struct CurrentContextGuard;
+
+/// Reads a typed value from the nearest provider and subscribes the component
+/// currently being rendered to provider changes.
+pub fn use_context<T>() -> T
+where
+    T: Clone + 'static,
+{
+    try_use_context::<T>().unwrap_or_else(|| {
+        panic!(
+            "missing active context value `{}`; context hooks may only run while rendering a component",
+            type_name::<T>()
+        )
+    })
+}
+
+/// Tries to read a typed value from the nearest provider for the component
+/// currently being rendered.
+pub fn try_use_context<T>() -> Option<T>
+where
+    T: Clone + 'static,
+{
+    let current = CURRENT_CONTEXT.with(|stack| stack.borrow().last().cloned())?;
+    current.registry.read(current.consumer)
+}
+
 impl ContextRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -34,13 +76,13 @@ impl ContextRegistry {
 
     pub fn begin_render(&self) {
         self.restore_render_state();
-        self.active.borrow_mut().clear();
-        *self.consumer_rollback.borrow_mut() = Some(self.consumers.borrow().clone());
-        self.render_active.set(true);
+        self.inner.active.borrow_mut().clear();
+        *self.inner.consumer_rollback.borrow_mut() = Some(self.inner.consumers.borrow().clone());
+        self.inner.render_active.set(true);
     }
 
     pub fn begin_component(&self, component: ComponentId) {
-        self.consumers.borrow_mut().retain(|_, consumers| {
+        self.inner.consumers.borrow_mut().retain(|_, consumers| {
             consumers.remove(&component);
             !consumers.is_empty()
         });
@@ -48,29 +90,30 @@ impl ContextRegistry {
 
     pub fn end_render(&self, components: &ComponentTree) {
         debug_assert!(
-            self.active.borrow().values().all(Vec::is_empty),
+            self.inner.active.borrow().values().all(Vec::is_empty),
             "context provider stack was not balanced"
         );
-        self.active.borrow_mut().clear();
-        self.providers
+        self.inner.active.borrow_mut().clear();
+        self.inner
+            .providers
             .borrow_mut()
             .retain(|key, _| components.is_alive(key.component));
-        self.consumers.borrow_mut().retain(|key, consumers| {
+        self.inner.consumers.borrow_mut().retain(|key, consumers| {
             if !components.is_alive(key.component) {
                 return false;
             }
             consumers.retain(|consumer| components.is_alive(*consumer));
             !consumers.is_empty()
         });
-        self.provider_rollback.borrow_mut().clear();
-        self.consumer_rollback.borrow_mut().take();
-        self.render_active.set(false);
+        self.inner.provider_rollback.borrow_mut().clear();
+        self.inner.consumer_rollback.borrow_mut().take();
+        self.inner.render_active.set(false);
     }
 
     pub fn abort_render(&self, _components: &ComponentTree) {
-        self.active.borrow_mut().clear();
+        self.inner.active.borrow_mut().clear();
         self.restore_render_state();
-        self.render_active.set(false);
+        self.inner.render_active.set(false);
     }
 
     pub fn provide<T>(
@@ -88,8 +131,10 @@ impl ContextRegistry {
             value_type,
         };
         let changed = {
-            let mut providers = self.providers.borrow_mut();
-            if self.render_active.get() && !self.provider_rollback.borrow().contains_key(&key) {
+            let mut providers = self.inner.providers.borrow_mut();
+            if self.inner.render_active.get()
+                && !self.inner.provider_rollback.borrow().contains_key(&key)
+            {
                 let previous = providers.get(&key).map(|current| {
                     Box::new(
                         current
@@ -100,7 +145,10 @@ impl ContextRegistry {
                             .clone(),
                     ) as Box<dyn Any>
                 });
-                self.provider_rollback.borrow_mut().insert(key, previous);
+                self.inner
+                    .provider_rollback
+                    .borrow_mut()
+                    .insert(key, previous);
             }
             match providers.get_mut(&key) {
                 Some(current) => {
@@ -121,13 +169,14 @@ impl ContextRegistry {
             }
         };
         if changed {
-            if let Some(consumers) = self.consumers.borrow().get(&key) {
+            if let Some(consumers) = self.inner.consumers.borrow().get(&key) {
                 for consumer in consumers {
                     components.mark_dirty(*consumer);
                 }
             }
         }
-        self.active
+        self.inner
+            .active
             .borrow_mut()
             .entry(value_type)
             .or_default()
@@ -144,18 +193,21 @@ impl ContextRegistry {
     {
         let value_type = TypeId::of::<T>();
         let key = self
+            .inner
             .active
             .borrow()
             .get(&value_type)
             .and_then(|providers| providers.last())
             .copied()?;
-        self.consumers
+        self.inner
+            .consumers
             .borrow_mut()
             .entry(key)
             .or_default()
             .insert(consumer);
         Some(
-            self.providers
+            self.inner
+                .providers
                 .borrow()
                 .get(&key)
                 .and_then(|value| value.downcast_ref::<T>())
@@ -165,17 +217,27 @@ impl ContextRegistry {
     }
 
     pub fn clear(&self) {
-        self.providers.borrow_mut().clear();
-        self.active.borrow_mut().clear();
-        self.consumers.borrow_mut().clear();
-        self.provider_rollback.borrow_mut().clear();
-        self.consumer_rollback.borrow_mut().take();
-        self.render_active.set(false);
+        self.inner.providers.borrow_mut().clear();
+        self.inner.active.borrow_mut().clear();
+        self.inner.consumers.borrow_mut().clear();
+        self.inner.provider_rollback.borrow_mut().clear();
+        self.inner.consumer_rollback.borrow_mut().take();
+        self.inner.render_active.set(false);
+    }
+
+    pub(crate) fn enter_current(&self, consumer: ComponentId) -> CurrentContextGuard {
+        CURRENT_CONTEXT.with(|stack| {
+            stack.borrow_mut().push(CurrentContext {
+                registry: self.clone(),
+                consumer,
+            });
+        });
+        CurrentContextGuard
     }
 
     fn restore_render_state(&self) {
-        let rollback = std::mem::take(&mut *self.provider_rollback.borrow_mut());
-        let mut providers = self.providers.borrow_mut();
+        let rollback = std::mem::take(&mut *self.inner.provider_rollback.borrow_mut());
+        let mut providers = self.inner.providers.borrow_mut();
         for (key, previous) in rollback {
             match previous {
                 Some(previous) => {
@@ -187,19 +249,30 @@ impl ContextRegistry {
             }
         }
         drop(providers);
-        if let Some(consumers) = self.consumer_rollback.borrow_mut().take() {
-            *self.consumers.borrow_mut() = consumers;
+        if let Some(consumers) = self.inner.consumer_rollback.borrow_mut().take() {
+            *self.inner.consumers.borrow_mut() = consumers;
         }
     }
 }
 
 impl Drop for ContextProviderGuard<'_> {
     fn drop(&mut self) {
-        let mut active = self.registry.active.borrow_mut();
+        let mut active = self.registry.inner.active.borrow_mut();
         let stack = active
             .get_mut(&self.value_type)
             .expect("context provider stack disappeared");
         stack.pop().expect("context provider stack underflow");
+    }
+}
+
+impl Drop for CurrentContextGuard {
+    fn drop(&mut self) {
+        CURRENT_CONTEXT.with(|stack| {
+            stack
+                .borrow_mut()
+                .pop()
+                .expect("current context stack underflow");
+        });
     }
 }
 
