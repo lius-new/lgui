@@ -131,7 +131,7 @@ impl UiSession {
 
     pub fn apply_pending_updates(&mut self) -> super::core::PendingUpdateOutput {
         let updates = self.runtime.apply_pending_updates();
-        if updates.focus_changed || updates.frame_requested {
+        if updates.focus_changed {
             self.invalidate_all();
         }
         updates

@@ -1,7 +1,8 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicIsize, Ordering},
+    atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
@@ -11,6 +12,9 @@ use windows::Win32::{
 use crate::application::{ApplicationHandle, ApplicationTask};
 
 pub const WM_LGUI_DISPATCH: u32 = WM_APP + 44;
+pub const WM_LGUI_FRAME_TICK: u32 = WM_APP + 45;
+
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 #[derive(Clone, Default)]
 pub struct Win32Dispatcher {
@@ -21,6 +25,10 @@ pub struct Win32Dispatcher {
 struct DispatcherInner {
     window: AtomicIsize,
     frame_requested: AtomicBool,
+    frame_driver_running: AtomicBool,
+    frame_tick_pending: AtomicBool,
+    frame_generation: AtomicU64,
+    last_frame_tick: Mutex<Option<Instant>>,
     tasks: Mutex<Vec<ApplicationTask>>,
 }
 
@@ -71,6 +79,70 @@ impl Win32Dispatcher {
         self.wake();
     }
 
+    pub fn start_frame_driver(&self) {
+        if self
+            .inner
+            .frame_driver_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let generation = self.inner.frame_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *self
+            .inner
+            .last_frame_tick
+            .lock()
+            .expect("frame clock poisoned") = Some(Instant::now());
+
+        let driver = self.clone();
+        if std::thread::Builder::new()
+            .name("lgui-animation".to_owned())
+            .spawn(move || driver.run_frame_driver(generation))
+            .is_err()
+        {
+            self.stop_frame_driver();
+        }
+    }
+
+    pub fn frame_elapsed_ms(&self) -> f32 {
+        let now = Instant::now();
+        let mut last = self
+            .inner
+            .last_frame_tick
+            .lock()
+            .expect("frame clock poisoned");
+        last.replace(now)
+            .map(|previous| now.duration_since(previous).as_secs_f32() * 1000.0)
+            .unwrap_or(FRAME_INTERVAL.as_secs_f32() * 1000.0)
+            .clamp(1.0, 50.0)
+    }
+
+    pub fn finish_frame_tick(&self, should_continue: bool) {
+        if should_continue {
+            self.inner
+                .frame_tick_pending
+                .store(false, Ordering::Release);
+        } else {
+            self.stop_frame_driver();
+        }
+    }
+
+    pub fn stop_frame_driver(&self) {
+        self.inner
+            .frame_driver_running
+            .store(false, Ordering::Release);
+        self.inner
+            .frame_tick_pending
+            .store(false, Ordering::Release);
+        self.inner.frame_generation.fetch_add(1, Ordering::AcqRel);
+        *self
+            .inner
+            .last_frame_tick
+            .lock()
+            .expect("frame clock poisoned") = None;
+    }
+
     /// Wakes the UI thread without declaring that every window needs a frame.
     ///
     /// Retained state/store updates use this path because the affected component queues carry
@@ -106,19 +178,42 @@ impl Win32Dispatcher {
         self.wake();
     }
 
+    fn run_frame_driver(&self, generation: u64) {
+        while self.inner.frame_driver_running.load(Ordering::Acquire)
+            && self.inner.frame_generation.load(Ordering::Acquire) == generation
+        {
+            std::thread::sleep(FRAME_INTERVAL);
+            if !self.inner.frame_driver_running.load(Ordering::Acquire)
+                || self.inner.frame_generation.load(Ordering::Acquire) != generation
+            {
+                break;
+            }
+            if self
+                .inner
+                .frame_tick_pending
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                continue;
+            }
+            if !self.post_message(WM_LGUI_FRAME_TICK) {
+                self.inner
+                    .frame_tick_pending
+                    .store(false, Ordering::Release);
+            }
+        }
+    }
+
     fn wake(&self) {
+        let _ = self.post_message(WM_LGUI_DISPATCH);
+    }
+
+    fn post_message(&self, message: u32) -> bool {
         let hwnd = self.inner.window.load(Ordering::Acquire);
         if hwnd == 0 {
-            return;
+            return false;
         }
-        unsafe {
-            let _ = PostMessageW(
-                Some(HWND(hwnd as _)),
-                WM_LGUI_DISPATCH,
-                WPARAM(0),
-                LPARAM(0),
-            );
-        }
+        unsafe { PostMessageW(Some(HWND(hwnd as _)), message, WPARAM(0), LPARAM(0)).is_ok() }
     }
 }
 

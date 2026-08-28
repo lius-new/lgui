@@ -87,7 +87,10 @@ use super::ico::create_icon_from_ico_bytes;
 use super::GdiRenderer;
 #[cfg(feature = "tray")]
 use super::Win32TrayHost;
-use super::{dispatcher::WM_LGUI_DISPATCH, set_scale_preference, DpiContext, Win32Dispatcher};
+use super::{
+    dispatcher::{WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
+    set_scale_preference, DpiContext, Win32Dispatcher,
+};
 
 const WINDOW_CLASS: &str = "LguiApplicationWindow";
 const BACKGROUND_RETRIM_DELAY: Duration = Duration::from_secs(3);
@@ -1354,6 +1357,10 @@ extern "system" fn window_proc(
             drain_dispatcher(hwnd);
             LRESULT(0)
         }
+        WM_LGUI_FRAME_TICK => {
+            handle_frame_tick(hwnd);
+            LRESULT(0)
+        }
         WM_PAINT => {
             paint(hwnd);
             LRESULT(0)
@@ -1543,6 +1550,8 @@ extern "system" fn window_proc(
                 dispatcher.detach(hwnd);
                 if let Some(raw) = next_window {
                     dispatcher.attach(HWND(raw as _));
+                } else {
+                    dispatcher.stop_frame_driver();
                 }
             }
             if empty {
@@ -1602,20 +1611,62 @@ fn drain_dispatcher(hwnd: HWND) {
         return;
     };
     let result = dispatcher.drain();
+    let mut start_frame_driver = result.frame_requested;
     let windows = STATE.with(|state| state.borrow().keys().copied().collect::<Vec<_>>());
     for raw in windows {
         let target = HWND(raw as _);
-        let mut repaint = apply_pending_window_updates(target);
-        if result.frame_requested {
-            STATE.with(|state| {
-                if let Some(window) = state.borrow_mut().get_mut(&raw) {
-                    window.session.invalidate_all();
-                }
-            });
-            repaint = WindowRepaint::Full;
-        }
+        let (repaint, frame_requested) = apply_pending_window_updates(target);
+        start_frame_driver |= frame_requested;
         request_window_repaint(target, repaint);
     }
+    if start_frame_driver {
+        dispatcher.start_frame_driver();
+    }
+}
+
+fn handle_frame_tick(hwnd: HWND) {
+    let dispatcher = STATE.with(|state| {
+        state
+            .borrow()
+            .get(&(hwnd.0 as isize))
+            .map(|window| window.dispatcher.clone())
+    });
+    let Some(dispatcher) = dispatcher else {
+        return;
+    };
+    let elapsed_ms = dispatcher.frame_elapsed_ms();
+    let (repaints, should_continue) = STATE.with(|state| {
+        let mut windows = state.borrow_mut();
+        let mut repaints = Vec::new();
+        let mut should_continue = false;
+        for (raw, window) in windows.iter_mut() {
+            if window.rendering_suspended
+                || !window.visibility.desired_visible
+                || window.visibility.hidden_for_owner
+            {
+                continue;
+            }
+            let output = window.session.advance(elapsed_ms);
+            should_continue |= output.animation_changed;
+            let repaint = if let Some(bounds) = output.dirty_bounds {
+                window.session.invalidations_mut().invalidate_rect(bounds);
+                WindowRepaint::Rect(bounds)
+            } else if output.animation_changed {
+                window.session.invalidate_all();
+                WindowRepaint::Full
+            } else {
+                WindowRepaint::None
+            };
+            if repaint != WindowRepaint::None {
+                repaints.push((HWND(*raw as _), repaint));
+            }
+        }
+        (repaints, should_continue)
+    });
+    for (target, repaint) in repaints {
+        request_window_repaint(target, repaint);
+    }
+    dispatcher.finish_frame_tick(should_continue);
 }
 
 fn paint(hwnd: HWND) {
@@ -1751,8 +1802,9 @@ fn schedule_render_retry(state: &mut WindowState) -> bool {
 }
 
 fn dispatch_input(hwnd: HWND, input: InputEvent) {
-    let (repaint, ime_update) = STATE.with(|state| {
+    let (repaint, ime_update, frame_dispatcher) = STATE.with(|state| {
         if let Some(state) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+            let dispatcher = state.dispatcher.clone();
             let output = state.session.handle_input(input);
             let session = &mut state.session;
             let mut context_requested_frame = false;
@@ -1767,28 +1819,33 @@ fn dispatch_input(hwnd: HWND, input: InputEvent) {
                 ime_composition_point(&output).map(|point| (state.logical_size, point));
             if context_requested_frame {
                 session.invalidate_all();
-                return (WindowRepaint::Full, ime_update);
+                return (WindowRepaint::Full, ime_update, Some(dispatcher));
             }
             // Router and Store observables synchronously queue the component that owns their
             // outlet/content boundary. Consume that queue now so this input pass invalidates the
             // old boundary; Host diff adds the new boundary after the local component rerenders.
-            let mut repaint = pending_session_repaint(session);
+            let (mut repaint, frame_requested) = pending_session_repaint(session);
             if let Some(bounds) = output.dirty_bounds {
                 session.invalidations_mut().invalidate_rect(bounds);
                 repaint = repaint.union(WindowRepaint::Rect(bounds));
             }
             if output.animation_changed && repaint == WindowRepaint::None {
                 session.invalidate_all();
-                return (WindowRepaint::Full, ime_update);
+                return (WindowRepaint::Full, ime_update, Some(dispatcher));
             }
-            return (repaint, ime_update);
+            let frame_dispatcher =
+                (frame_requested || output.animation_changed).then_some(dispatcher);
+            return (repaint, ime_update, frame_dispatcher);
         }
-        (WindowRepaint::None, None)
+        (WindowRepaint::None, None, None)
     });
     if let Some((logical_size, point)) = ime_update {
         update_ime_composition_window(hwnd, logical_size, point);
     }
     request_window_repaint(hwnd, repaint);
+    if let Some(dispatcher) = frame_dispatcher {
+        dispatcher.start_frame_driver();
+    }
 }
 
 fn ime_composition_point(output: &RuntimeOutput) -> Option<Option<Point>> {
@@ -1852,26 +1909,27 @@ impl WindowRepaint {
     }
 }
 
-fn pending_session_repaint(session: &mut UiSession) -> WindowRepaint {
+fn pending_session_repaint(session: &mut UiSession) -> (WindowRepaint, bool) {
     let updates = session.apply_pending_updates();
-    if updates.focus_changed || updates.frame_requested {
-        return WindowRepaint::Full;
+    if updates.focus_changed {
+        return (WindowRepaint::Full, updates.frame_requested);
     }
     if updates.dirty_ids.is_empty() {
-        return WindowRepaint::None;
+        return (WindowRepaint::None, updates.frame_requested);
     }
-    session
+    let repaint = session
         .tree()
         .paint_bounds(updates.dirty_ids)
         .map(WindowRepaint::Rect)
-        .unwrap_or(WindowRepaint::Full)
+        .unwrap_or(WindowRepaint::Full);
+    (repaint, updates.frame_requested)
 }
 
-fn apply_pending_window_updates(hwnd: HWND) -> WindowRepaint {
+fn apply_pending_window_updates(hwnd: HWND) -> (WindowRepaint, bool) {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
-            return WindowRepaint::None;
+            return (WindowRepaint::None, false);
         };
         pending_session_repaint(&mut window.session)
     })
