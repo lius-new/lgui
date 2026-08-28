@@ -257,6 +257,8 @@ impl HostTreeBuilder {
         };
         component_states.end_frame();
         component_tree.end_render();
+        self.fresh_owners
+            .extend(component_tree.take_executed_in_render());
         for owner in self.fresh_owners.clone() {
             let keep = self.seen_by_owner.get(&owner).cloned().unwrap_or_default();
             self.structure_changed |= self.tree.retain_owner_nodes(owner, &keep);
@@ -748,6 +750,60 @@ mod tests {
         assert_eq!(labels, vec!["alpha"]);
         assert_eq!(tree.nodes().len(), 2);
         assert_eq!(runtime.component_tree().metrics().unmounted, 1);
+    }
+
+    struct RootBranchReplacement {
+        show_email: bool,
+    }
+
+    impl RootComponent for RootBranchReplacement {
+        fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+            if self.show_email {
+                return component((), |_cx, _| {
+                    group(UiRect::new(0, 0, 30, 30)).child(super::super::content_text("email"))
+                })
+                .key("email-form");
+            }
+
+            group(UiRect::new(0, 0, 30, 30)).content((
+                super::super::content_text("remembered"),
+                super::super::content_text("remembered details"),
+            ))
+        }
+    }
+
+    fn mount_root_branch(runtime: &UiRuntime, tree: HostTree, show_email: bool) -> HostTree {
+        let mut builder = HostTreeBuilder::from_retained(tree);
+        builder.mount(
+            RootBranchReplacement { show_email },
+            UiRect::new(0, 0, 30, 30),
+            &runtime.interaction_state(),
+            runtime.animations(),
+            runtime.component_states(),
+            runtime.component_tree(),
+            runtime.contexts(),
+            runtime.hook_states(),
+            runtime.hook_updates(),
+            runtime.task_spawner(),
+            runtime.effects(),
+            UiScale::ONE,
+        );
+        builder.finish()
+    }
+
+    #[test]
+    fn replacing_a_plain_component_root_with_a_child_component_prunes_the_old_host_subtree() {
+        let runtime = UiRuntime::new();
+        let mut tree = mount_root_branch(&runtime, HostTree::new(), false);
+        tree.take_projection_changes();
+        let tree = mount_root_branch(&runtime, tree, true);
+
+        let labels = tree
+            .nodes()
+            .iter()
+            .filter_map(|node| node.text.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec!["email"]);
     }
 
     #[test]

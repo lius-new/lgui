@@ -133,6 +133,7 @@ pub struct ComponentTree {
     dirty: RefCell<HashSet<ComponentId>>,
     metrics: Cell<ComponentRuntimeMetrics>,
     render_active: Cell<bool>,
+    render_executed: RefCell<HashSet<ComponentId>>,
     render_replacements: RefCell<Vec<(ComponentIdentity, ComponentId)>>,
     render_dirty: RefCell<Option<HashSet<ComponentId>>>,
     render_dirty_flags: RefCell<HashMap<ComponentId, (bool, bool)>>,
@@ -148,6 +149,7 @@ impl ComponentTree {
             self.abort_render();
         }
         self.render_active.set(true);
+        self.render_executed.borrow_mut().clear();
         *self.render_dirty.borrow_mut() = Some(self.dirty.borrow().clone());
         self.render_dirty_flags.borrow_mut().clear();
         for slot in self.slots.borrow_mut().iter_mut() {
@@ -248,7 +250,12 @@ impl ComponentTree {
         let mut metrics = self.metrics.get();
         metrics.executed += 1;
         self.metrics.set(metrics);
+        self.render_executed.borrow_mut().insert(id);
         force_children
+    }
+
+    pub(crate) fn take_executed_in_render(&self) -> HashSet<ComponentId> {
+        std::mem::take(&mut *self.render_executed.borrow_mut())
     }
 
     pub fn can_reuse<P>(&self, id: ComponentId, props: &P) -> bool
@@ -456,6 +463,7 @@ impl ComponentTree {
             *self.dirty.borrow_mut() = dirty;
         }
         self.render_dirty_flags.borrow_mut().clear();
+        self.render_executed.borrow_mut().clear();
         self.render_active.set(false);
         self.metrics.set(ComponentRuntimeMetrics::default());
     }
@@ -469,6 +477,7 @@ impl ComponentTree {
         self.free.borrow_mut().clear();
         self.identities.borrow_mut().clear();
         self.dirty.borrow_mut().clear();
+        self.render_executed.borrow_mut().clear();
         self.render_replacements.borrow_mut().clear();
         self.render_dirty.borrow_mut().take();
         self.render_dirty_flags.borrow_mut().clear();
