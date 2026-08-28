@@ -30,6 +30,10 @@ impl UiScope {
         self.path.id(leaf)
     }
 
+    pub(crate) fn scope_id(&self) -> UiId {
+        UiId::from_parts(self.path.segments().iter().map(|segment| segment.as_ref()))
+    }
+
     pub(crate) fn node_id(&self) -> UiId {
         self.path.id("n")
     }

@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use super::{UiAction, UiId};
+use super::{UiAction, UiId, UiScope};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComponentActionOutcome {
@@ -185,19 +185,19 @@ impl ComponentStateStore {
         Some(f(state))
     }
 
-    pub fn preserve_scope(&self, scope: &UiId) {
+    pub fn preserve_scope(&self, scope: &UiScope) {
         if !self.tracking_frame.get() {
             return;
         }
-        let prefix = scope.as_str();
+        let scope_id = scope.scope_id();
+        let prefix = scope_id.as_str();
+        let nested_prefix = format!("{prefix}.");
         let states = self.states.borrow();
         let mut seen = self.seen.borrow_mut();
         seen.extend(
             states
                 .keys()
-                .filter(|id| {
-                    id.as_str() == prefix || id.as_str().starts_with(&format!("{prefix}."))
-                })
+                .filter(|id| id.as_str() == prefix || id.as_str().starts_with(&nested_prefix))
                 .cloned(),
         );
     }
@@ -248,5 +248,25 @@ mod tests {
             Some(1)
         );
         assert!(!store.contains(&created));
+    }
+
+    #[test]
+    fn preserve_scope_keeps_reused_descendant_state_only() {
+        let store = ComponentStateStore::new();
+        let retained_scope = UiScope::new("ui").child("retained");
+        let retained = retained_scope.id("h.0.0");
+        let removed = UiScope::new("ui").child("removed").id("h.0.0");
+
+        store.begin_frame();
+        store.with_mut(&retained, |state: &mut TestState| state.value = 1);
+        store.with_mut(&removed, |state: &mut TestState| state.value = 2);
+        store.end_frame();
+
+        store.begin_frame();
+        store.preserve_scope(&retained_scope);
+        store.end_frame();
+
+        assert!(store.contains(&retained));
+        assert!(!store.contains(&removed));
     }
 }

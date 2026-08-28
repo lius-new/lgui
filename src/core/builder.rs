@@ -289,14 +289,17 @@ impl Default for HostTreeBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     };
+    use std::{
+        any::Any,
+        panic::{catch_unwind, AssertUnwindSafe},
+    };
 
     use super::*;
-    use crate::core::{component, context_provider, group, UiRuntime};
+    use crate::core::{component, context_provider, group, ComponentState, UiRuntime};
 
     struct CountingRoot {
         executions: Arc<AtomicUsize>,
@@ -431,6 +434,99 @@ mod tests {
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(second.visited_nodes, 1);
         assert_eq!(second.reused_component_roots, 1);
+    }
+
+    #[derive(Clone, Default)]
+    struct RetainedLocalState {
+        value: u32,
+    }
+
+    impl ComponentState for RetainedLocalState {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    struct ComponentStateRoot {
+        executions: Arc<AtomicUsize>,
+        state_id: Arc<Mutex<Option<UiId>>>,
+    }
+
+    impl RootComponent for ComponentStateRoot {
+        fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+            component((), move |cx, _| {
+                self.executions.fetch_add(1, Ordering::SeqCst);
+                let state_id = cx.use_stable_id();
+                *self.state_id.lock().expect("state ID poisoned") = Some(state_id.clone());
+                super::super::Element::new(move |cx| {
+                    cx.context
+                        .component_state_mut(&state_id, |state: &mut RetainedLocalState| {
+                            state.value = 7;
+                        });
+                    UiElement::group(cx.id, UiRect::new(0, 0, 10, 10))
+                })
+            })
+        }
+    }
+
+    fn mount_component_state_retained(
+        runtime: &UiRuntime,
+        tree: HostTree,
+        executions: Arc<AtomicUsize>,
+        state_id: Arc<Mutex<Option<UiId>>>,
+    ) -> HostTree {
+        let mut builder = HostTreeBuilder::from_retained(tree);
+        builder.mount(
+            ComponentStateRoot {
+                executions,
+                state_id,
+            },
+            UiRect::new(0, 0, 10, 10),
+            &runtime.interaction_state(),
+            runtime.animations(),
+            runtime.component_states(),
+            runtime.component_tree(),
+            runtime.contexts(),
+            runtime.hook_states(),
+            runtime.hook_updates(),
+            runtime.task_spawner(),
+            runtime.effects(),
+            UiScale::ONE,
+        );
+        builder.finish()
+    }
+
+    #[test]
+    fn clean_component_reuse_preserves_component_state_in_its_element_scope() {
+        let runtime = UiRuntime::new();
+        let executions = Arc::new(AtomicUsize::new(0));
+        let state_id = Arc::new(Mutex::new(None));
+        let tree = mount_component_state_retained(
+            &runtime,
+            HostTree::new(),
+            Arc::clone(&executions),
+            Arc::clone(&state_id),
+        );
+        let retained = state_id
+            .lock()
+            .expect("state ID poisoned")
+            .clone()
+            .expect("state ID missing");
+        assert!(runtime.component_states().contains(&retained));
+
+        let _tree = mount_component_state_retained(
+            &runtime,
+            tree,
+            Arc::clone(&executions),
+            Arc::clone(&state_id),
+        );
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(runtime.component_states().contains(&retained));
     }
 
     struct StatefulRoot {

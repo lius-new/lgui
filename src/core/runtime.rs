@@ -1090,7 +1090,7 @@ mod tests {
 
         let start = runtime.handle_input(&tree, InputEvent::ImeStart);
         let update = runtime.handle_input(&tree, InputEvent::ImeUpdate("nǐ".to_owned()));
-        let commit = runtime.handle_input(&tree, InputEvent::ImeCommit("你".to_owned()));
+        let commit = runtime.handle_input(&tree, InputEvent::ImeCommit("中文".to_owned()));
         let end = runtime.handle_input(&tree, InputEvent::ImeEnd);
 
         assert_eq!(start.handler_events[0].target, input_id);
@@ -1101,9 +1101,44 @@ mod tests {
         assert_eq!(commit.default_actions.len(), 1);
         assert!(matches!(
             commit.handler_events[0].payload,
-            super::super::UiEventPayload::Input { ref text } if text == "你"
+            super::super::UiEventPayload::Input { ref text } if text == "中文"
         ));
+        assert_eq!(
+            commit.default_actions[0].action.payload_value(),
+            Some("中文")
+        );
         assert_eq!(end.handler_events[0].target, input_id);
+    }
+
+    #[test]
+    fn backspace_uses_the_focused_text_default_action_route() {
+        let input_id = UiId::new("backspace-input");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                input_id.clone(),
+                UiNodeKind::Custom("test-input"),
+                UiRect::new(0, 0, 100, 40),
+            )
+            .interaction(InteractionRole::Custom("input")),
+        );
+        let mut runtime = UiRuntime::new();
+        runtime.handle_input(
+            &tree,
+            InputEvent::PointerDown {
+                point: Point::new(10, 10),
+                button: PointerButton::Left,
+            },
+        );
+
+        let output = runtime.handle_input(&tree, InputEvent::Backspace);
+
+        assert_eq!(output.default_actions.len(), 1);
+        assert_eq!(output.default_actions[0].event_target, input_id);
+        assert_eq!(
+            output.default_actions[0].action.id().as_str(),
+            "text.backspace"
+        );
     }
 
     #[derive(Clone, Default)]

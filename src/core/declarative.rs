@@ -668,7 +668,7 @@ where
             cx.context.component_tree().mark_dirty(component_id);
         }
         if cx.context.component_tree().can_reuse(component_id, &props) {
-            cx.context.preserve_component_state_scope(&cx.id);
+            cx.context.preserve_component_state_scope(cx.scope);
             return cx
                 .context
                 .component_tree()

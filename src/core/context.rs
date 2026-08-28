@@ -1,7 +1,8 @@
 use super::{
     AnimProperty, AnimationRegistry, ComponentId, ComponentState, ComponentStateStore,
     ComponentTree, ContextRegistry, EffectRegistry, HookId, HookSlotKind, HookStateStore,
-    InteractionFlags, UiId, UiInteractionState, UiRect, UiScale, UiTaskSpawner, UiUpdateQueue,
+    InteractionFlags, UiId, UiInteractionState, UiRect, UiScale, UiScope, UiTaskSpawner,
+    UiUpdateQueue,
 };
 use std::sync::Arc;
 
@@ -72,7 +73,7 @@ impl<'a> UiRenderContext<'a> {
         self.component_states.with_mut(id, f)
     }
 
-    pub fn preserve_component_state_scope(&self, scope: &UiId) {
+    pub fn preserve_component_state_scope(&self, scope: &UiScope) {
         self.component_states.preserve_scope(scope);
     }
 

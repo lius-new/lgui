@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     mem::size_of,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -32,26 +32,27 @@ use windows::{
             },
             Input::{
                 Ime::{
-                    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, GCS_COMPSTR,
+                    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext,
+                    ImmSetCompositionWindow, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR,
                     GCS_RESULTSTR,
                 },
                 KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, DispatchMessageW,
-                GetClassLongPtrW, GetClientRect, GetCursorPos, GetMessageW, GetSystemMetrics,
-                GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, IsWindowVisible, IsZoomed,
-                LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassExW,
-                SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
-                ShowWindow, TranslateMessage, UnregisterClassW, CS_HREDRAW, CS_VREDRAW,
-                CW_USEDEFAULT, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, HICON, HTBOTTOM, HTBOTTOMLEFT,
-                HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
-                ICON_BIG, ICON_SMALL, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED,
-                SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SM_CYICON,
-                SM_CYSIZEFRAME, SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
-                SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT, WINDOW_EX_STYLE,
-                WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
-                WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
+                CreateWindowExW, DefWindowProcW, DestroyCaret, DestroyIcon, DestroyWindow,
+                DispatchMessageW, GetClassLongPtrW, GetClientRect, GetCursorPos, GetMessageW,
+                GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
+                IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, PostQuitMessage,
+                RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW,
+                SetWindowPlacement, SetWindowPos, ShowWindow, TranslateMessage, UnregisterClassW,
+                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, HICON,
+                HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP,
+                HTTOPLEFT, HTTOPRIGHT, ICON_BIG, ICON_SMALL, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG,
+                SIZE_MINIMIZED, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON,
+                SM_CYICON, SM_CYSIZEFRAME, SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+                SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT,
+                WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY,
+                WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
                 WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
                 WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE,
                 WM_NCHITTEST, WM_PAINT, WM_SETICON, WM_SIZE, WNDCLASSEXW, WS_CAPTION,
@@ -75,8 +76,8 @@ use crate::{
         WindowId, WindowMode, WindowOptions, WindowPosition,
     },
     core::{
-        dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton, Size,
-        UiRect,
+        dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton,
+        RuntimeOutput, Size, UiEvent, UiRect,
     },
     session::UiSession,
 };
@@ -351,6 +352,8 @@ struct WindowState {
     close_handler: Option<WindowCloseHandler>,
     dispatcher: Win32Dispatcher,
     render_retry_used: bool,
+    suppressed_ime_char_units: VecDeque<u16>,
+    pending_high_surrogate: Option<u16>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -763,6 +766,8 @@ fn create_window(
                 close_handler: options.close_handler,
                 dispatcher,
                 render_retry_used: false,
+                suppressed_ime_char_units: VecDeque::new(),
+                pending_high_surrogate: None,
             },
         );
     });
@@ -1471,8 +1476,11 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_CHAR => {
-            if let Some(character) = char::from_u32(wparam.0 as u32) {
-                dispatch_input(hwnd, InputEvent::TextInput(character.to_string()));
+            let unit = wparam.0 as u16;
+            if let Some(text) =
+                take_window_char(hwnd, unit).filter(|text| !text.chars().all(char::is_control))
+            {
+                dispatch_input(hwnd, InputEvent::TextInput(text));
             }
             LRESULT(0)
         }
@@ -1484,13 +1492,17 @@ extern "system" fn window_proc(
             let flags = lparam.0 as u32;
             if flags & GCS_RESULTSTR.0 != 0 {
                 if let Some(text) = read_ime_string(hwnd, GCS_RESULTSTR) {
+                    STATE.with(|state| {
+                        if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+                            window.suppressed_ime_char_units.extend(text.encode_utf16());
+                            window.pending_high_surrogate = None;
+                        }
+                    });
                     dispatch_input(hwnd, InputEvent::ImeCommit(text));
                 }
             } else if flags & GCS_COMPSTR.0 != 0 {
-                dispatch_input(
-                    hwnd,
-                    InputEvent::ImeUpdate(read_ime_string(hwnd, GCS_COMPSTR).unwrap_or_default()),
-                );
+                let text = read_ime_string(hwnd, GCS_COMPSTR).unwrap_or_default();
+                dispatch_input(hwnd, InputEvent::ImeUpdate(text));
             }
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
@@ -1499,14 +1511,17 @@ extern "system" fn window_proc(
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_KEYDOWN => {
-            if let Some(key) = key_code(wparam.0) {
-                dispatch_input(
+            let key = key_code(wparam.0);
+            match key {
+                Some(KeyCode::Backspace) => dispatch_input(hwnd, InputEvent::Backspace),
+                Some(key) => dispatch_input(
                     hwnd,
                     InputEvent::KeyDown {
                         key,
                         modifiers: key_modifiers(),
                     },
-                );
+                ),
+                None => {}
             }
             LRESULT(0)
         }
@@ -1736,7 +1751,7 @@ fn schedule_render_retry(state: &mut WindowState) -> bool {
 }
 
 fn dispatch_input(hwnd: HWND, input: InputEvent) {
-    let repaint = STATE.with(|state| {
+    let (repaint, ime_update) = STATE.with(|state| {
         if let Some(state) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
             let output = state.session.handle_input(input);
             let session = &mut state.session;
@@ -1748,9 +1763,11 @@ fn dispatch_input(hwnd: HWND, input: InputEvent) {
                 |action| session.runtime_mut().handle_default_action(action),
                 |context| context_requested_frame |= context.flags().needs_frame,
             );
+            let ime_update =
+                ime_composition_point(&output).map(|point| (state.logical_size, point));
             if context_requested_frame {
                 session.invalidate_all();
-                return WindowRepaint::Full;
+                return (WindowRepaint::Full, ime_update);
             }
             // Router and Store observables synchronously queue the component that owns their
             // outlet/content boundary. Consume that queue now so this input pass invalidates the
@@ -1762,13 +1779,59 @@ fn dispatch_input(hwnd: HWND, input: InputEvent) {
             }
             if output.animation_changed && repaint == WindowRepaint::None {
                 session.invalidate_all();
-                return WindowRepaint::Full;
+                return (WindowRepaint::Full, ime_update);
             }
-            return repaint;
+            return (repaint, ime_update);
         }
-        WindowRepaint::None
+        (WindowRepaint::None, None)
     });
+    if let Some((logical_size, point)) = ime_update {
+        update_ime_composition_window(hwnd, logical_size, point);
+    }
     request_window_repaint(hwnd, repaint);
+}
+
+fn ime_composition_point(output: &RuntimeOutput) -> Option<Option<Point>> {
+    output
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            UiEvent::FocusChanged { current, .. } => Some(
+                current
+                    .as_ref()
+                    .map(|hit| Point::new(hit.rect.left + 12, hit.rect.bottom + 4)),
+            ),
+            _ => None,
+        })
+        .last()
+}
+
+fn update_ime_composition_window(hwnd: HWND, logical_size: Size, point: Option<Point>) {
+    unsafe {
+        let _ = DestroyCaret();
+    }
+    let Some(point) = point else {
+        return;
+    };
+    let physical_point = DpiContext::for_window(hwnd, logical_size)
+        .scale
+        .physical_point(point);
+    unsafe {
+        let context = ImmGetContext(hwnd);
+        if context.is_invalid() {
+            return;
+        }
+        let form = COMPOSITIONFORM {
+            dwStyle: CFS_POINT,
+            ptCurrentPos: POINT {
+                x: physical_point.x,
+                y: physical_point.y,
+            },
+            rcArea: Default::default(),
+        };
+        let _ = ImmSetCompositionWindow(context, &form);
+        let _ = ImmReleaseContext(hwnd, context);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1887,6 +1950,40 @@ fn key_modifiers() -> KeyModifiers {
     }
 }
 
+fn take_window_char(hwnd: HWND, unit: u16) -> Option<String> {
+    STATE.with(|state| {
+        let mut windows = state.borrow_mut();
+        let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
+            return Some(String::from_utf16_lossy(&[unit]));
+        };
+        if suppress_committed_ime_char(&mut window.suppressed_ime_char_units, unit) {
+            return None;
+        }
+        decode_utf16_char_unit(&mut window.pending_high_surrogate, unit)
+    })
+}
+
+fn suppress_committed_ime_char(pending: &mut VecDeque<u16>, unit: u16) -> bool {
+    if pending.front().copied() == Some(unit) {
+        pending.pop_front();
+        true
+    } else {
+        pending.clear();
+        false
+    }
+}
+
+fn decode_utf16_char_unit(pending_high_surrogate: &mut Option<u16>, unit: u16) -> Option<String> {
+    if (0xD800..=0xDBFF).contains(&unit) {
+        *pending_high_surrogate = Some(unit);
+        return None;
+    }
+    let units = pending_high_surrogate
+        .take()
+        .map_or_else(|| vec![unit], |high| vec![high, unit]);
+    Some(String::from_utf16_lossy(&units))
+}
+
 fn read_ime_string(
     hwnd: HWND,
     kind: windows::Win32::UI::Input::Ime::IME_COMPOSITION_STRING,
@@ -1926,13 +2023,35 @@ fn wide(value: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use windows::Win32::Foundation::RECT;
 
     use super::{
-        resize_border_hit, window_corner_preference, window_style, OwnerVisibility, Point,
-        WindowOptions, DWMWCP_DONOTROUND, DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT,
-        WS_CAPTION, WS_POPUP, WS_THICKFRAME,
+        decode_utf16_char_unit, resize_border_hit, suppress_committed_ime_char,
+        window_corner_preference, window_style, OwnerVisibility, Point, WindowOptions,
+        DWMWCP_DONOTROUND, DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT, WS_CAPTION, WS_POPUP,
+        WS_THICKFRAME,
     };
+
+    #[test]
+    fn committed_ime_units_are_suppressed_until_the_sequence_diverges() {
+        let mut pending = "\u{4E2D}\u{6587}".encode_utf16().collect::<VecDeque<_>>();
+        assert!(suppress_committed_ime_char(&mut pending, '\u{4E2D}' as u16));
+        assert!(!suppress_committed_ime_char(&mut pending, 'x' as u16));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn utf16_decoder_combines_a_surrogate_pair() {
+        let mut high = None;
+        assert_eq!(decode_utf16_char_unit(&mut high, 0xD83D), None);
+        assert_eq!(
+            decode_utf16_char_unit(&mut high, 0xDE00),
+            Some("\u{1F600}".to_string())
+        );
+        assert_eq!(high, None);
+    }
 
     #[test]
     fn corner_preferences_map_to_explicit_dwm_requests() {
