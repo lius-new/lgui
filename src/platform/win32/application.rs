@@ -451,6 +451,7 @@ impl ApplicationBackend for Win32Application {
         };
 
         let dispatcher = Win32Dispatcher::new();
+        context.resources().provide(dispatcher.application_handle());
         let factory = Arc::clone(&self.renderer_factory);
         let main_id = options.id.clone();
         let hwnd = create_window(
@@ -463,7 +464,6 @@ impl ApplicationBackend for Win32Application {
             dispatcher.clone(),
         )?;
         dispatcher.attach(hwnd);
-        context.resources().provide(dispatcher.application_handle());
         #[cfg(feature = "notifications")]
         if let Some(registration) = notification_registration {
             let service = super::Win32NotificationService::new(&registration.identity)

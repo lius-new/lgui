@@ -389,6 +389,7 @@ impl UiRuntime {
             for event in events.iter().cloned() {
                 self.dirty.mark_event(event);
             }
+            self.mark_component_owners(&tree, events.iter().flat_map(interaction_state_target_ids));
             let animation_changed =
                 apply_events_to_animations(&tree, &mut self.animations, events.iter().cloned());
             if animation_changed {
@@ -814,6 +815,57 @@ mod tests {
 
         assert!(runtime.sync_tree_focus(&base_tree));
         assert_eq!(runtime.interaction_state().focused, Some(background));
+    }
+
+    #[test]
+    fn tab_focus_traversal_invalidates_retained_focus_visuals() {
+        let first = UiId::owned("first");
+        let second = UiId::owned("second");
+        let mut runtime = UiRuntime::new();
+        let owner = {
+            let components = runtime.component_tree();
+            components.begin_render();
+            let owner = components.root(UiId::owned("focus-owner"), "focus-owner");
+            components.begin_component_execution(owner);
+            components.finish_component(owner);
+            components.end_render();
+            owner
+        };
+
+        let mut tree = HostTree::new();
+        for (id, rect) in [
+            (first.clone(), UiRect::new(0, 0, 40, 20)),
+            (second.clone(), UiRect::new(50, 0, 90, 20)),
+        ] {
+            tree.push(
+                UiNode::new(id, UiNodeKind::Button, rect)
+                    .component_owner(owner)
+                    .interaction(InteractionRole::Button),
+            );
+        }
+        runtime.reconcile_tree(&tree);
+        assert!(runtime.focus_node(&first));
+
+        {
+            let components = runtime.component_tree();
+            components.begin_render();
+            components.begin_component_execution(owner);
+            components.finish_component(owner);
+            components.end_render();
+            assert!(!components.is_dirty(owner));
+        }
+
+        let output = runtime.handle_input(
+            &tree,
+            InputEvent::KeyDown {
+                key: KeyCode::Tab,
+                modifiers: super::super::KeyModifiers::default(),
+            },
+        );
+        runtime.handle_default_action(output.default_actions[0].clone());
+
+        assert_eq!(runtime.interaction_state().focused, Some(second));
+        assert!(runtime.component_tree().is_dirty(owner));
     }
 
     #[test]
