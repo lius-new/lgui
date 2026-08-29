@@ -257,6 +257,10 @@ impl AnimationRegistry {
         changed
     }
 
+    pub(crate) fn is_running(&self) -> bool {
+        self.values.values().any(|value| value.is_running())
+    }
+
     pub fn take_dirty_ids(&mut self) -> Vec<UiId> {
         self.dirty_ids.drain().collect()
     }

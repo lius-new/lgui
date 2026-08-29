@@ -330,6 +330,15 @@ impl ComponentStateStore {
             .collect()
     }
 
+    pub(crate) fn requested_frame_interval_ms(&self) -> Option<u64> {
+        self.states
+            .borrow()
+            .values()
+            .filter(|entry| entry.state.wants_frame())
+            .map(|entry| entry.state.frame_interval_ms().max(1))
+            .min()
+    }
+
     pub(crate) fn advance_invalidations(&self, elapsed_ms: f32) -> Vec<ComponentStateInvalidation> {
         let mut dirty = Vec::new();
         for (id, entry) in self.states.borrow_mut().iter_mut() {

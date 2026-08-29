@@ -1067,7 +1067,13 @@ impl WinitWindow {
                 self.full_redraw = true;
             }
         }
-        if self.full_redraw || updates.frame_requested || has_dirty_ids {
+        if updates.frame_requested {
+            self.schedule_next_frame();
+        }
+        if self.full_redraw
+            || has_dirty_ids
+            || (updates.frame_requested && self.next_frame.is_none())
+        {
             self.window.request_redraw();
         }
     }
@@ -1128,11 +1134,11 @@ impl WinitWindow {
     }
 
     fn schedule_next_frame(&mut self) {
-        self.next_frame = self
-            .session
-            .runtime()
-            .frame_interval_ms()
-            .map(|milliseconds| Instant::now() + Duration::from_millis(milliseconds.max(1)));
+        self.next_frame = next_frame_deadline(
+            self.next_frame,
+            Instant::now(),
+            self.session.runtime().frame_interval_ms(),
+        );
     }
 
     fn update_scale(&mut self) {
@@ -1634,6 +1640,17 @@ impl WinitSkiaRenderer {
     }
 }
 
+fn next_frame_deadline(
+    current: Option<Instant>,
+    now: Instant,
+    interval_ms: Option<u64>,
+) -> Option<Instant> {
+    interval_ms.map(|milliseconds| {
+        let requested = now + Duration::from_millis(milliseconds.max(1));
+        current.map_or(requested, |deadline| deadline.min(requested))
+    })
+}
+
 fn renderer_recovery_state(renderer: &WinitSkiaRenderer) -> RendererRecoveryState {
     renderer
         .fallback_reason()
@@ -1986,6 +2003,21 @@ mod tests {
     fn software_backend_rejects_an_explicit_unavailable_driver() {
         let backend = WinitApplication::new(GraphicsPreference::Vulkan);
         assert_eq!(backend.preference, GraphicsPreference::Vulkan);
+    }
+
+    #[test]
+    fn repeated_frame_requests_preserve_the_earliest_deadline() {
+        let now = Instant::now();
+        let original = now + Duration::from_millis(16);
+
+        assert_eq!(
+            next_frame_deadline(Some(original), now + Duration::from_millis(4), Some(16)),
+            Some(original)
+        );
+        assert_eq!(
+            next_frame_deadline(Some(original), now + Duration::from_millis(4), Some(4)),
+            Some(now + Duration::from_millis(8))
+        );
     }
 
     #[test]

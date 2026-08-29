@@ -82,7 +82,14 @@ impl UiRuntime {
     }
 
     pub fn frame_interval_ms(&self) -> Option<u64> {
-        self.frame_interval_ms
+        [
+            self.frame_interval_ms,
+            self.animations.is_running().then_some(16),
+            self.component_states.requested_frame_interval_ms(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     pub fn invalidate_all_components(&self) {
@@ -860,6 +867,8 @@ mod tests {
             |_state: &mut AlwaysAnimatingState| {},
         );
 
+        assert_eq!(runtime.frame_interval_ms(), Some(33));
+
         let output = runtime.advance(&mut tree, 16.0);
 
         assert!(output.animation_changed);
@@ -977,6 +986,8 @@ mod tests {
             rail_id,
             |_state: &mut AlwaysAnimatingState| {},
         );
+
+        assert_eq!(runtime.frame_interval_ms(), Some(16));
 
         let output = runtime.advance(&mut tree, 16.0);
 
@@ -1479,6 +1490,10 @@ mod tests {
         }
 
         fn advance(&mut self, _elapsed_ms: f32) -> bool {
+            true
+        }
+
+        fn wants_frame(&self) -> bool {
             true
         }
 
