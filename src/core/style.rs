@@ -6,20 +6,34 @@ impl Color {
     pub const WHITE: Self = Self(0xFFFFFF);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use std::hash::{Hash, Hasher};
+
+use super::geometry::normalized_f32_bits;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stroke {
     pub color: Color,
-    pub width: i32,
+    pub width: f32,
     pub alpha: u8,
 }
 
 impl Stroke {
-    pub const fn new(color: Color, width: i32, alpha: u8) -> Self {
+    pub const fn new(color: Color, width: f32, alpha: u8) -> Self {
         Self {
             color,
             width,
             alpha,
         }
+    }
+}
+
+impl Eq for Stroke {}
+
+impl Hash for Stroke {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.color.hash(state);
+        normalized_f32_bits(self.width).hash(state);
+        self.alpha.hash(state);
     }
 }
 
@@ -30,23 +44,23 @@ pub enum TextAlign {
     Right,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextStyle {
     pub color: Color,
-    pub height: i32,
+    pub height: f32,
     pub weight: i32,
-    pub tracking: i32,
+    pub tracking: f32,
     pub align: TextAlign,
     pub alpha: u8,
 }
 
 impl TextStyle {
-    pub const fn new(color: Color, height: i32, weight: i32) -> Self {
+    pub const fn new(color: Color, height: f32, weight: i32) -> Self {
         Self {
             color,
             height,
             weight,
-            tracking: 0,
+            tracking: 0.0,
             align: TextAlign::Left,
             alpha: 0xFF,
         }
@@ -57,7 +71,7 @@ impl TextStyle {
         self
     }
 
-    pub const fn tracking(mut self, tracking: i32) -> Self {
+    pub const fn tracking(mut self, tracking: f32) -> Self {
         self.tracking = tracking;
         self
     }
@@ -68,15 +82,39 @@ impl TextStyle {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+impl Eq for TextStyle {}
+
+impl Hash for TextStyle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.color.hash(state);
+        normalized_f32_bits(self.height).hash(state);
+        self.weight.hash(state);
+        normalized_f32_bits(self.tracking).hash(state);
+        self.align.hash(state);
+        self.alpha.hash(state);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VisualStyle {
     pub fill: Option<Color>,
     pub fill_alpha: u8,
     pub stroke: Option<Stroke>,
-    pub radius: i32,
+    pub radius: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+impl Eq for VisualStyle {}
+
+impl Hash for VisualStyle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.fill.hash(state);
+        self.fill_alpha.hash(state);
+        self.stroke.hash(state);
+        normalized_f32_bits(self.radius).hash(state);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PathStyle {
     pub fill: Option<Color>,
     pub fill_alpha: u8,
@@ -181,7 +219,7 @@ pub struct BackdropBlurStyle {
     pub source: &'static str,
     pub fit: super::ImageFit,
     pub source_rect: super::UiRect,
-    pub radius: usize,
+    pub radius: f32,
     pub opacity: f32,
     pub tint: Color,
     pub tint_alpha: f32,
@@ -197,14 +235,14 @@ impl BackdropBlurStyle {
             source,
             fit,
             source_rect,
-            radius: 24,
+            radius: 24.0,
             opacity: 1.0,
             tint: Color::BLACK,
             tint_alpha: 0.0,
         }
     }
 
-    pub const fn radius(mut self, radius: usize) -> Self {
+    pub const fn radius(mut self, radius: f32) -> Self {
         self.radius = radius;
         self
     }
@@ -256,7 +294,7 @@ impl Default for VisualStyle {
             fill: None,
             fill_alpha: 0xFF,
             stroke: None,
-            radius: 0,
+            radius: 0.0,
         }
     }
 }
@@ -277,7 +315,7 @@ impl VisualStyle {
             fill: Some(fill),
             fill_alpha: 0xFF,
             stroke: None,
-            radius: 0,
+            radius: 0.0,
         }
     }
 
@@ -286,7 +324,7 @@ impl VisualStyle {
         self
     }
 
-    pub const fn radius(mut self, radius: i32) -> Self {
+    pub const fn radius(mut self, radius: f32) -> Self {
         self.radius = radius;
         self
     }

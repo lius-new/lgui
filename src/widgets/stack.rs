@@ -7,14 +7,14 @@ pub struct Stack {
     key: ElementKey,
     rect: UiRect,
     axis: Axis,
-    gap: i32,
+    gap: f32,
     padding: EdgeInsets,
     align: Align,
     children: Vec<Element>,
 }
 
 impl Stack {
-    pub fn gap(mut self, gap: i32) -> Self {
+    pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
         self
     }
@@ -77,7 +77,7 @@ pub fn stack(rect: UiRect, axis: Axis) -> Stack {
         key: ElementKey::caller(),
         rect,
         axis,
-        gap: 0,
+        gap: 0.0,
         padding: EdgeInsets::ZERO,
         align: Align::Start,
         children: Vec::new(),

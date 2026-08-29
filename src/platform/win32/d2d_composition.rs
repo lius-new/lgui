@@ -34,17 +34,18 @@ use windows::{
                 DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                 DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
-            Gdi::HDC,
         },
     },
 };
 
 use crate::{
-    application::RenderErrorStage,
-    core::{Scene, UiRect},
+    core::{PhysicalRect, Scene},
+    renderer::{FrameInfo, RenderErrorStage, RenderStats, RendererCapabilities, SceneRenderer},
 };
 
-use super::super::{enhanced, Win32RenderError, Win32Renderer, Win32RendererFactory};
+use super::super::{
+    enhanced, Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct D2dRendererFactory;
@@ -54,7 +55,7 @@ impl Win32RendererFactory for D2dRendererFactory {
         "d2d"
     }
 
-    fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
+    fn create(&self, hwnd: HWND) -> Result<Box<Win32SceneRenderer>> {
         Ok(Box::new(D2dRenderer::new(hwnd)))
     }
 }
@@ -86,7 +87,7 @@ impl D2dRenderer {
         }
     }
 
-    fn ensure_resources(&mut self, viewport: UiRect) -> Result<&mut CompositionResources> {
+    fn ensure_resources(&mut self, viewport: PhysicalRect) -> Result<&mut CompositionResources> {
         let size = (viewport.width().max(1), viewport.height().max(1));
         if self.resources.is_none() || self.size != size {
             self.resources = Some(CompositionResources::new(self.hwnd, size.0, size.1)?);
@@ -97,50 +98,37 @@ impl D2dRenderer {
             .ok_or_else(|| Error::from_hresult(HRESULT(0x80004003_u32 as i32)))
     }
 
-    fn resources_need_reset(&self, viewport: UiRect) -> bool {
+    fn resources_need_reset(&self, viewport: PhysicalRect) -> bool {
         let size = (viewport.width().max(1), viewport.height().max(1));
         self.resources.is_none() || self.size != size
     }
 }
 
-impl Win32Renderer for D2dRenderer {
-    fn draw(
-        &mut self,
-        _hwnd: HWND,
-        _target: HDC,
-        scene: &Scene,
-        viewport: UiRect,
-    ) -> std::result::Result<(), Win32RenderError> {
-        let result = self
-            .ensure_resources(viewport)
-            .map_err(|source| {
-                Win32RenderError::new(
-                    RenderErrorStage::Create,
-                    "create_composition_resources",
-                    source,
-                )
-            })
-            .and_then(|resources| resources.draw_and_present(scene, None));
-        if result.is_err() {
-            self.resources = None;
+impl SceneRenderer for D2dRenderer {
+    type Target = Win32RenderTarget;
+    type Error = Win32RenderError;
+
+    fn capabilities(&self) -> RendererCapabilities {
+        RendererCapabilities {
+            partial_redraw: true,
+            retained_surface: true,
         }
-        result
     }
 
-    fn draw_damage(
+    fn render(
         &mut self,
-        _hwnd: HWND,
-        _target: HDC,
+        _target: &mut Self::Target,
         scene: &Scene,
-        viewport: UiRect,
-        damage: &[UiRect],
-    ) -> std::result::Result<(), Win32RenderError> {
+        frame: &FrameInfo<'_>,
+    ) -> std::result::Result<RenderStats, Self::Error> {
+        let viewport = frame.viewport();
+        let damage = frame.damage();
         let reset = self.resources_need_reset(viewport);
         if !reset && damage.is_empty() {
             // DirectComposition retains the last presented surface for exposure paints.
-            return Ok(());
+            return Ok(RenderStats::for_frame(frame));
         }
-        let full = reset || damage_is_full(viewport, damage);
+        let full = reset || frame.is_full_redraw() || damage_is_full(viewport, damage);
         let result = self
             .ensure_resources(viewport)
             .map_err(|source| {
@@ -156,7 +144,8 @@ impl Win32Renderer for D2dRenderer {
         if result.is_err() {
             self.resources = None;
         }
-        result
+        result?;
+        Ok(RenderStats::for_frame(frame))
     }
 }
 
@@ -218,17 +207,22 @@ impl CompositionResources {
     fn draw_and_present(
         &mut self,
         scene: &Scene,
-        damage: Option<&[UiRect]>,
+        damage: Option<&[PhysicalRect]>,
     ) -> std::result::Result<(), Win32RenderError> {
         match damage {
             Some(rects) => {
+                let scene_damage = rects
+                    .iter()
+                    .copied()
+                    .map(PhysicalRect::as_ui_rect)
+                    .collect::<Vec<_>>();
                 self.renderer
-                    .draw_scene_dirty(scene, rects)
+                    .draw_scene_dirty(scene, &scene_damage)
                     .map_err(|source| {
                         Win32RenderError::new(RenderErrorStage::Draw, "draw_scene_dirty", source)
                     })?;
                 self.renderer
-                    .copy_scene_to_target(&self.target_bitmap, Some(rects))
+                    .copy_scene_to_target(&self.target_bitmap, Some(&scene_damage))
                     .map_err(|source| {
                         Win32RenderError::new(
                             RenderErrorStage::Copy,
@@ -285,11 +279,11 @@ impl CompositionResources {
     }
 }
 
-fn damage_is_full(viewport: UiRect, damage: &[UiRect]) -> bool {
+fn damage_is_full(viewport: PhysicalRect, damage: &[PhysicalRect]) -> bool {
     damage.len() == 1 && damage[0] == viewport
 }
 
-unsafe fn present_dirty(swap_chain: &IDXGISwapChain1, damage: &[UiRect]) -> Result<()> {
+unsafe fn present_dirty(swap_chain: &IDXGISwapChain1, damage: &[PhysicalRect]) -> Result<()> {
     let mut rects = damage
         .iter()
         .map(|rect| RECT {
@@ -313,19 +307,25 @@ mod tests {
 
     #[test]
     fn exact_viewport_damage_uses_the_full_present_path() {
-        let viewport = UiRect::new(0, 0, 1280, 720);
+        let viewport = PhysicalRect::new(0, 0, 1280, 720);
 
         assert!(damage_is_full(viewport, &[viewport]));
     }
 
     #[test]
     fn partial_or_split_damage_keeps_the_dirty_present_path() {
-        let viewport = UiRect::new(0, 0, 1280, 720);
+        let viewport = PhysicalRect::new(0, 0, 1280, 720);
 
-        assert!(!damage_is_full(viewport, &[UiRect::new(12, 20, 240, 180)]));
         assert!(!damage_is_full(
             viewport,
-            &[UiRect::new(0, 0, 640, 720), UiRect::new(640, 0, 1280, 720),]
+            &[PhysicalRect::new(12, 20, 240, 180)]
+        ));
+        assert!(!damage_is_full(
+            viewport,
+            &[
+                PhysicalRect::new(0, 0, 640, 720),
+                PhysicalRect::new(640, 0, 1280, 720),
+            ]
         ));
     }
 }

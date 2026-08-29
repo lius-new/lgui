@@ -733,8 +733,8 @@ mod tests {
         application::{AppView, ApplicationContext},
         core::{
             component, context_provider, text, Color, HostTree, HostTreeBuilder, InputEvent,
-            InteractionRole, Point, PointerButton, RootComponent, TextStyle, UiElement, UiRect,
-            UiRuntime, UiScale, VisualStyle,
+            InteractionRole, Point, PointerButton, PointerData, RootComponent, TextStyle,
+            UiElement, UiRect, UiRuntime, UiScale, VisualStyle,
         },
         router::RouteMatchHooks as _,
         session::UiSession,
@@ -905,7 +905,7 @@ mod tests {
         application: ApplicationContext,
         routes: DeclarativeRouter<Location>,
     ) -> HostTree {
-        let viewport = UiRect::new(0, 0, 100, 100);
+        let viewport = UiRect::new(0.0, 0.0, 100.0, 100.0);
         let interaction = ui.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(
@@ -996,7 +996,7 @@ mod tests {
 
     #[test]
     fn navigation_invalidates_the_outlet_bounds_instead_of_the_window() {
-        let outlet_bounds = UiRect::new(18, 24, 82, 76);
+        let outlet_bounds = UiRect::new(18.0, 24.0, 82.0, 76.0);
         let routes = create_router((
             route("/", move |_| group(outlet_bounds)),
             route("/dialog", move |_| group(outlet_bounds)),
@@ -1015,14 +1015,14 @@ mod tests {
             old_tree.paint_bounds(updates.dirty_ids),
             Some(outlet_bounds)
         );
-        assert_ne!(outlet_bounds, UiRect::new(0, 0, 100, 100));
+        assert_ne!(outlet_bounds, UiRect::new(0.0, 0.0, 100.0, 100.0));
     }
 
     #[test]
     fn navigation_commits_the_new_nested_outlet_in_the_first_retained_frame() {
-        let viewport = UiRect::new(0, 0, 320, 200);
-        let outlet_bounds = UiRect::new(80, 40, 280, 180);
-        let login_link_bounds = UiRect::new(180, 140, 260, 170);
+        let viewport = UiRect::new(0.0, 0.0, 320.0, 200.0);
+        let outlet_bounds = UiRect::new(80.0, 40.0, 280.0, 180.0);
+        let login_link_bounds = UiRect::new(180.0, 140.0, 260.0, 170.0);
         let application = ApplicationContext::empty();
         let router = application.router::<Location>();
         let view: AppView = Arc::new({
@@ -1036,7 +1036,7 @@ mod tests {
                                 text(
                                     outlet_bounds,
                                     "login",
-                                    TextStyle::new(Color::WHITE, 16, 400),
+                                    TextStyle::new(Color::WHITE, 16.0, 400),
                                 ),
                                 Element::new(move |cx| {
                                     UiElement::panel(
@@ -1052,7 +1052,7 @@ mod tests {
                             text(
                                 outlet_bounds,
                                 "register",
-                                TextStyle::new(Color::WHITE, 16, 400),
+                                TextStyle::new(Color::WHITE, 16.0, 400),
                             )
                         }),
                     ),
@@ -1074,7 +1074,10 @@ mod tests {
             .any(|node| node.text.as_deref() == Some("login")));
 
         session.handle_input(InputEvent::PointerDown {
-            point: Point::new(login_link_bounds.left + 1, login_link_bounds.top + 1),
+            pointer: PointerData::mouse(Point::new(
+                login_link_bounds.left + 1.0,
+                login_link_bounds.top + 1.0,
+            )),
             button: PointerButton::Left,
         });
         assert!(session.runtime().interaction_state().focused.is_some());
@@ -1112,7 +1115,7 @@ mod tests {
                         component((), move |cx, _| {
                             metadata_renders.fetch_add(1, Ordering::SeqCst);
                             let _matches = cx.use_route_matches();
-                            group(UiRect::new(0, 0, 100, 20))
+                            group(UiRect::new(0.0, 0.0, 100.0, 20.0))
                         })
                         .key("route.metadata"),
                         outlet(),
@@ -1120,8 +1123,8 @@ mod tests {
                 }
             },
             (
-                route("/", |_| group(UiRect::new(0, 20, 100, 100))),
-                route("/dialog", |_| group(UiRect::new(0, 20, 100, 100))),
+                route("/", |_| group(UiRect::new(0.0, 20.0, 100.0, 100.0))),
+                route("/dialog", |_| group(UiRect::new(0.0, 20.0, 100.0, 100.0))),
             ),
         ));
         let application = ApplicationContext::empty();

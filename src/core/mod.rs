@@ -25,6 +25,7 @@ mod observable;
 mod reactor;
 mod render;
 mod runtime;
+mod semantics;
 mod scope;
 mod static_layer;
 mod style;
@@ -59,11 +60,15 @@ pub use dispatch::{dispatch_event_handlers, dispatch_hit_handlers, dispatch_runt
 pub use effect::{EffectRegistry, IntoEffectCleanup, UiEffect};
 pub use element::{UiComponent, UiElement};
 pub use event::{
-    apply_events_to_animations, InputEvent, InteractionFlags, KeyCode, KeyModifiers, PointerButton,
-    UiEvent, UiEventDispatcher, UiInteractionState,
+    apply_events_to_animations, ImeEvent, InputEvent, InteractionFlags, KeyLocation, KeyModifiers,
+    KeyState, KeyboardEvent, LogicalKey, NamedKey, PhysicalKey, PlatformEvent, PlatformTheme,
+    PointerButton, PointerData, PointerId, PointerKind, SemanticInput, TouchPhase, UiEvent,
+    UiEventDispatcher, UiInteractionState, WheelDelta, WheelUnit, WindowStateEvent,
 };
 pub use event_context::{UiAsyncContext, UiEventContext, UiEventFlags};
-pub use geometry::{EdgeInsets, Point, Size, UiRect, UiScale};
+pub use geometry::{
+    EdgeInsets, PhysicalPoint, PhysicalRect, PhysicalSize, Point, Size, UiRect, UiScale,
+};
 pub use handler::{
     IntoUiHandler, UiActionBinding, UiActionEvent, UiActionHandler, UiEventHandler, UiEventKind,
     UiEventPayload, UiHandlerEvent, UiInputEventBinding, UiInputEventHandler,
@@ -81,7 +86,11 @@ pub(crate) use render::{clear_scroll_raster_command_cache, patch_compositing_lay
 pub use render::{
     commands_for_phase, compile_scene, compile_scene_root, compositing_layer_damage,
     scene_root_ids, scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene,
-    ScenePrimitive, ScrollRasterSpec,
+    ScenePrimitive, ScenePrimitiveKind, ScrollRasterSpec,
+};
+pub use semantics::{
+    SemanticAction, SemanticNode, SemanticRelationships, SemanticRole, SemanticState,
+    SemanticText, SemanticUpdate, Semantics,
 };
 pub use runtime::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 pub use scope::UiScope;

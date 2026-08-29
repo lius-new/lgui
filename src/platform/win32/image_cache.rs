@@ -192,6 +192,45 @@ pub fn request_cached_image(source: &ImageSource) -> CachedImageStatus {
     status
 }
 
+pub(crate) fn portable_image_cache_handle() -> crate::assets::ImageCacheHandle {
+    crate::assets::ImageCacheHandle::new(
+        |source| match source {
+            crate::core::UiImageSource::Url(url) => {
+                portable_status(request_cached_image(&ImageSource::url(url)))
+            }
+            crate::core::UiImageSource::File(path) => {
+                portable_status(request_cached_image(&ImageSource::file(path)))
+            }
+            crate::core::UiImageSource::Static(_) | crate::core::UiImageSource::Bytes { .. } => {
+                crate::assets::ImageStatus::Ready
+            }
+        },
+        |source| {
+            let source = match source {
+                crate::core::UiImageSource::Url(url) => ImageSource::url(url),
+                crate::core::UiImageSource::File(path) => ImageSource::file(path),
+                crate::core::UiImageSource::Static(_)
+                | crate::core::UiImageSource::Bytes { .. } => return None,
+            };
+            cached_image_data(&source).map(|(bytes, _, _)| Arc::<[u8]>::from(bytes))
+        },
+        || {
+            clear_cached_image_cache();
+            clear_decoded_image_cache();
+            #[cfg(feature = "advanced-rendering")]
+            super::enhanced::image::clear_decoded_image_cache();
+        },
+    )
+}
+
+fn portable_status(status: CachedImageStatus) -> crate::assets::ImageStatus {
+    match status {
+        CachedImageStatus::Loading => crate::assets::ImageStatus::Loading,
+        CachedImageStatus::Ready => crate::assets::ImageStatus::Ready,
+        CachedImageStatus::Failed => crate::assets::ImageStatus::Failed,
+    }
+}
+
 pub fn cached_image_data(source: &ImageSource) -> Option<(Vec<u8>, i32, i32)> {
     let key = source.key();
     let entry = {

@@ -1,14 +1,15 @@
 use crate::core::UiEventContext;
 use crate::core::{
     AnimProperty, AnimationBinding, Element, ElementKey, ElementRenderCx, InteractionRole,
-    IntoElementContent, TextStyle, UiElement, UiEventHandler, UiRect, VisualStyle,
+    IntoElementContent, SemanticAction, SemanticRole, Semantics, TextStyle, UiElement,
+    UiEventHandler, UiRect, VisualStyle,
 };
 
 #[derive(Clone, Copy)]
 pub struct ButtonStyle {
     pub panel: VisualStyle,
     pub text: TextStyle,
-    pub hover_outset: (i32, i32),
+    pub hover_outset: (f32, f32),
 }
 
 impl ButtonStyle {
@@ -22,7 +23,7 @@ impl ButtonStyle {
         self
     }
 
-    pub fn hover_outset(mut self, x: i32, y: i32) -> Self {
+    pub fn hover_outset(mut self, x: f32, y: f32) -> Self {
         self.hover_outset = (x, y);
         self
     }
@@ -81,6 +82,11 @@ impl From<Button> for Element {
             let label_id = cx.scope.id(format!("{}.label", cx.id.as_str()));
             let mut root = UiElement::button(cx.id, rect, style.panel)
                 .interaction(InteractionRole::Button)
+                .semantics(
+                    Semantics::new(SemanticRole::Button)
+                        .name(label)
+                        .action(SemanticAction::Click),
+                )
                 .animation(AnimationBinding::new(AnimProperty::Hover, 0.0, 1.0))
                 .animation(AnimationBinding::new(AnimProperty::Pressed, 0.0, 1.0))
                 .animation_outset(style.hover_outset.0, style.hover_outset.1);

@@ -7,9 +7,26 @@ use crate::{
 
 pub mod dpi;
 
+#[cfg(feature = "renderer-skia")]
+#[allow(unsafe_code)]
+pub(crate) mod skia;
+
 #[cfg(all(feature = "backend-win32", target_os = "windows"))]
 #[allow(unsafe_code)]
 pub mod win32;
+
+#[cfg(feature = "backend-winit")]
+mod winit;
+#[cfg(feature = "renderer-skia-gl")]
+#[allow(unsafe_code)]
+mod winit_skia_gl;
+#[cfg(all(feature = "backend-winit", target_os = "windows"))]
+mod winit_windows;
+#[cfg(feature = "accessibility")]
+mod winit_accessibility;
+
+#[cfg(feature = "backend-winit")]
+pub use winit::{WinitApplication, WinitApplicationError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardError {

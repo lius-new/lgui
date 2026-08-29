@@ -11,7 +11,7 @@ Application UI is expressed as retained function components and declarative `Ele
 fn counter(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_u32);
     let current = count.get();
-    let rect = UiRect::new(0, 0, 160, 48);
+    let rect = UiRect::new(0.0, 0.0, 160.0, 48.0);
 
     cx.use_effect((current,), move || {
         move || tracing::debug!(count = current, "counter effect cleanup")

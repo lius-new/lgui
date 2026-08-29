@@ -193,8 +193,7 @@ impl HostTree {
             let parent_changed = node
                 .parent
                 .as_ref()
-                .is_some_and(|parent| remove.contains(parent))
-                ;
+                .is_some_and(|parent| remove.contains(parent));
             if !children_changed && !parent_changed {
                 continue;
             }
@@ -446,8 +445,8 @@ impl HostTree {
                 .handler_event(&hit.id, UiEventPayload::Click)
                 .into_iter()
                 .collect(),
-            UiEvent::Wheel { hit, delta_y } => self
-                .handler_event(&hit.id, UiEventPayload::Wheel { delta_y: *delta_y })
+            UiEvent::Wheel { hit, delta } => self
+                .handler_event(&hit.id, UiEventPayload::Wheel { delta: *delta })
                 .into_iter()
                 .collect(),
             UiEvent::TextInput { target, text } => self
@@ -458,10 +457,17 @@ impl HostTree {
                 .handler_event(target, UiEventPayload::CompositionStart)
                 .into_iter()
                 .collect(),
-            UiEvent::ImeUpdated { target, text } => self
+            UiEvent::ImeUpdated {
+                target,
+                text,
+                cursor,
+            } => self
                 .handler_event(
                     target,
-                    UiEventPayload::CompositionUpdate { text: text.clone() },
+                    UiEventPayload::CompositionUpdate {
+                        text: text.clone(),
+                        cursor: cursor.clone(),
+                    },
                 )
                 .into_iter()
                 .collect(),
@@ -469,40 +475,26 @@ impl HostTree {
                 .handler_event(target, UiEventPayload::CompositionEnd)
                 .into_iter()
                 .collect(),
-            UiEvent::Backspace { target } => self
+            UiEvent::Keyboard { target, event } => self
                 .handler_event(
                     target,
-                    UiEventPayload::KeyDown {
-                        key: super::KeyCode::Backspace,
-                        modifiers: super::KeyModifiers::default(),
+                    UiEventPayload::Keyboard {
+                        event: event.clone(),
                     },
                 )
                 .into_iter()
                 .collect(),
-            UiEvent::KeyDown {
-                target,
-                key,
-                modifiers,
-            } => self
-                .handler_event(
-                    target,
-                    UiEventPayload::KeyDown {
-                        key: *key,
-                        modifiers: *modifiers,
-                    },
-                )
+            UiEvent::PointerPressed { hit, pointer } => self
+                .handler_event(&hit.id, UiEventPayload::PointerDown { pointer: *pointer })
                 .into_iter()
                 .collect(),
-            UiEvent::PointerPressed { hit, point } => self
-                .handler_event(&hit.id, UiEventPayload::PointerDown { point: *point })
-                .into_iter()
-                .collect(),
-            UiEvent::PointerMoved { hit, point } | UiEvent::PointerDragged { hit, point } => self
-                .handler_event(&hit.id, UiEventPayload::PointerMove { point: *point })
-                .into_iter()
-                .collect(),
-            UiEvent::PointerReleased { hit, point } => self
-                .handler_event(&hit.id, UiEventPayload::PointerUp { point: *point })
+            UiEvent::PointerMoved { hit, pointer } | UiEvent::PointerDragged { hit, pointer } => {
+                self.handler_event(&hit.id, UiEventPayload::PointerMove { pointer: *pointer })
+                    .into_iter()
+                    .collect()
+            }
+            UiEvent::PointerReleased { hit, pointer } => self
+                .handler_event(&hit.id, UiEventPayload::PointerUp { pointer: *pointer })
                 .into_iter()
                 .collect(),
             UiEvent::FocusChanged { previous, current } => {
@@ -520,7 +512,9 @@ impl HostTree {
             }
             UiEvent::HoverChanged { .. }
             | UiEvent::PressedChanged { .. }
-            | UiEvent::PointerLeft { .. } => Vec::new(),
+            | UiEvent::PointerLeft { .. }
+            | UiEvent::SemanticValue { .. }
+            | UiEvent::SemanticAction { .. } => Vec::new(),
         }
     }
 
@@ -657,9 +651,9 @@ impl HostTree {
         true
     }
 
-    pub(crate) fn ancestor_content_offset(&self, node: &UiNode) -> (i32, i32) {
-        let mut x = 0;
-        let mut y = 0;
+    pub(crate) fn ancestor_content_offset(&self, node: &UiNode) -> (f32, f32) {
+        let mut x = 0.0;
+        let mut y = 0.0;
         let mut parent = node.parent.as_ref();
         while let Some(parent_id) = parent {
             let Some(parent_node) = self.node(parent_id) else {
@@ -757,12 +751,12 @@ mod tests {
         original.push(UiNode::new(
             first_id.clone(),
             UiNodeKind::Panel,
-            UiRect::new(0, 0, 10, 10),
+            UiRect::new(0.0, 0.0, 10.0, 10.0),
         ));
         original.push(UiNode::new(
             second_id.clone(),
             UiNodeKind::Panel,
-            UiRect::new(10, 0, 20, 10),
+            UiRect::new(10.0, 0.0, 20.0, 10.0),
         ));
         original.take_projection_changes();
 
@@ -774,14 +768,17 @@ mod tests {
             UiNode::new(
                 first_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 10, 10),
+                UiRect::new(0.0, 0.0, 10.0, 10.0),
             )
             .style(VisualStyle::filled(crate::core::Color::WHITE)),
         );
 
         assert!(!Arc::ptr_eq(&original.nodes[0], &next.nodes[0]));
         assert!(Arc::ptr_eq(&original.nodes[1], &next.nodes[1]));
-        assert_ne!(original.node(&first_id).unwrap().style, next.node(&first_id).unwrap().style);
+        assert_ne!(
+            original.node(&first_id).unwrap().style,
+            next.node(&first_id).unwrap().style
+        );
         assert!(next.node(&second_id).is_some());
     }
 
@@ -793,13 +790,13 @@ mod tests {
         tree.push(UiNode::new(
             plain_id.clone(),
             UiNodeKind::Panel,
-            UiRect::new(0, 0, 10, 10),
+            UiRect::new(0.0, 0.0, 10.0, 10.0),
         ));
         tree.push(
             UiNode::new(
                 animated_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(10, 0, 20, 10),
+                UiRect::new(10.0, 0.0, 20.0, 10.0),
             )
             .animation(AnimationBinding::new(AnimProperty::Opacity, 0.0, 1.0))
             .animation_target(AnimProperty::Opacity, false),
@@ -811,7 +808,7 @@ mod tests {
             UiNode::new(
                 plain_id,
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 10, 10),
+                UiRect::new(0.0, 0.0, 10.0, 10.0),
             )
             .style(VisualStyle::filled(crate::core::Color::WHITE)),
         );
@@ -825,14 +822,15 @@ mod tests {
         let clip_id = UiId::new("clip");
         let popup_id = UiId::new("popup");
         let sibling_id = UiId::new("sibling");
-        let target = UiRect::new(20, 20, 40, 40);
+        let target = UiRect::new(20.0, 20.0, 40.0, 40.0);
         let mut tree = HostTree::new();
         tree.push(
-            UiNode::new(clip_id.clone(), UiNodeKind::Clip, UiRect::new(0, 0, 10, 10)).clip(
-                UiRect::new(0, 0, 10, 10),
-                0,
-                0,
-            ),
+            UiNode::new(
+                clip_id.clone(),
+                UiNodeKind::Clip,
+                UiRect::new(0.0, 0.0, 10.0, 10.0),
+            )
+            .clip(UiRect::new(0.0, 0.0, 10.0, 10.0), 0.0, 0.0),
         );
         tree.push(
             UiNode::new(popup_id.clone(), UiNodeKind::Button, target)
@@ -847,7 +845,7 @@ mod tests {
         );
 
         let hit = tree
-            .hit_test(Point::new(30, 30))
+            .hit_test(Point::new(30.0, 30.0))
             .expect("popup should be hittable outside its ancestor clip");
         assert_eq!(hit.id, popup_id);
     }
@@ -861,7 +859,7 @@ mod tests {
             UiNode::new(
                 drag_id.clone(),
                 UiNodeKind::Group,
-                UiRect::new(0, 0, 400, 64),
+                UiRect::new(0.0, 0.0, 400.0, 64.0),
             )
             .interaction(InteractionRole::WindowDragRegion)
             .event_policy(crate::core::EventPolicy::NONE),
@@ -870,20 +868,20 @@ mod tests {
             UiNode::new(
                 button_id.clone(),
                 UiNodeKind::Button,
-                UiRect::new(350, 0, 400, 64),
+                UiRect::new(350.0, 0.0, 400.0, 64.0),
             )
             .parent(drag_id.clone())
             .interaction(InteractionRole::Button),
         );
 
         let drag = tree
-            .hit_test(Point::new(100, 32))
+            .hit_test(Point::new(100.0, 32.0))
             .expect("titlebar background should be draggable");
         assert_eq!(drag.id, drag_id);
         assert_eq!(drag.interaction, InteractionRole::WindowDragRegion);
 
         let button = tree
-            .hit_test(Point::new(375, 32))
+            .hit_test(Point::new(375.0, 32.0))
             .expect("titlebar button should remain interactive");
         assert_eq!(button.id, button_id);
         assert_eq!(button.interaction, InteractionRole::Button);

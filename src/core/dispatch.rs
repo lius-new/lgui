@@ -144,7 +144,8 @@ mod tests {
 
     use super::*;
     use crate::core::{
-        HostTree, InputEvent, InteractionRole, Point, PointerButton, UiId, UiNode, UiNodeKind,
+        HostTree, InputEvent, InteractionRole, Point, PointerButton, PointerData, UiId, UiNode,
+        UiNodeKind,
     };
 
     #[test]
@@ -156,7 +157,7 @@ mod tests {
             UiNode::new(
                 parent.clone(),
                 UiNodeKind::Group,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .on_click_capture({
                 let calls = Arc::clone(&calls);
@@ -171,7 +172,7 @@ mod tests {
             UiNode::new(
                 UiId::owned("button"),
                 UiNodeKind::Button,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .parent(parent)
             .interaction(InteractionRole::Button)
@@ -184,14 +185,14 @@ mod tests {
         runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
         let output = runtime.handle_input(
             &tree,
             InputEvent::PointerUp {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );

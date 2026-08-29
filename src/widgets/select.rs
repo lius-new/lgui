@@ -2,17 +2,18 @@ use std::{any::Any, borrow::Cow, sync::Arc};
 
 use crate::core::{
     AnimProperty, AnimationBinding, Color, ComponentActionOutcome, ComponentState, Element,
-    ElementKey, ElementRenderCx, EventPolicy, IconStyle, InteractionRole, RenderPhase, Stroke,
-    TextStyle, UiAction, UiElement, UiEventContext, UiId, UiRect, UiRenderContext, VisualStyle,
+    ElementKey, ElementRenderCx, EventPolicy, IconStyle, InteractionRole, RenderPhase,
+    SemanticAction, SemanticRole, Semantics, Stroke, TextStyle, UiAction, UiElement,
+    UiEventContext, UiId, UiRect, UiRenderContext, VisualStyle,
 };
 use crate::theme::{ThemeContext, ThemeTokens};
 
 pub type SelectChangeHandler = Arc<dyn Fn(&mut UiEventContext, usize) + Send + Sync>;
-pub const SELECT_OPTION_HEIGHT: i32 = 40;
+pub const SELECT_OPTION_HEIGHT: f32 = 40.0;
 const SELECT_MAX_VISIBLE_OPTIONS: usize = 8;
 const SELECT_WHEEL_ROWS: i32 = 3;
-const SELECT_MENU_GAP: i32 = 4;
-const SELECT_MENU_PADDING: i32 = 4;
+const SELECT_MENU_GAP: f32 = 4.0;
+const SELECT_MENU_PADDING: f32 = 4.0;
 const SELECT_HOVER_IN_MS: f32 = 110.0;
 const SELECT_HOVER_OUT_MS: f32 = 150.0;
 
@@ -98,7 +99,7 @@ pub struct SelectStyle {
     pub icon: Color,
     pub active_icon: Color,
     pub swatch_border: Color,
-    pub radius: i32,
+    pub radius: f32,
 }
 
 impl SelectStyle {
@@ -116,7 +117,7 @@ impl SelectStyle {
             icon: theme.colors.text_muted,
             active_icon: theme.colors.accent,
             swatch_border: theme.colors.border_subtle,
-            radius: 6,
+            radius: 6.0,
         }
     }
 }
@@ -252,9 +253,9 @@ fn render_select(cx: ElementRenderCx<'_, '_, '_>, select: Select) -> UiElement {
         .and_then(|option| option.swatch)
         .is_some()
     {
-        select.rect.left + 40
+        select.rect.left + 40.0
     } else {
-        select.rect.left + 12
+        select.rect.left + 12.0
     };
 
     let mut root = UiElement::panel(
@@ -262,11 +263,22 @@ fn render_select(cx: ElementRenderCx<'_, '_, '_>, select: Select) -> UiElement {
         select.rect,
         VisualStyle::filled(control_fill)
             .alpha(0xF2)
-            .stroked(Stroke::new(control_border, 1, border_alpha))
+            .stroked(Stroke::new(control_border, 1.0, border_alpha))
             .radius(style.radius),
     )
     .render_phase(select.phase)
     .paint_bounds(paint_bounds)
+    .semantics({
+        let mut semantics = Semantics::new(SemanticRole::ComboBox)
+            .action(SemanticAction::Focus)
+            .action(SemanticAction::Click);
+        if let Some(option) = select.options.get(selected) {
+            semantics.value = Some(option.label.to_string());
+        }
+        semantics.state.disabled = !enabled;
+        semantics.state.expanded = Some(open);
+        semantics
+    })
     .on_action(CHANGE_EVENT, move |context, action| {
         let Some(index) = action
             .payload_value()
@@ -292,10 +304,10 @@ fn render_select(cx: ElementRenderCx<'_, '_, '_>, select: Select) -> UiElement {
             root = root.child(render_swatch(
                 UiId::owned(format!("{}.selected.swatch", id.as_str())),
                 UiRect::new(
-                    select.rect.left + 12,
-                    select.rect.top + 10,
-                    select.rect.left + 30,
-                    select.rect.bottom - 10,
+                    select.rect.left + 12.0,
+                    select.rect.top + 10.0,
+                    select.rect.left + 30.0,
+                    select.rect.bottom - 10.0,
                 ),
                 swatch,
                 style.swatch_border,
@@ -308,11 +320,11 @@ fn render_select(cx: ElementRenderCx<'_, '_, '_>, select: Select) -> UiElement {
                 UiRect::new(
                     control_text_left,
                     select.rect.top,
-                    select.rect.right - 34,
+                    select.rect.right - 34.0,
                     select.rect.bottom,
                 ),
                 option.label.clone(),
-                TextStyle::new(style.selected_text, -14, 500),
+                TextStyle::new(style.selected_text, -14.0, 500),
             )
             .render_phase(select.phase),
         );
@@ -322,10 +334,10 @@ fn render_select(cx: ElementRenderCx<'_, '_, '_>, select: Select) -> UiElement {
         UiElement::icon(
             UiId::owned(format!("{}.chevron", id.as_str())),
             UiRect::new(
-                select.rect.right - 28,
-                select.rect.top + (select.rect.height() - 16) / 2,
-                select.rect.right - 12,
-                select.rect.top + (select.rect.height() + 16) / 2,
+                select.rect.right - 28.0,
+                select.rect.top + (select.rect.height() - 16.0) / 2.0,
+                select.rect.right - 12.0,
+                select.rect.top + (select.rect.height() + 16.0) / 2.0,
             ),
             if open { "chevron-up" } else { "chevron-down" },
         )
@@ -369,7 +381,7 @@ fn render_menu(
         rect,
         VisualStyle::filled(style.menu_fill)
             .alpha(0xFA)
-            .stroked(Stroke::new(style.border, 1, 0x70))
+            .stroked(Stroke::new(style.border, 1.0, 0x70))
             .radius(style.radius),
     )
     .render_phase(phase);
@@ -386,7 +398,7 @@ fn render_menu(
         .take(visible_count)
         .enumerate()
     {
-        let top = rect.top + SELECT_MENU_PADDING + slot as i32 * SELECT_OPTION_HEIGHT;
+        let top = rect.top + SELECT_MENU_PADDING + slot as f32 * SELECT_OPTION_HEIGHT;
         let item = UiRect::new(
             rect.left + SELECT_MENU_PADDING,
             top,
@@ -397,14 +409,14 @@ fn render_menu(
         let option_hover = smootherstep(context.animation_value(&option_id, AnimProperty::Hover));
         let is_selected = index == selected;
         let text_left = if option.swatch.is_some() {
-            item.left + 38
+            item.left + 38.0
         } else {
-            item.left + 10
+            item.left + 10.0
         };
         let text_right = if is_selected {
-            item.right - 36
+            item.right - 36.0
         } else {
-            item.right - 10
+            item.right - 10.0
         };
         let option_fill = if is_selected {
             style.selected_fill
@@ -421,10 +433,17 @@ fn render_menu(
             item,
             VisualStyle::filled(option_fill)
                 .alpha(option_fill_alpha)
-                .radius((style.radius - 2).max(2)),
+                .radius((style.radius - 2.0).max(2.0)),
         )
         .render_phase(phase)
         .interaction(InteractionRole::Button)
+        .semantics({
+            let mut semantics = Semantics::new(SemanticRole::ListBoxOption)
+                .name(option.label.to_string())
+                .action(SemanticAction::Click);
+            semantics.state.selected = is_selected;
+            semantics
+        })
         .event_policy(EventPolicy {
             hover: true,
             press: true,
@@ -443,12 +462,12 @@ fn render_menu(
                     UiElement::panel(
                         UiId::owned(format!("{}.option.{index}.indicator", select_id.as_str())),
                         UiRect::new(
-                            item.left + 2,
-                            item.top + 10,
-                            item.left + 4,
-                            item.bottom - 10,
+                            item.left + 2.0,
+                            item.top + 10.0,
+                            item.left + 4.0,
+                            item.bottom - 10.0,
                         ),
-                        VisualStyle::filled(style.active_icon).radius(1),
+                        VisualStyle::filled(style.active_icon).radius(1.0),
                     )
                     .render_phase(phase),
                 )
@@ -456,10 +475,10 @@ fn render_menu(
                     UiElement::icon(
                         UiId::owned(format!("{}.option.{index}.check", select_id.as_str())),
                         UiRect::new(
-                            item.right - 27,
-                            item.top + 11,
-                            item.right - 11,
-                            item.bottom - 11,
+                            item.right - 27.0,
+                            item.top + 11.0,
+                            item.right - 11.0,
+                            item.bottom - 11.0,
                         ),
                         "check",
                     )
@@ -472,10 +491,10 @@ fn render_menu(
             option_element = option_element.child(render_swatch(
                 UiId::owned(format!("{}.option.{index}.swatch", select_id.as_str())),
                 UiRect::new(
-                    item.left + 10,
-                    item.top + 11,
-                    item.left + 28,
-                    item.bottom - 11,
+                    item.left + 10.0,
+                    item.top + 11.0,
+                    item.left + 28.0,
+                    item.bottom - 11.0,
                 ),
                 swatch,
                 style.swatch_border,
@@ -493,7 +512,7 @@ fn render_menu(
                     } else {
                         mix_color(style.text, style.selected_text, option_hover)
                     },
-                    -14,
+                    -14.0,
                     500,
                 ),
             )
@@ -525,33 +544,33 @@ fn render_scrollbar(
     phase: RenderPhase,
 ) -> UiElement {
     let track = UiRect::new(
-        rect.right - 6,
-        rect.top + 8,
-        rect.right - 3,
-        rect.bottom - 8,
+        rect.right - 6.0,
+        rect.top + 8.0,
+        rect.right - 3.0,
+        rect.bottom - 8.0,
     );
-    let thumb_height = (track.height() * visible_count as i32 / option_count as i32)
-        .max(24)
+    let thumb_height = (track.height() * visible_count as f32 / option_count as f32)
+        .max(24.0)
         .min(track.height());
     let max_start = option_count.saturating_sub(visible_count);
     let thumb_travel = track.height() - thumb_height;
     let thumb_top = if max_start == 0 {
         track.top
     } else {
-        track.top + thumb_travel * scroll_start as i32 / max_start as i32
+        track.top + thumb_travel * scroll_start as f32 / max_start as f32
     };
 
     UiElement::panel(
         UiId::owned(format!("{}.scrollbar.track", select_id.as_str())),
         track,
-        VisualStyle::filled(style.border).alpha(0x38).radius(2),
+        VisualStyle::filled(style.border).alpha(0x38).radius(2.0),
     )
     .render_phase(phase)
     .child(
         UiElement::panel(
             UiId::owned(format!("{}.scrollbar.thumb", select_id.as_str())),
             UiRect::new(track.left, thumb_top, track.right, thumb_top + thumb_height),
-            VisualStyle::filled(style.icon).alpha(0x92).radius(2),
+            VisualStyle::filled(style.icon).alpha(0x92).radius(2.0),
         )
         .render_phase(phase),
     )
@@ -564,19 +583,19 @@ fn render_swatch(
     border: Color,
     phase: RenderPhase,
 ) -> UiElement {
-    let center = (rect.left + rect.right) / 2;
+    let center = (rect.left + rect.right) / 2.0;
     UiElement::panel(
         id.clone(),
         rect,
         VisualStyle::default()
-            .stroked(Stroke::new(border, 1, 0xFF))
-            .radius(2),
+            .stroked(Stroke::new(border, 1.0, 0xFF))
+            .radius(2.0),
     )
     .render_phase(phase)
     .child(
         UiElement::panel(
             UiId::owned(format!("{}.primary", id.as_str())),
-            UiRect::new(rect.left + 1, rect.top + 1, center, rect.bottom - 1),
+            UiRect::new(rect.left + 1.0, rect.top + 1.0, center, rect.bottom - 1.0),
             VisualStyle::filled(swatch.primary),
         )
         .render_phase(phase),
@@ -584,7 +603,7 @@ fn render_swatch(
     .child(
         UiElement::panel(
             UiId::owned(format!("{}.secondary", id.as_str())),
-            UiRect::new(center, rect.top + 1, rect.right - 1, rect.bottom - 1),
+            UiRect::new(center, rect.top + 1.0, rect.right - 1.0, rect.bottom - 1.0),
             VisualStyle::filled(swatch.secondary),
         )
         .render_phase(phase),
@@ -606,8 +625,8 @@ fn select_menu_layout(
 ) -> SelectMenuLayout {
     let desired_count = visible_option_count(option_count);
     let desired_height = select_menu_height(desired_count);
-    let space_below = (viewport.bottom - anchor.bottom - SELECT_MENU_GAP).max(0);
-    let space_above = (anchor.top - viewport.top - SELECT_MENU_GAP).max(0);
+    let space_below = (viewport.bottom - anchor.bottom - SELECT_MENU_GAP).max(0.0);
+    let space_above = (anchor.top - viewport.top - SELECT_MENU_GAP).max(0.0);
     let resolved = match placement {
         SelectPlacement::Auto if space_below >= desired_height => SelectPlacement::Below,
         SelectPlacement::Auto if space_above >= desired_height => SelectPlacement::Above,
@@ -620,8 +639,10 @@ fn select_menu_layout(
         SelectPlacement::Above => space_above,
         SelectPlacement::Auto => unreachable!("auto placement must be resolved"),
     };
-    let fitting_count = ((available_height - SELECT_MENU_PADDING * 2).max(0) / SELECT_OPTION_HEIGHT)
-        .max(1) as usize;
+    let fitting_count = ((available_height - SELECT_MENU_PADDING * 2.0).max(0.0)
+        / SELECT_OPTION_HEIGHT)
+        .floor()
+        .max(1.0) as usize;
     let visible_count = desired_count.min(fitting_count);
     let menu_height = select_menu_height(visible_count);
     let (top, bottom) = match resolved {
@@ -643,11 +664,11 @@ fn select_menu_layout(
     }
 }
 
-fn select_menu_height(visible_count: usize) -> i32 {
+fn select_menu_height(visible_count: usize) -> f32 {
     if visible_count == 0 {
-        0
+        0.0
     } else {
-        SELECT_MENU_PADDING * 2 + SELECT_OPTION_HEIGHT * visible_count as i32
+        SELECT_MENU_PADDING * 2.0 + SELECT_OPTION_HEIGHT * visible_count as f32
     }
 }
 
@@ -911,8 +932,8 @@ mod tests {
 
     #[test]
     fn auto_placement_opens_above_when_the_menu_does_not_fit_below() {
-        let viewport = UiRect::new(0, 0, 800, 700);
-        let anchor = UiRect::new(500, 600, 720, 638);
+        let viewport = UiRect::new(0.0, 0.0, 800.0, 700.0);
+        let anchor = UiRect::new(500.0, 600.0, 720.0, 638.0);
         let menu = select_menu_layout(anchor, 100, viewport, SelectPlacement::Auto);
 
         assert_eq!(menu.placement, SelectPlacement::Above);
@@ -923,8 +944,8 @@ mod tests {
 
     #[test]
     fn auto_placement_prefers_below_when_the_full_menu_fits() {
-        let viewport = UiRect::new(0, 0, 800, 700);
-        let anchor = UiRect::new(500, 100, 720, 138);
+        let viewport = UiRect::new(0.0, 0.0, 800.0, 700.0);
+        let anchor = UiRect::new(500.0, 100.0, 720.0, 138.0);
         let menu = select_menu_layout(anchor, 100, viewport, SelectPlacement::Auto);
 
         assert_eq!(menu.placement, SelectPlacement::Below);
@@ -934,8 +955,8 @@ mod tests {
 
     #[test]
     fn explicit_placement_is_respected_and_reduces_visible_rows_to_fit() {
-        let viewport = UiRect::new(0, 0, 800, 700);
-        let anchor = UiRect::new(500, 600, 720, 638);
+        let viewport = UiRect::new(0.0, 0.0, 800.0, 700.0);
+        let anchor = UiRect::new(500.0, 600.0, 720.0, 638.0);
         let menu = select_menu_layout(anchor, 100, viewport, SelectPlacement::Below);
 
         assert_eq!(menu.placement, SelectPlacement::Below);

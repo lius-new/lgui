@@ -149,12 +149,7 @@ impl LayerTransform {
             .iter()
             .map(|point| point.1)
             .fold(f32::NEG_INFINITY, f32::max);
-        super::UiRect::new(
-            min_x.floor() as i32,
-            min_y.floor() as i32,
-            max_x.ceil() as i32,
-            max_y.ceil() as i32,
-        )
+        super::UiRect::new(min_x, min_y, max_x, max_y)
     }
 
     pub(crate) fn transform_point(self, rect: super::UiRect, x: f32, y: f32) -> (f32, f32) {
@@ -333,8 +328,8 @@ mod tests {
             .rotation_degrees(90.0)
             .scale_xy(2.0, 1.0);
         assert_eq!(
-            transform.transformed_bounds(super::super::UiRect::new(10, 20, 30, 60)),
-            super::super::UiRect::new(0, 20, 40, 60)
+            transform.transformed_bounds(super::super::UiRect::new(10.0, 20.0, 30.0, 60.0)),
+            super::super::UiRect::new(0.0, 20.0, 40.0, 60.0)
         );
     }
 
@@ -342,8 +337,8 @@ mod tests {
     fn transformed_bounds_include_translation() {
         let transform = LayerTransform::identity().translation(120.5, -30.25);
         assert_eq!(
-            transform.transformed_bounds(super::super::UiRect::new(0, 0, 80, 80)),
-            super::super::UiRect::new(120, -31, 201, 50)
+            transform.transformed_bounds(super::super::UiRect::new(0.0, 0.0, 80.0, 80.0)),
+            super::super::UiRect::new(120.5, -30.25, 200.5, 49.75)
         );
     }
 

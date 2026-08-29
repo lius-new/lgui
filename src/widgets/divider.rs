@@ -37,14 +37,14 @@ fn render_divider(id: UiId, divider: Divider) -> UiElement {
     let rect = match divider.direction {
         DividerDirection::Horizontal => UiRect::new(
             divider.rect.left,
-            (divider.rect.top + divider.rect.bottom) / 2,
+            (divider.rect.top + divider.rect.bottom) / 2.0,
             divider.rect.right,
-            (divider.rect.top + divider.rect.bottom) / 2,
+            (divider.rect.top + divider.rect.bottom) / 2.0,
         ),
         DividerDirection::Vertical => UiRect::new(
-            (divider.rect.left + divider.rect.right) / 2,
+            (divider.rect.left + divider.rect.right) / 2.0,
             divider.rect.top,
-            (divider.rect.left + divider.rect.right) / 2,
+            (divider.rect.left + divider.rect.right) / 2.0,
             divider.rect.bottom,
         ),
     };

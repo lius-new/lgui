@@ -8,7 +8,7 @@ use windows::Win32::{
     },
 };
 
-use crate::core::UiRect;
+use crate::core::PhysicalRect;
 
 pub struct LayeredBackbuffer {
     hdc: HDC,
@@ -95,8 +95,8 @@ impl LayeredBackbuffer {
         self.height
     }
 
-    pub fn viewport(&self) -> UiRect {
-        UiRect::new(0, 0, self.width, self.height)
+    pub fn viewport(&self) -> PhysicalRect {
+        PhysicalRect::new(0, 0, self.width, self.height)
     }
 
     pub fn pixels(&self) -> &[u8] {
@@ -147,21 +147,21 @@ impl LayeredBackbuffer {
         set_opaque_alpha(self.bits.cast(), self.width, self.height);
     }
 
-    pub fn set_opaque_alpha_region(&mut self, rect: UiRect) {
+    pub fn set_opaque_alpha_region(&mut self, rect: PhysicalRect) {
         let Some(rect) = rect.intersect(self.viewport()) else {
             return;
         };
         set_opaque_alpha_region(self.bits.cast(), self.width, self.height, rect);
     }
 
-    pub fn set_rounded_rect_alpha_mask(&mut self, rect: UiRect, radius: i32) {
+    pub fn set_rounded_rect_alpha_mask(&mut self, rect: PhysicalRect, radius: i32) {
         let Some(rect) = rect.intersect(self.viewport()) else {
             return;
         };
         set_rounded_rect_alpha_mask(self.bits.cast(), self.width, self.height, rect, radius);
     }
 
-    pub fn clear_region(&mut self, rect: UiRect) {
+    pub fn clear_region(&mut self, rect: PhysicalRect) {
         let Some(rect) = rect.intersect(self.viewport()) else {
             return;
         };
@@ -202,7 +202,7 @@ fn set_opaque_alpha(bits: *mut u8, width: i32, height: i32) {
     }
 }
 
-fn set_opaque_alpha_region(bits: *mut u8, width: i32, height: i32, rect: UiRect) {
+fn set_opaque_alpha_region(bits: *mut u8, width: i32, height: i32, rect: PhysicalRect) {
     if bits.is_null() || width <= 0 || height <= 0 {
         return;
     }
@@ -218,7 +218,13 @@ fn set_opaque_alpha_region(bits: *mut u8, width: i32, height: i32, rect: UiRect)
     }
 }
 
-fn set_rounded_rect_alpha_mask(bits: *mut u8, width: i32, height: i32, rect: UiRect, radius: i32) {
+fn set_rounded_rect_alpha_mask(
+    bits: *mut u8,
+    width: i32,
+    height: i32,
+    rect: PhysicalRect,
+    radius: i32,
+) {
     if bits.is_null() || width <= 0 || height <= 0 {
         return;
     }
@@ -247,9 +253,9 @@ fn set_rounded_rect_alpha_mask(bits: *mut u8, width: i32, height: i32, rect: UiR
     }
 }
 
-fn rounded_rect_coverage(x: i32, y: i32, rect: UiRect, radius: f32) -> f32 {
+fn rounded_rect_coverage(x: i32, y: i32, rect: PhysicalRect, radius: f32) -> f32 {
     if radius <= 0.0 {
-        return if rect.contains(crate::core::Point::new(x, y)) {
+        return if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
             1.0
         } else {
             0.0
@@ -268,7 +274,7 @@ fn rounded_rect_coverage(x: i32, y: i32, rect: UiRect, radius: f32) -> f32 {
     covered as f32 / 16.0
 }
 
-fn rounded_rect_contains(x: f32, y: f32, rect: UiRect, radius: f32) -> bool {
+fn rounded_rect_contains(x: f32, y: f32, rect: PhysicalRect, radius: f32) -> bool {
     let left = rect.left as f32;
     let top = rect.top as f32;
     let right = rect.right as f32;

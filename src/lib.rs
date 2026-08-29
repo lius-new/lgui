@@ -10,6 +10,8 @@ pub mod assets;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 pub mod core;
+#[cfg(feature = "dialogs")]
+pub mod dialogs;
 #[cfg(feature = "open-url")]
 pub mod desktop;
 #[cfg(feature = "diagnostics")]
@@ -27,7 +29,6 @@ pub mod router;
 pub mod session;
 #[cfg(feature = "store")]
 pub mod store;
-#[cfg(feature = "backend-win32")]
 pub mod text;
 #[cfg(feature = "theme")]
 pub mod theme;

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::{
     core::{
         Color, Element, ElementKey, ElementRenderCx, InteractionRole, PathStyle, Point,
-        RenderPhase, Stroke, UiElement, UiEventContext, UiId, UiPath, UiPathCommand, UiRect,
-        VisualStyle,
+        RenderPhase, SemanticAction, SemanticRole, Semantics, Stroke, UiElement, UiEventContext,
+        UiId, UiPath, UiPathCommand, UiRect, VisualStyle,
     },
     theme::{ThemeContext, ThemeTokens},
 };
@@ -164,18 +164,26 @@ fn render_checkbox(cx: ElementRenderCx<'_, '_, '_>, checkbox: Checkbox) -> UiEle
         checkbox.rect,
         VisualStyle::filled(fill)
             .alpha(alpha)
-            .stroked(Stroke::new(border, 1, alpha))
-            .radius(3),
+            .stroked(Stroke::new(border, 1.0, alpha))
+            .radius(3.0),
     )
     .render_phase(checkbox.phase)
-    .hit_rect(checkbox.hit_rect);
+    .hit_rect(checkbox.hit_rect)
+    .semantics({
+        let mut semantics = Semantics::new(SemanticRole::CheckBox)
+            .action(SemanticAction::Focus)
+            .action(SemanticAction::Click);
+        semantics.state.checked = Some(checkbox.checked);
+        semantics.state.disabled = !checkbox.enabled;
+        semantics
+    });
 
     if checkbox.checked {
         root = root.child(checkmark(
             &cx.id,
             checkbox.rect,
             checkbox.phase,
-            Stroke::new(style.check, 2, alpha),
+            Stroke::new(style.check, 2.0, alpha),
         ));
     }
     if checkbox.enabled {
@@ -189,11 +197,17 @@ fn render_checkbox(cx: ElementRenderCx<'_, '_, '_>, checkbox: Checkbox) -> UiEle
 }
 
 fn checkmark(id: &UiId, rect: UiRect, phase: RenderPhase, stroke: Stroke) -> UiElement {
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
-    let start = Point::new(rect.left + width * 2 / 9, rect.top + height / 2);
-    let bend = Point::new(rect.left + width * 4 / 9, rect.top + height * 7 / 10);
-    let end = Point::new(rect.left + width * 7 / 9, rect.top + height * 3 / 10);
+    let width = rect.width().max(1.0);
+    let height = rect.height().max(1.0);
+    let start = Point::new(rect.left + width * 2.0 / 9.0, rect.top + height / 2.0);
+    let bend = Point::new(
+        rect.left + width * 4.0 / 9.0,
+        rect.top + height * 7.0 / 10.0,
+    );
+    let end = Point::new(
+        rect.left + width * 7.0 / 9.0,
+        rect.top + height * 3.0 / 10.0,
+    );
     let path = UiPath::new([
         UiPathCommand::MoveTo(start),
         UiPathCommand::LineTo(bend),
@@ -220,12 +234,12 @@ mod tests {
 
     #[test]
     fn checkmark_is_a_continuous_rising_tick_inside_the_checkbox_bounds() {
-        let rect = UiRect::new(10, 20, 28, 38);
+        let rect = UiRect::new(10.0, 20.0, 28.0, 38.0);
         let checkmark = checkmark(
             &UiId::owned("checkbox"),
             rect,
             RenderPhase::Content,
-            Stroke::new(Color(0xFFFFFF), 2, 0xFF),
+            Stroke::new(Color(0xFFFFFF), 2.0, 0xFF),
         );
         let commands = checkmark.node().path.as_ref().unwrap().commands();
         let [UiPathCommand::MoveTo(start), UiPathCommand::LineTo(bend), UiPathCommand::LineTo(end)] =
@@ -249,7 +263,7 @@ mod tests {
 
         let reported = Arc::new(AtomicBool::new(false));
         let next = Arc::clone(&reported);
-        let checkbox = checkbox(UiRect::new(0, 0, 16, 16), false, move |checked| {
+        let checkbox = checkbox(UiRect::new(0.0, 0.0, 16.0, 16.0), false, move |checked| {
             next.store(checked, Ordering::SeqCst);
         });
         let mut context = UiEventContext::new(

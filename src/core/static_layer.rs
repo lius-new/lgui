@@ -1,4 +1,6 @@
-use super::ImageFit;
+use std::hash::{Hash, Hasher};
+
+use super::{geometry::normalized_f32_bits, ImageFit};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StaticLayerSource {
@@ -40,14 +42,14 @@ pub enum StaticLayerBackground {
     Transparent,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StaticLayerSpec {
     pub source: StaticLayerSource,
     pub cache_policy: StaticLayerCachePolicy,
     pub revision: &'static str,
     pub opacity: u8,
-    pub offset_x: i32,
-    pub offset_y: i32,
+    pub offset_x: f32,
+    pub offset_y: f32,
     pub memory_budget_bytes: usize,
     pub background: StaticLayerBackground,
 }
@@ -61,8 +63,8 @@ impl StaticLayerSpec {
             cache_policy: StaticLayerCachePolicy::Disabled,
             revision: "v1",
             opacity: 255,
-            offset_x: 0,
-            offset_y: 0,
+            offset_x: 0.0,
+            offset_y: 0.0,
             memory_budget_bytes: 64 * 1024 * 1024,
             background: StaticLayerBackground::Opaque,
         }
@@ -87,7 +89,7 @@ impl StaticLayerSpec {
         self.opacity as f32 / 255.0
     }
 
-    pub fn paint_offset(mut self, x: i32, y: i32) -> Self {
+    pub fn paint_offset(mut self, x: f32, y: f32) -> Self {
         self.offset_x = x;
         self.offset_y = y;
         self
@@ -115,6 +117,21 @@ impl StaticLayerSpec {
             revision: self.revision,
             background: self.background,
         }
+    }
+}
+
+impl Eq for StaticLayerSpec {}
+
+impl Hash for StaticLayerSpec {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.source.hash(state);
+        self.cache_policy.hash(state);
+        self.revision.hash(state);
+        self.opacity.hash(state);
+        normalized_f32_bits(self.offset_x).hash(state);
+        normalized_f32_bits(self.offset_y).hash(state);
+        self.memory_budget_bytes.hash(state);
+        self.background.hash(state);
     }
 }
 

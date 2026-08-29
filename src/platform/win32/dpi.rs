@@ -10,7 +10,7 @@ use windows::Win32::{
 };
 
 use crate::{
-    core::{Point, Size, UiRect, UiScale},
+    core::{PhysicalPoint, PhysicalRect, PhysicalSize, Size, UiScale},
     platform::dpi::{ScaleContext, ScalePreference, WorkArea, BASE_DPI},
 };
 
@@ -40,7 +40,7 @@ pub struct DpiContext {
     pub scale: UiScale,
     pub work_area: WorkArea,
     pub preferred_logical_size: Size,
-    pub physical_window_size: Size,
+    pub physical_window_size: PhysicalSize,
     pub compact: bool,
     pub generation: u64,
 }
@@ -72,7 +72,7 @@ impl DpiContext {
         )
     }
 
-    pub fn for_point(point: Point, dpi: u32, preferred_logical_size: Size) -> Self {
+    pub fn for_point(point: PhysicalPoint, dpi: u32, preferred_logical_size: Size) -> Self {
         Self::resolve(
             dpi,
             work_area_for_point(point),
@@ -81,7 +81,10 @@ impl DpiContext {
         )
     }
 
-    pub fn for_monitor_point_system_scale(point: Point, preferred_logical_size: Size) -> Self {
+    pub fn for_monitor_point_system_scale(
+        point: PhysicalPoint,
+        preferred_logical_size: Size,
+    ) -> Self {
         let monitor = monitor_for_point(point);
         Self::resolve(
             dpi_for_monitor(monitor),
@@ -111,7 +114,7 @@ impl DpiContext {
         }
     }
 
-    pub fn logical_point(self, physical: Point) -> Point {
+    pub fn logical_point(self, physical: PhysicalPoint) -> crate::core::Point {
         self.scale.logical_point(physical)
     }
 
@@ -121,7 +124,7 @@ impl DpiContext {
             && self.preference == other.preference
     }
 
-    pub fn clamp_origin(self, proposed: Point, size: Size) -> Point {
+    pub fn clamp_origin(self, proposed: PhysicalPoint, size: PhysicalSize) -> PhysicalPoint {
         let resolved = ScaleContext {
             dpi: self.dpi,
             os_scale: self.os_scale,
@@ -141,11 +144,11 @@ pub fn work_area_for_window(hwnd: HWND) -> WorkArea {
     work_area_for_monitor(monitor)
 }
 
-pub fn work_area_for_point(point: Point) -> WorkArea {
+pub fn work_area_for_point(point: PhysicalPoint) -> WorkArea {
     work_area_for_monitor(monitor_for_point(point))
 }
 
-fn monitor_for_point(point: Point) -> HMONITOR {
+fn monitor_for_point(point: PhysicalPoint) -> HMONITOR {
     unsafe {
         MonitorFromPoint(
             POINT {
@@ -176,9 +179,9 @@ fn work_area_for_monitor(monitor: HMONITOR) -> WorkArea {
     let ok = unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool();
     let rect = if ok { info.rcWork } else { RECT::default() };
     let rect = if rect.right > rect.left && rect.bottom > rect.top {
-        UiRect::new(rect.left, rect.top, rect.right, rect.bottom)
+        PhysicalRect::new(rect.left, rect.top, rect.right, rect.bottom)
     } else {
-        UiRect::new(0, 0, 1920, 1080)
+        PhysicalRect::new(0, 0, 1920, 1080)
     };
     WorkArea { rect }
 }

@@ -1,8 +1,6 @@
 #![allow(dead_code)]
 
-pub mod backend;
 pub mod blur;
-pub mod custom_paint;
 pub mod d2d;
 pub mod gdi_renderer;
 pub mod image;
@@ -14,11 +12,17 @@ pub use gdi_renderer::{
     take_gdi_frame_blit_metrics, GdiFrameBlitMetrics, GdiFrameBlitSourceMetrics, GdiRenderer,
 };
 
-pub fn draw_scene(
-    hdc: windows::Win32::Graphics::Gdi::HDC,
-    scene: &lgui::core::Scene,
-    clip: Option<lgui::core::UiRect>,
-) {
-    use lgui::renderer::RenderBackend as _;
-    backend::GdiRenderBackend.draw_scene(hdc, scene, clip);
+pub(crate) fn portable_render_cache_handle() -> crate::renderer::RenderCacheHandle {
+    crate::renderer::RenderCacheHandle::new(
+        || {
+            static_layer::clear_static_layer_memory_cache();
+            clear_gdi_renderer_caches();
+            blur::clear_blur_caches();
+            crate::assets::clear_image_caches();
+        },
+        static_layer::clear_scroll_raster_memory_cache,
+        static_layer::static_layer_memory_cache_stats,
+        static_layer::static_layer_memory_cache_stats_for_prefix,
+        static_layer::static_layer_memory_cache_entry_ids_for_prefix,
+    )
 }

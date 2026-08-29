@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
-use super::{ActionId, KeyCode, KeyModifiers, Point, UiAction, UiEventContext, UiId};
+use super::{ActionId, KeyboardEvent, PointerData, UiAction, UiEventContext, UiId, WheelDelta};
 
 pub type UiEventHandler = Arc<dyn Fn(&mut UiEventContext) + Send + Sync>;
 pub type UiInputEventHandler = Arc<dyn Fn(&mut UiEventContext, &UiEventPayload) + Send + Sync>;
@@ -14,6 +14,7 @@ pub enum UiEventKind {
     PointerUp,
     Wheel,
     KeyDown,
+    KeyUp,
     Input,
     CompositionStart,
     CompositionUpdate,
@@ -27,20 +28,19 @@ pub enum UiEventKind {
 pub enum UiEventPayload {
     Click,
     PointerDown {
-        point: Point,
+        pointer: PointerData,
     },
     PointerMove {
-        point: Point,
+        pointer: PointerData,
     },
     PointerUp {
-        point: Point,
+        pointer: PointerData,
     },
     Wheel {
-        delta_y: i32,
+        delta: WheelDelta,
     },
-    KeyDown {
-        key: KeyCode,
-        modifiers: KeyModifiers,
+    Keyboard {
+        event: KeyboardEvent,
     },
     Input {
         text: String,
@@ -48,6 +48,7 @@ pub enum UiEventPayload {
     CompositionStart,
     CompositionUpdate {
         text: String,
+        cursor: Option<Range<usize>>,
     },
     CompositionEnd,
     Focus,
@@ -65,7 +66,14 @@ impl UiEventPayload {
             Self::PointerMove { .. } => UiEventKind::PointerMove,
             Self::PointerUp { .. } => UiEventKind::PointerUp,
             Self::Wheel { .. } => UiEventKind::Wheel,
-            Self::KeyDown { .. } => UiEventKind::KeyDown,
+            Self::Keyboard {
+                event:
+                    KeyboardEvent {
+                        state: super::KeyState::Down,
+                        ..
+                    },
+            } => UiEventKind::KeyDown,
+            Self::Keyboard { .. } => UiEventKind::KeyUp,
             Self::Input { .. } => UiEventKind::Input,
             Self::CompositionStart => UiEventKind::CompositionStart,
             Self::CompositionUpdate { .. } => UiEventKind::CompositionUpdate,

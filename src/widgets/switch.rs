@@ -3,14 +3,15 @@ use std::sync::Arc;
 use crate::{
     core::{
         AnimProperty, AnimationBinding, Color, Element, ElementKey, ElementRenderCx,
-        InteractionRole, RenderPhase, Stroke, UiElement, UiEventContext, UiId, UiRect, VisualStyle,
+        InteractionRole, RenderPhase, SemanticAction, SemanticRole, Semantics, Stroke, UiElement,
+        UiEventContext, UiId, UiRect, VisualStyle,
     },
     theme::{ThemeContext, ThemeTokens},
 };
 
 pub type SwitchChangeHandler = Arc<dyn Fn(&mut UiEventContext, bool) + Send + Sync>;
-pub const SWITCH_WIDTH: i32 = 46;
-pub const SWITCH_HEIGHT: i32 = 24;
+pub const SWITCH_WIDTH: f32 = 46.0;
+pub const SWITCH_HEIGHT: f32 = 24.0;
 const SWITCH_ANIMATION_DURATION_MS: f32 = 160.0;
 
 pub trait IntoSwitchChangeHandler {
@@ -161,15 +162,17 @@ fn render_switch(cx: ElementRenderCx<'_, '_, '_>, switch: Switch, progress: f32)
     } else {
         style.disabled_alpha
     };
-    let height = switch.rect.height().max(1);
-    let inset = (height / 6).clamp(2, 4);
-    let thumb_size = (height - inset * 2).max(1).min(switch.rect.width().max(1));
-    let thumb_left = mix_i32(
+    let height = switch.rect.height().max(1.0);
+    let inset = (height / 6.0).clamp(2.0, 4.0);
+    let thumb_size = (height - inset * 2.0)
+        .max(1.0)
+        .min(switch.rect.width().max(1.0));
+    let thumb_left = mix_f32(
         switch.rect.left + inset,
         switch.rect.right - inset - thumb_size,
         progress,
     );
-    let thumb_top = switch.rect.top + (height - thumb_size) / 2;
+    let thumb_top = switch.rect.top + (height - thumb_size) / 2.0;
     let thumb_rect = UiRect::new(
         thumb_left,
         thumb_top,
@@ -182,11 +185,19 @@ fn render_switch(cx: ElementRenderCx<'_, '_, '_>, switch: Switch, progress: f32)
         switch.rect,
         VisualStyle::filled(track)
             .alpha(alpha)
-            .stroked(Stroke::new(border, 1, alpha))
-            .radius(height / 2),
+            .stroked(Stroke::new(border, 1.0, alpha))
+            .radius(height / 2.0),
     )
     .render_phase(switch.phase)
     .hit_rect(switch.hit_rect)
+    .semantics({
+        let mut semantics = Semantics::new(SemanticRole::Switch)
+            .action(SemanticAction::Focus)
+            .action(SemanticAction::Click);
+        semantics.state.checked = Some(switch.checked);
+        semantics.state.disabled = !switch.enabled;
+        semantics
+    })
     .animation(
         AnimationBinding::new(AnimProperty::Active, 0.0, 1.0)
             .duration(SWITCH_ANIMATION_DURATION_MS, SWITCH_ANIMATION_DURATION_MS),
@@ -198,7 +209,7 @@ fn render_switch(cx: ElementRenderCx<'_, '_, '_>, switch: Switch, progress: f32)
             thumb_rect,
             VisualStyle::filled(thumb)
                 .alpha(alpha)
-                .radius(thumb_size / 2),
+                .radius(thumb_size / 2.0),
         )
         .render_phase(switch.phase),
     );
@@ -234,9 +245,9 @@ fn mix_color(from: Color, to: Color, value: f32) -> Color {
     Color((r << 16) | (g << 8) | b)
 }
 
-fn mix_i32(from: i32, to: i32, value: f32) -> i32 {
+fn mix_f32(from: f32, to: f32, value: f32) -> f32 {
     let value = value.clamp(0.0, 1.0);
-    (from as f32 + (to - from) as f32 * value).round() as i32
+    from + (to - from) * value
 }
 
 #[cfg(test)]
@@ -254,15 +265,15 @@ mod tests {
         fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> Element {
             context_provider(
                 self.theme,
-                Element::from(switch(UiRect::new(0, 0, 46, 24), false, |_| {})),
+                Element::from(switch(UiRect::new(0.0, 0.0, 46.0, 24.0), false, |_| {})),
             )
         }
     }
 
     #[test]
     fn switch_visuals_interpolate_between_stable_endpoints() {
-        assert_eq!(mix_i32(4, 26, 0.0), 4);
-        assert_eq!(mix_i32(4, 26, 1.0), 26);
+        assert_eq!(mix_f32(4.0, 26.0, 0.0), 4.0);
+        assert_eq!(mix_f32(4.0, 26.0, 1.0), 26.0);
         assert_eq!(
             mix_color(Color(0x000000), Color(0xFFFFFF), 0.5),
             Color(0x808080)
@@ -276,7 +287,7 @@ mod tests {
         let mut tokens = ThemeTokens::default();
         tokens.colors.surface_raised = Color(0x123456);
         let ui = UiRuntime::new();
-        let viewport = UiRect::new(0, 0, 46, 24);
+        let viewport = UiRect::new(0.0, 0.0, 46.0, 24.0);
         let interaction = ui.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(

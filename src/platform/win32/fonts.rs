@@ -25,7 +25,10 @@ use windows::{
     },
 };
 
-use crate::core::UiRect;
+use crate::{
+    core::UiRect,
+    text::{TextMeasureRequest, TextMetrics, TextSystem, TextSystemHandle},
+};
 
 const DEFAULT_UI_FONT_FAMILIES: &[&str] = &[
     "Microsoft YaHei UI",
@@ -182,11 +185,33 @@ pub fn measure_gdi_text_width_with_fallback(
 pub fn measure_text_width(
     text: &str,
     bounds: UiRect,
-    font_height: i32,
+    font_height: f32,
     font_weight: i32,
-) -> Option<i32> {
-    measure_dwrite_text_width(text, bounds, font_height.unsigned_abs(), font_weight)
-        .or_else(|| measure_gdi_text_width_with_fallback(text, font_height, font_weight, 0))
+) -> Option<f32> {
+    measure_dwrite_text_width(text, bounds, font_height.abs().ceil() as u32, font_weight)
+        .map(|width| width as f32)
+        .or_else(|| {
+            measure_gdi_text_width_with_fallback(text, font_height.round() as i32, font_weight, 0)
+                .map(|width| width as f32)
+        })
+}
+
+pub(crate) struct Win32TextSystem;
+
+impl TextSystem for Win32TextSystem {
+    fn measure(&self, request: &TextMeasureRequest<'_>) -> Option<TextMetrics> {
+        measure_text_width(
+            request.text,
+            request.bounds,
+            request.font_height,
+            request.font_weight,
+        )
+        .map(|width| TextMetrics { width })
+    }
+}
+
+pub(crate) fn portable_text_system_handle() -> TextSystemHandle {
+    TextSystemHandle::new(Win32TextSystem)
 }
 
 fn measure_dwrite_text_width(
@@ -225,8 +250,8 @@ fn measure_dwrite_text_width(
             .CreateTextLayout(
                 &wide,
                 &format,
-                bounds.width().max(1) as f32,
-                bounds.height().max(1) as f32,
+                bounds.width().max(1.0),
+                bounds.height().max(1.0),
             )
             .ok()?;
         let mut point_x = 0.0;

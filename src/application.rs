@@ -18,6 +18,8 @@ use crate::{
     resources::Resources,
 };
 
+pub use crate::renderer::RenderErrorStage;
+
 #[cfg(feature = "router")]
 use crate::router::Router;
 #[cfg(feature = "store")]
@@ -122,7 +124,7 @@ pub(crate) struct TrayRegistration {
 
 #[cfg(feature = "notifications")]
 pub(crate) struct NotificationRegistration {
-    pub identity: String,
+    pub(crate) identity: String,
 }
 
 #[derive(Clone)]
@@ -425,6 +427,21 @@ impl ApplicationContext {
         self.try_resource::<NotificationHandle>()
     }
 
+    #[cfg(feature = "clipboard")]
+    pub fn clipboard(&self) -> crate::platform::ClipboardHandle {
+        (*self.resource::<crate::platform::ClipboardHandle>()).clone()
+    }
+
+    #[cfg(feature = "open-url")]
+    pub fn open_url(&self, url: &str) -> Result<(), crate::desktop::OpenUrlError> {
+        self.resource::<crate::desktop::OpenUrlHandle>().open(url)
+    }
+
+    #[cfg(feature = "dialogs")]
+    pub fn file_dialogs(&self) -> Arc<crate::dialogs::FileDialogHandle> {
+        self.resource::<crate::dialogs::FileDialogHandle>()
+    }
+
     pub(crate) fn task_spawner(&self) -> Option<UiTaskSpawner> {
         self.inner
             .executor
@@ -502,7 +519,7 @@ impl RootComponent for AppView {
     }
 }
 
-pub type WindowDragExclusion = fn(i32, i32) -> UiRect;
+pub type WindowDragExclusion = fn(f32, f32) -> UiRect;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WindowId(String);
@@ -528,29 +545,6 @@ impl From<&str> for WindowId {
 impl From<String> for WindowId {
     fn from(value: String) -> Self {
         Self::new(value)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RenderErrorStage {
-    Create,
-    Prepare,
-    Draw,
-    Copy,
-    Present,
-    Commit,
-}
-
-impl RenderErrorStage {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Create => "create",
-            Self::Prepare => "prepare",
-            Self::Draw => "draw",
-            Self::Copy => "copy",
-            Self::Present => "present",
-            Self::Commit => "commit",
-        }
     }
 }
 
@@ -663,46 +657,127 @@ pub enum ClosePolicy {
 
 pub type WindowCloseHandler = fn(&mut crate::core::UiEventContext);
 
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg(any(
+    all(feature = "renderer-gdi", target_os = "windows"),
+    all(feature = "renderer-d2d", target_os = "windows"),
+    feature = "renderer-skia"
+))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RendererKind {
-    #[default]
+    #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
     Gdi,
-    #[cfg(feature = "renderer-d2d")]
+    #[cfg(all(feature = "renderer-d2d", target_os = "windows"))]
     D2d,
+    #[cfg(feature = "renderer-skia")]
+    Skia(GraphicsPreference),
 }
 
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+#[cfg(any(
+    all(feature = "renderer-gdi", target_os = "windows"),
+    all(feature = "renderer-d2d", target_os = "windows"),
+    feature = "renderer-skia"
+))]
+impl Default for RendererKind {
+    fn default() -> Self {
+        #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+        {
+            return Self::Gdi;
+        }
+        #[cfg(all(
+            not(all(feature = "renderer-gdi", target_os = "windows")),
+            feature = "renderer-d2d",
+            target_os = "windows"
+        ))]
+        {
+            return Self::D2d;
+        }
+        #[cfg(all(
+            not(all(feature = "renderer-gdi", target_os = "windows")),
+            not(all(feature = "renderer-d2d", target_os = "windows")),
+            feature = "renderer-skia"
+        ))]
+        {
+            Self::Skia(GraphicsPreference::Auto)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GraphicsPreference {
+    #[default]
+    Auto,
+    OpenGl,
+    Vulkan,
+    Metal,
+    Software,
+}
+
+impl GraphicsPreference {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::OpenGl => "opengl",
+            Self::Vulkan => "vulkan",
+            Self::Metal => "metal",
+            Self::Software => "software",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RendererProbeError(String);
 
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
 impl std::fmt::Display for RendererProbeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
 impl std::error::Error for RendererProbeError {}
 
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+#[cfg(any(
+    all(feature = "renderer-gdi", target_os = "windows"),
+    all(feature = "renderer-d2d", target_os = "windows"),
+    feature = "renderer-skia"
+))]
 impl RendererKind {
     pub const fn as_str(self) -> &'static str {
         match self {
+            #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
             Self::Gdi => "gdi",
-            #[cfg(feature = "renderer-d2d")]
+            #[cfg(all(feature = "renderer-d2d", target_os = "windows"))]
             Self::D2d => "d2d",
+            #[cfg(feature = "renderer-skia")]
+            Self::Skia(_) => "skia",
         }
     }
 
     pub fn probe(self) -> Result<(), RendererProbeError> {
         match self {
+            #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
             Self::Gdi => Ok(()),
-            #[cfg(feature = "renderer-d2d")]
+            #[cfg(all(feature = "renderer-d2d", target_os = "windows"))]
             Self::D2d => crate::platform::win32::probe_d2d_support()
                 .map_err(|error| RendererProbeError(error.to_string())),
+            #[cfg(feature = "renderer-skia")]
+            Self::Skia(preference) => {
+                crate::platform::skia::probe_skia_support(preference).map_err(RendererProbeError)
+            }
         }
+    }
+}
+
+#[derive(Clone, Default)]
+struct WindowOptionExtensions {
+    values: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+}
+
+impl std::fmt::Debug for WindowOptionExtensions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WindowOptionExtensions")
+            .field("count", &self.values.len())
+            .finish()
     }
 }
 
@@ -710,9 +785,6 @@ impl RendererKind {
 pub struct WindowOptions {
     pub id: WindowId,
     pub owner: Option<WindowId>,
-    pub class_name: Option<String>,
-    /// ICO data used by the registered window class and every window created from it.
-    pub icon_bytes: Option<&'static [u8]>,
     pub title: String,
     pub visible: bool,
     pub size: Size,
@@ -722,14 +794,12 @@ pub struct WindowOptions {
     pub native_titlebar: bool,
     pub position: WindowPosition,
     pub transparent: bool,
-    /// Requests the platform's standard rounded top-level window corners.
-    pub rounded_corners: bool,
     pub corner_radius: i32,
     pub topmost: bool,
     pub hide_on_deactivate: bool,
     pub background_memory_optimization: bool,
     /// COMPATIBILITY: remove after consumers migrate to `Element::window_drag_region`.
-    pub titlebar_drag_height: Option<i32>,
+    pub titlebar_drag_height: Option<f32>,
     /// COMPATIBILITY: remove after consumers migrate to `Element::window_drag_region`.
     pub drag_exclusion: Option<WindowDragExclusion>,
     pub scale_reference_size: Option<Size>,
@@ -737,49 +807,7 @@ pub struct WindowOptions {
     pub mode: WindowMode,
     pub close_policy: ClosePolicy,
     pub close_handler: Option<WindowCloseHandler>,
-}
-
-impl PartialEq for WindowOptions {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.owner == other.owner
-            && self.class_name == other.class_name
-            && self.icon_bytes == other.icon_bytes
-            && self.title == other.title
-            && self.visible == other.visible
-            && self.size == other.size
-            && self.minimum_size == other.minimum_size
-            && self.maximum_size == other.maximum_size
-            && self.resizable == other.resizable
-            && self.native_titlebar == other.native_titlebar
-            && self.position == other.position
-            && self.transparent == other.transparent
-            && self.rounded_corners == other.rounded_corners
-            && self.corner_radius == other.corner_radius
-            && self.topmost == other.topmost
-            && self.hide_on_deactivate == other.hide_on_deactivate
-            && self.background_memory_optimization == other.background_memory_optimization
-            && self.titlebar_drag_height == other.titlebar_drag_height
-            && drag_exclusions_equal(self.drag_exclusion, other.drag_exclusion)
-            && self.scale_reference_size == other.scale_reference_size
-            && self.scale_preference == other.scale_preference
-            && self.mode == other.mode
-            && self.close_policy == other.close_policy
-            && close_handlers_equal(self.close_handler, other.close_handler)
-    }
-}
-
-impl Eq for WindowOptions {}
-
-fn drag_exclusions_equal(
-    left: Option<WindowDragExclusion>,
-    right: Option<WindowDragExclusion>,
-) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => std::ptr::fn_addr_eq(left, right),
-        _ => false,
-    }
+    extensions: WindowOptionExtensions,
 }
 
 impl WindowOptions {
@@ -804,16 +832,6 @@ impl WindowOptions {
 
     pub fn owner(mut self, owner: impl Into<WindowId>) -> Self {
         self.owner = Some(owner.into());
-        self
-    }
-
-    pub fn class_name(mut self, class_name: impl Into<String>) -> Self {
-        self.class_name = Some(class_name.into());
-        self
-    }
-
-    pub fn icon_bytes(mut self, bytes: &'static [u8]) -> Self {
-        self.icon_bytes = Some(bytes);
         self
     }
 
@@ -852,11 +870,6 @@ impl WindowOptions {
         self
     }
 
-    pub fn rounded_corners(mut self, enabled: bool) -> Self {
-        self.rounded_corners = enabled;
-        self
-    }
-
     pub fn corner_radius(mut self, radius: i32) -> Self {
         self.corner_radius = radius.max(0);
         self
@@ -883,8 +896,8 @@ impl WindowOptions {
     #[deprecated(
         note = "geometry-based titlebar drag is a compatibility path; migrate immediately to Element::window_drag_region"
     )]
-    pub fn titlebar_drag(mut self, height: i32, exclusion: Option<WindowDragExclusion>) -> Self {
-        self.titlebar_drag_height = Some(height.max(0));
+    pub fn titlebar_drag(mut self, height: f32, exclusion: Option<WindowDragExclusion>) -> Self {
+        self.titlebar_drag_height = Some(height.max(0.0));
         self.drag_exclusion = exclusion;
         self
     }
@@ -917,6 +930,26 @@ impl WindowOptions {
         self.close_handler = Some(handler);
         self
     }
+
+    pub fn with_platform_options<T>(mut self, options: T) -> Self
+    where
+        T: Any + Send + Sync,
+    {
+        self.extensions
+            .values
+            .insert(TypeId::of::<T>(), Arc::new(options));
+        self
+    }
+
+    pub fn platform_options<T>(&self) -> Option<&T>
+    where
+        T: Any + Send + Sync,
+    {
+        self.extensions
+            .values
+            .get(&TypeId::of::<T>())
+            .and_then(|options| options.downcast_ref())
+    }
 }
 
 impl Default for WindowOptions {
@@ -924,18 +957,15 @@ impl Default for WindowOptions {
         Self {
             id: WindowId::new("main"),
             owner: None,
-            class_name: None,
-            icon_bytes: None,
             title: "lgui".to_owned(),
             visible: true,
-            size: Size::new(1024, 720),
+            size: Size::new(1024.0, 720.0),
             minimum_size: None,
             maximum_size: None,
             resizable: true,
             native_titlebar: true,
             position: WindowPosition::Centered,
             transparent: false,
-            rounded_corners: true,
             corner_radius: 0,
             topmost: false,
             hide_on_deactivate: false,
@@ -947,18 +977,8 @@ impl Default for WindowOptions {
             mode: WindowMode::Windowed,
             close_policy: ClosePolicy::Exit,
             close_handler: None,
+            extensions: WindowOptionExtensions::default(),
         }
-    }
-}
-
-fn close_handlers_equal(
-    left: Option<WindowCloseHandler>,
-    right: Option<WindowCloseHandler>,
-) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => std::ptr::fn_addr_eq(left, right),
-        _ => false,
     }
 }
 
@@ -971,6 +991,72 @@ pub trait ApplicationBackend: Sized {
         view: AppView,
         context: ApplicationContext,
     ) -> Result<(), Self::Error>;
+}
+
+#[cfg(all(
+    target_os = "windows",
+    feature = "renderer-gdi",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+pub enum DesktopApplication {
+    Win32(crate::platform::win32::Win32Application),
+    Winit(crate::platform::WinitApplication),
+}
+
+#[cfg(all(
+    target_os = "windows",
+    feature = "renderer-gdi",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+#[derive(Debug)]
+pub struct DesktopApplicationError(String);
+
+#[cfg(all(
+    target_os = "windows",
+    feature = "renderer-gdi",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+impl std::fmt::Display for DesktopApplicationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[cfg(all(
+    target_os = "windows",
+    feature = "renderer-gdi",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+impl std::error::Error for DesktopApplicationError {}
+
+#[cfg(all(
+    target_os = "windows",
+    feature = "renderer-gdi",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+impl ApplicationBackend for DesktopApplication {
+    type Error = DesktopApplicationError;
+
+    fn run(
+        self,
+        options: WindowOptions,
+        view: AppView,
+        context: ApplicationContext,
+    ) -> Result<(), Self::Error> {
+        match self {
+            Self::Win32(backend) => backend
+                .run(options, view, context)
+                .map_err(|error| DesktopApplicationError(error.to_string())),
+            Self::Winit(backend) => backend
+                .run(options, view, context)
+                .map_err(|error| DesktopApplicationError(error.to_string())),
+        }
+    }
 }
 
 pub struct Application<B> {
@@ -1025,7 +1111,6 @@ impl<B> Application<B> {
         self
     }
 
-    #[cfg(feature = "backend-win32")]
     pub fn font_families(self, families: &'static [&'static str]) -> Self {
         self.resources.provide(crate::text::FontFamilies(families));
         self
@@ -1034,9 +1119,9 @@ impl<B> Application<B> {
     #[cfg(feature = "svg")]
     pub fn svg_icons(self, registry: crate::icons::SvgIconRegistry) -> Self {
         self.resources
-            .provide(crate::icons::IconRegistration(std::sync::Mutex::new(Some(
+            .provide(crate::icons::IconRegistration(std::sync::Arc::new(
                 registry,
-            ))));
+            )));
         self
     }
 
@@ -1062,7 +1147,11 @@ impl<B> Application<B> {
     }
 }
 
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+#[cfg(all(
+    feature = "renderer-gdi",
+    target_os = "windows",
+    not(all(feature = "backend-winit", feature = "renderer-skia"))
+))]
 impl Application<crate::platform::win32::Win32Application> {
     pub fn new() -> Self {
         Self::with_backend(crate::platform::win32::Win32Application::default())
@@ -1079,8 +1168,56 @@ impl Application<crate::platform::win32::Win32Application> {
             RendererKind::D2d => crate::platform::win32::Win32Application::with_renderer(
                 crate::platform::win32::D2dRendererFactory,
             ),
+            #[cfg(feature = "renderer-skia")]
+            RendererKind::Skia(_) => {
+                panic!("the Skia desktop renderer requires the backend-winit feature")
+            }
         };
         self
+    }
+}
+
+#[cfg(all(
+    feature = "renderer-gdi",
+    target_os = "windows",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+impl Application<DesktopApplication> {
+    pub fn new() -> Self {
+        Self::with_backend(DesktopApplication::Win32(
+            crate::platform::win32::Win32Application::default(),
+        ))
+        .provide(RendererKind::Gdi)
+    }
+
+    pub fn renderer(mut self, renderer: RendererKind) -> Self {
+        self.resources.provide(renderer);
+        self.backend = match renderer {
+            RendererKind::Gdi => {
+                DesktopApplication::Win32(crate::platform::win32::Win32Application::with_renderer(
+                    crate::platform::win32::GdiRendererFactory,
+                ))
+            }
+            #[cfg(feature = "renderer-d2d")]
+            RendererKind::D2d => {
+                DesktopApplication::Win32(crate::platform::win32::Win32Application::with_renderer(
+                    crate::platform::win32::D2dRendererFactory,
+                ))
+            }
+            RendererKind::Skia(preference) => {
+                DesktopApplication::Winit(crate::platform::WinitApplication::new(preference))
+            }
+        };
+        self
+    }
+}
+
+#[cfg(all(feature = "renderer-skia", feature = "backend-winit"))]
+impl Application<crate::platform::WinitApplication> {
+    pub fn new_skia(preference: GraphicsPreference) -> Self {
+        Self::with_backend(crate::platform::WinitApplication::new(preference))
+            .provide(RendererKind::Skia(preference))
     }
 }
 
@@ -1095,6 +1232,32 @@ where
             + Sync
             + 'static,
     ) -> Result<(), B::Error> {
+        #[cfg(feature = "clipboard")]
+        if self
+            .resources
+            .get::<crate::platform::ClipboardHandle>()
+            .is_none()
+        {
+            self.resources
+                .provide::<crate::platform::ClipboardHandle>(crate::clipboard::system_clipboard());
+        }
+        #[cfg(feature = "open-url")]
+        if self
+            .resources
+            .get::<crate::desktop::OpenUrlHandle>()
+            .is_none()
+        {
+            self.resources.provide(crate::desktop::system_url_opener());
+        }
+        #[cfg(feature = "dialogs")]
+        if self
+            .resources
+            .get::<crate::dialogs::FileDialogHandle>()
+            .is_none()
+        {
+            self.resources
+                .provide(crate::dialogs::system_file_dialogs());
+        }
         let context = ApplicationContext::new(self.resources, self.executor);
         let backend_context = context.clone();
         let view: AppView = Arc::new(view);
@@ -1180,23 +1343,26 @@ mod tests {
     fn application_passes_window_options_to_the_backend() {
         let recorded = Arc::new(Mutex::new(None));
         let options = WindowOptions::new("counter")
-            .size(Size::new(640, 480))
-            .minimum_size(Size::new(320, 240))
-            .maximum_size(Size::new(1280, 960))
+            .size(Size::new(640.0, 480.0))
+            .minimum_size(Size::new(320.0, 240.0))
+            .maximum_size(Size::new(1280.0, 960.0))
             .resizable(false);
 
         Application::with_backend(RecordingBackend(Arc::clone(&recorded)))
             .window_options(options.clone())
-            .run(|_| crate::core::group(crate::core::UiRect::new(0, 0, 1, 1)))
+            .run(|_| crate::core::group(crate::core::UiRect::new(0.0, 0.0, 1.0, 1.0)))
             .expect("mock backend should run");
 
-        assert_eq!(
-            recorded
-                .lock()
-                .expect("window options lock poisoned")
-                .clone(),
-            Some(options)
-        );
+        let recorded = recorded
+            .lock()
+            .expect("window options lock poisoned")
+            .clone()
+            .expect("backend should receive window options");
+        assert_eq!(recorded.id, options.id);
+        assert_eq!(recorded.size, options.size);
+        assert_eq!(recorded.minimum_size, options.minimum_size);
+        assert_eq!(recorded.maximum_size, options.maximum_size);
+        assert_eq!(recorded.resizable, options.resizable);
     }
 
     #[test]
@@ -1211,31 +1377,9 @@ mod tests {
     }
 
     #[test]
-    fn rounded_corners_are_enabled_by_default_and_can_be_disabled() {
-        assert!(WindowOptions::default().rounded_corners);
-        assert!(WindowOptions::new("default").rounded_corners);
-        assert!(
-            !WindowOptions::new("square")
-                .rounded_corners(false)
-                .rounded_corners
-        );
-    }
-
-    #[test]
     fn windows_are_visible_by_default_and_can_start_hidden() {
         assert!(WindowOptions::default().visible);
         assert!(!WindowOptions::new("background").visible(false).visible);
-    }
-
-    #[test]
-    fn window_icon_bytes_are_optional_and_configurable() {
-        static ICON: &[u8] = b"icon";
-
-        assert_eq!(WindowOptions::default().icon_bytes, None);
-        assert_eq!(
-            WindowOptions::new("branded").icon_bytes(ICON).icon_bytes,
-            Some(ICON)
-        );
     }
 
     #[test]
@@ -1245,10 +1389,10 @@ mod tests {
         assert_eq!(defaults.maximum_size, None);
 
         let constrained = defaults
-            .minimum_size(Size::new(640, 360))
-            .maximum_size(Size::new(1920, 1080));
-        assert_eq!(constrained.minimum_size, Some(Size::new(640, 360)));
-        assert_eq!(constrained.maximum_size, Some(Size::new(1920, 1080)));
+            .minimum_size(Size::new(640.0, 360.0))
+            .maximum_size(Size::new(1920.0, 1080.0));
+        assert_eq!(constrained.minimum_size, Some(Size::new(640.0, 360.0)));
+        assert_eq!(constrained.maximum_size, Some(Size::new(1920.0, 1080.0)));
     }
 
     #[test]
@@ -1285,8 +1429,8 @@ mod tests {
         let options = WindowOptions::new("friends")
             .owner("main")
             .title("Friends")
-            .size(Size::new(292, 640))
-            .minimum_size(Size::new(292, 360))
+            .size(Size::new(292.0, 640.0))
+            .minimum_size(Size::new(292.0, 360.0))
             .position(WindowPosition::AdjacentToOwner { gap: 1 })
             .transparent(true)
             .corner_radius(8)
@@ -1369,7 +1513,7 @@ mod tests {
             let mut session = crate::session::UiSession::new();
             let _ = session.render_view(
                 &view,
-                UiRect::new(0, 0, 320, 200),
+                UiRect::new(0.0, 0.0, 320.0, 200.0),
                 crate::core::UiScale::ONE,
             );
             self.0.fetch_add(1, Ordering::SeqCst);
@@ -1505,7 +1649,10 @@ mod tests {
     ))]
     #[test]
     fn gdi_and_d2d_use_the_same_application_builder_type() {
+        #[cfg(not(all(feature = "backend-winit", feature = "renderer-skia")))]
         fn assert_type(_: Application<crate::platform::win32::Win32Application>) {}
+        #[cfg(all(feature = "backend-winit", feature = "renderer-skia"))]
+        fn assert_type(_: Application<DesktopApplication>) {}
 
         assert_type(Application::new().renderer(RendererKind::Gdi));
         assert_type(Application::new().renderer(RendererKind::D2d));

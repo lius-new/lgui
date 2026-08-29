@@ -1,9 +1,13 @@
 pub use crate::application::{
     AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle, ClosePolicy,
-    RenderError, RenderErrorStage, WindowCloseHandler, WindowHandle, WindowId, WindowManager,
-    WindowMode, WindowOptions, WindowPosition,
+    GraphicsPreference, RenderError, RenderErrorStage, WindowCloseHandler, WindowHandle, WindowId,
+    WindowManager, WindowMode, WindowOptions, WindowPosition,
 };
-#[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
+#[cfg(any(
+    all(feature = "renderer-gdi", target_os = "windows"),
+    all(feature = "renderer-d2d", target_os = "windows"),
+    feature = "renderer-skia"
+))]
 pub use crate::application::{RendererKind, RendererProbeError};
 #[cfg(feature = "tray")]
 pub use crate::application::{TrayAction, TrayOptions};
@@ -11,7 +15,8 @@ pub use crate::application::{TrayAction, TrayOptions};
 pub use crate::assets::SvgRenderer;
 #[cfg(feature = "images")]
 pub use crate::assets::{
-    AssetBytes, AssetError, AssetResolver, CustomPaintProvider, ImageData, ImageLoader,
+    AssetBytes, AssetError, AssetResolver, CustomPaintProvider, ImageCacheHandle, ImageData,
+    ImageLoader, ImageSource, ImageStatus, RemoteImageLoader, RemoteImageLoaderHandle,
     RenderResources,
 };
 pub use crate::core::{
@@ -29,7 +34,16 @@ pub use crate::platform::{
     Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationError,
     NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService, WakeHandle,
 };
-pub use crate::renderer::{ClipRegion, RenderBackend};
+#[cfg(feature = "open-url")]
+pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};
+#[cfg(feature = "dialogs")]
+pub use crate::dialogs::{
+    FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
+};
+pub use crate::renderer::{
+    ClipRegion, FrameInfo, FrameReason, MemoryPressure, RenderStats, RendererCapabilities,
+    SceneRenderer,
+};
 pub use crate::resources::Resources;
 #[cfg(feature = "router")]
 pub use crate::router::{

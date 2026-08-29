@@ -1,60 +1,182 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range, path::PathBuf};
 
-use super::{AnimProperty, AnimationRegistry, HitResult, HostTree, Point, UiId};
+use super::{
+    geometry::normalized_f32_bits, AnimProperty, AnimationRegistry, HitResult, HostTree, Point,
+    UiId,
+};
+
+pub use keyboard_types::{
+    Code as PhysicalKey, Key as LogicalKey, KeyState, KeyboardEvent, Location as KeyLocation,
+    Modifiers as KeyModifiers, NamedKey,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PointerButton {
     Left,
     Right,
     Middle,
+    Back,
+    Forward,
+    Other(u16),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct KeyModifiers {
-    pub ctrl: bool,
-    pub shift: bool,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PointerId(pub u64);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PointerKind {
+    #[default]
+    Mouse,
+    Touch,
+    Pen,
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KeyCode {
-    Tab,
-    Backspace,
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ArrowDown,
-    Enter,
-    A,
-    C,
-    V,
+pub struct PointerData {
+    pub id: PointerId,
+    pub kind: PointerKind,
+    pub point: Point,
+    pub pressure: Option<u16>,
+    pub primary: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl PointerData {
+    pub const fn mouse(point: Point) -> Self {
+        Self {
+            id: PointerId(0),
+            kind: PointerKind::Mouse,
+            point,
+            pressure: None,
+            primary: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TouchPhase {
+    Started,
+    Moved,
+    Ended,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WheelUnit {
+    Lines,
+    Pixels,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WheelDelta {
+    pub x: f32,
+    pub y: f32,
+    pub unit: WheelUnit,
+    pub phase: TouchPhase,
+}
+
+impl PartialEq for WheelDelta {
+    fn eq(&self, other: &Self) -> bool {
+        normalized_f32_bits(self.x) == normalized_f32_bits(other.x)
+            && normalized_f32_bits(self.y) == normalized_f32_bits(other.y)
+            && self.unit == other.unit
+            && self.phase == other.phase
+    }
+}
+
+impl Eq for WheelDelta {}
+
+impl WheelDelta {
+    pub const fn lines(x: f32, y: f32) -> Self {
+        Self {
+            x,
+            y,
+            unit: WheelUnit::Lines,
+            phase: TouchPhase::Moved,
+        }
+    }
+
+    pub const fn pixels(x: f32, y: f32) -> Self {
+        Self {
+            x,
+            y,
+            unit: WheelUnit::Pixels,
+            phase: TouchPhase::Moved,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum InputEvent {
-    PointerMove(Point),
+    PointerMove(PointerData),
     PointerDown {
-        point: Point,
+        pointer: PointerData,
         button: PointerButton,
     },
     PointerUp {
-        point: Point,
+        pointer: PointerData,
         button: PointerButton,
     },
+    PointerEnter(PointerData),
     Wheel {
         point: Point,
-        delta_y: i32,
+        delta: WheelDelta,
     },
     TextInput(String),
-    ImeStart,
-    ImeUpdate(String),
-    ImeCommit(String),
-    ImeEnd,
-    Backspace,
-    KeyDown {
-        key: KeyCode,
-        modifiers: KeyModifiers,
+    Ime(ImeEvent),
+    Keyboard(KeyboardEvent),
+    PointerLeave(PointerData),
+    Touch {
+        pointer: PointerData,
+        phase: TouchPhase,
     },
-    PointerLeave,
+    Platform(PlatformEvent),
+    Semantic(SemanticInput),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SemanticInput {
+    Click(UiId),
+    Focus(UiId),
+    Blur(UiId),
+    SetValue { target: UiId, value: String },
+    Action { target: UiId, action: super::SemanticAction },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlatformTheme {
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowStateEvent {
+    pub focused: bool,
+    pub minimized: bool,
+    pub maximized: bool,
+    pub fullscreen: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlatformEvent {
+    Focused(bool),
+    FileHovered(PathBuf),
+    FileDropped(PathBuf),
+    FileHoverCancelled,
+    ScaleFactorChanged(f64),
+    ThemeChanged(PlatformTheme),
+    WindowStateChanged(WindowStateEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImeEvent {
+    Enabled,
+    Preedit {
+        text: String,
+        cursor: Option<Range<usize>>,
+    },
+    Commit(String),
+    Disabled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +192,7 @@ pub enum UiEvent {
     Clicked(HitResult),
     Wheel {
         hit: HitResult,
-        delta_y: i32,
+        delta: WheelDelta,
     },
     TextInput {
         target: UiId,
@@ -82,33 +204,30 @@ pub enum UiEvent {
     ImeUpdated {
         target: UiId,
         text: String,
+        cursor: Option<Range<usize>>,
     },
     ImeEnded {
         target: UiId,
     },
-    Backspace {
+    Keyboard {
         target: UiId,
-    },
-    KeyDown {
-        target: UiId,
-        key: KeyCode,
-        modifiers: KeyModifiers,
+        event: KeyboardEvent,
     },
     PointerPressed {
         hit: HitResult,
-        point: Point,
+        pointer: PointerData,
     },
     PointerMoved {
         hit: HitResult,
-        point: Point,
+        pointer: PointerData,
     },
     PointerDragged {
         hit: HitResult,
-        point: Point,
+        pointer: PointerData,
     },
     PointerReleased {
         hit: HitResult,
-        point: Point,
+        pointer: PointerData,
     },
     FocusChanged {
         previous: Option<UiId>,
@@ -116,6 +235,14 @@ pub enum UiEvent {
     },
     PointerLeft {
         previous: Option<UiId>,
+    },
+    SemanticValue {
+        target: UiId,
+        value: String,
+    },
+    SemanticAction {
+        target: UiId,
+        action: super::SemanticAction,
     },
 }
 
@@ -176,30 +303,66 @@ impl UiEventDispatcher {
 
     pub fn dispatch(&mut self, tree: &HostTree, event: InputEvent) -> Vec<UiEvent> {
         match event {
-            InputEvent::PointerMove(point) => self.pointer_move(tree, point),
-            InputEvent::PointerDown { point, .. } => self.pointer_down(tree, point),
-            InputEvent::PointerUp { point, .. } => self.pointer_up(tree, point),
-            InputEvent::Wheel { point, delta_y } => self.wheel(tree, point, delta_y),
-            InputEvent::TextInput(text) | InputEvent::ImeCommit(text) => self.text_input(text),
-            InputEvent::ImeStart => self.ime_start(),
-            InputEvent::ImeUpdate(text) => self.ime_update(text),
-            InputEvent::ImeEnd => self.ime_end(),
-            InputEvent::Backspace => self.backspace(),
-            InputEvent::KeyDown { key, modifiers } => self.key_down(tree, key, modifiers),
-            InputEvent::PointerLeave => self.pointer_leave(),
+            InputEvent::PointerMove(pointer) => self.pointer_move(tree, pointer),
+            InputEvent::PointerDown { pointer, .. } => self.pointer_down(tree, pointer),
+            InputEvent::PointerUp { pointer, .. } => self.pointer_up(tree, pointer),
+            InputEvent::PointerEnter(pointer) => self.pointer_move(tree, pointer),
+            InputEvent::Wheel { point, delta } => self.wheel(tree, point, delta),
+            InputEvent::TextInput(text) => self.text_input(text),
+            InputEvent::Ime(ImeEvent::Enabled) => self.ime_start(),
+            InputEvent::Ime(ImeEvent::Preedit { text, cursor }) => self.ime_update(text, cursor),
+            InputEvent::Ime(ImeEvent::Commit(text)) => self.text_input(text),
+            InputEvent::Ime(ImeEvent::Disabled) => self.ime_end(),
+            InputEvent::Keyboard(event) => self.keyboard(event),
+            InputEvent::PointerLeave(_) => self.pointer_leave(),
+            InputEvent::Touch { pointer, phase } => match phase {
+                TouchPhase::Started => self.pointer_down(tree, pointer),
+                TouchPhase::Moved => self.pointer_move(tree, pointer),
+                TouchPhase::Ended => self.pointer_up(tree, pointer),
+                TouchPhase::Cancelled => self.pointer_leave(),
+            },
+            InputEvent::Platform(_) => Vec::new(),
+            InputEvent::Semantic(input) => self.semantic(tree, input),
         }
     }
 
-    fn pointer_move(&mut self, tree: &HostTree, point: Point) -> Vec<UiEvent> {
-        let hit = tree.hit_test(point).filter(|hit| hit.policy.hover);
+    fn semantic(&mut self, tree: &HostTree, input: SemanticInput) -> Vec<UiEvent> {
+        match input {
+            SemanticInput::Click(id) => tree
+                .hit_for_id(&id)
+                .map(UiEvent::Clicked)
+                .into_iter()
+                .collect(),
+            SemanticInput::Focus(id) => tree
+                .focusable_hit(&id)
+                .map(|hit| self.set_focus(Some(hit)))
+                .unwrap_or_default(),
+            SemanticInput::Blur(id) => {
+                if self.state.focused.as_ref() == Some(&id) {
+                    self.set_focus(None)
+                } else {
+                    Vec::new()
+                }
+            }
+            SemanticInput::SetValue { target, value } => {
+                vec![UiEvent::SemanticValue { target, value }]
+            }
+            SemanticInput::Action { target, action } => {
+                vec![UiEvent::SemanticAction { target, action }]
+            }
+        }
+    }
+
+    fn pointer_move(&mut self, tree: &HostTree, pointer: PointerData) -> Vec<UiEvent> {
+        let hit = tree.hit_test(pointer.point).filter(|hit| hit.policy.hover);
         let current = hit.as_ref().map(|hit| hit.id.clone());
         let drag = self
             .pressed_hit
             .clone()
-            .map(|hit| UiEvent::PointerDragged { hit, point });
+            .map(|hit| UiEvent::PointerDragged { hit, pointer });
         if self.state.hovered == current {
             let mut events = hit
-                .map(|hit| UiEvent::PointerMoved { hit, point })
+                .map(|hit| UiEvent::PointerMoved { hit, pointer })
                 .into_iter()
                 .collect::<Vec<_>>();
             events.extend(drag);
@@ -215,13 +378,13 @@ impl UiEventDispatcher {
             events.push(event);
         }
         if let Some(hit) = current.as_ref().and_then(|id| tree.hit_for_id(id)) {
-            events.push(UiEvent::PointerMoved { hit, point });
+            events.push(UiEvent::PointerMoved { hit, pointer });
         }
         events
     }
 
-    fn pointer_down(&mut self, tree: &HostTree, point: Point) -> Vec<UiEvent> {
-        let hit = tree.hit_test(point).filter(|hit| hit.policy.press);
+    fn pointer_down(&mut self, tree: &HostTree, pointer: PointerData) -> Vec<UiEvent> {
+        let hit = tree.hit_test(pointer.point).filter(|hit| hit.policy.press);
         let current = hit.as_ref().map(|hit| hit.id.clone());
         let mut events = Vec::new();
         if self.state.pressed != current {
@@ -246,7 +409,7 @@ impl UiEventDispatcher {
                     });
                 }
             }
-            events.push(UiEvent::PointerPressed { hit, point });
+            events.push(UiEvent::PointerPressed { hit, pointer });
         } else if let Some(previous) = self.state.focused.take() {
             events.push(UiEvent::FocusChanged {
                 previous: Some(previous),
@@ -256,8 +419,8 @@ impl UiEventDispatcher {
         events
     }
 
-    fn pointer_up(&mut self, tree: &HostTree, point: Point) -> Vec<UiEvent> {
-        let hit = tree.hit_test(point).filter(|hit| hit.policy.press);
+    fn pointer_up(&mut self, tree: &HostTree, pointer: PointerData) -> Vec<UiEvent> {
+        let hit = tree.hit_test(pointer.point).filter(|hit| hit.policy.press);
         let mut events = Vec::new();
         let previous = self.state.pressed.clone();
         let pressed_hit = self.pressed_hit.take();
@@ -269,7 +432,7 @@ impl UiEventDispatcher {
             });
         }
         if let Some(hit) = pressed_hit {
-            events.push(UiEvent::PointerReleased { hit, point });
+            events.push(UiEvent::PointerReleased { hit, pointer });
         }
         if let Some(hit) = hit {
             if previous == Some(hit.id.clone()) {
@@ -289,9 +452,9 @@ impl UiEventDispatcher {
         events
     }
 
-    fn wheel(&mut self, tree: &HostTree, point: Point, delta_y: i32) -> Vec<UiEvent> {
+    fn wheel(&mut self, tree: &HostTree, point: Point, delta: WheelDelta) -> Vec<UiEvent> {
         tree.wheel_hit_test(point)
-            .map(|hit| vec![UiEvent::Wheel { hit, delta_y }])
+            .map(|hit| vec![UiEvent::Wheel { hit, delta }])
             .unwrap_or_default()
     }
 
@@ -311,11 +474,17 @@ impl UiEventDispatcher {
             .unwrap_or_default()
     }
 
-    fn ime_update(&self, text: String) -> Vec<UiEvent> {
+    fn ime_update(&self, text: String, cursor: Option<Range<usize>>) -> Vec<UiEvent> {
         self.state
             .focused
             .clone()
-            .map(|target| vec![UiEvent::ImeUpdated { target, text }])
+            .map(|target| {
+                vec![UiEvent::ImeUpdated {
+                    target,
+                    text,
+                    cursor,
+                }]
+            })
             .unwrap_or_default()
     }
 
@@ -327,30 +496,11 @@ impl UiEventDispatcher {
             .unwrap_or_default()
     }
 
-    fn backspace(&mut self) -> Vec<UiEvent> {
+    fn keyboard(&self, event: KeyboardEvent) -> Vec<UiEvent> {
         self.state
             .focused
             .clone()
-            .map(|target| vec![UiEvent::Backspace { target }])
-            .unwrap_or_default()
-    }
-
-    fn key_down(
-        &mut self,
-        _tree: &HostTree,
-        key: KeyCode,
-        modifiers: KeyModifiers,
-    ) -> Vec<UiEvent> {
-        self.state
-            .focused
-            .clone()
-            .map(|target| {
-                vec![UiEvent::KeyDown {
-                    target,
-                    key,
-                    modifiers,
-                }]
-            })
+            .map(|target| vec![UiEvent::Keyboard { target, event }])
             .unwrap_or_default()
     }
 
@@ -559,12 +709,13 @@ pub fn apply_events_to_animations(
             | UiEvent::ImeStarted { .. }
             | UiEvent::ImeUpdated { .. }
             | UiEvent::ImeEnded { .. }
-            | UiEvent::Backspace { .. }
-            | UiEvent::KeyDown { .. }
+            | UiEvent::Keyboard { .. }
             | UiEvent::PointerPressed { .. }
             | UiEvent::PointerMoved { .. }
             | UiEvent::PointerDragged { .. }
-            | UiEvent::PointerReleased { .. } => {}
+            | UiEvent::PointerReleased { .. }
+            | UiEvent::SemanticValue { .. }
+            | UiEvent::SemanticAction { .. } => {}
             UiEvent::FocusChanged { previous, current } => {
                 if let Some(id) = previous {
                     changed |= set_node_animation_targets(
@@ -639,5 +790,25 @@ fn event_policy_allows(policy: super::EventPolicy, property: AnimProperty) -> bo
         AnimProperty::Pressed => policy.press,
         AnimProperty::Focus => policy.focus,
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wheel_delta_preserves_fractional_line_and_pixel_input() {
+        let lines = WheelDelta::lines(0.25, -1.5);
+        assert_eq!(
+            (lines.x, lines.y, lines.unit),
+            (0.25, -1.5, WheelUnit::Lines)
+        );
+
+        let pixels = WheelDelta::pixels(1.75, -3.25);
+        assert_eq!(
+            (pixels.x, pixels.y, pixels.unit),
+            (1.75, -3.25, WheelUnit::Pixels)
+        );
     }
 }

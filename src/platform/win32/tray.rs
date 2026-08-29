@@ -588,7 +588,7 @@ fn create_menu_bitmap(icon: &'static str, size: i32) -> io::Result<HBITMAP> {
     let system_color = unsafe { GetSysColor(COLOR_MENUTEXT) };
     let rgb =
         ((system_color & 0xFF) << 16) | (system_color & 0x00FF00) | ((system_color >> 16) & 0xFF);
-    let rect = UiRect::new(0, 0, size, size);
+    let rect = UiRect::new(0.0, 0.0, size as f32, size as f32);
     let bitmap = super::rasterize_svg_icon_bgra(icon, rect, IconStyle::new(Color(rgb)))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unknown tray menu icon"))?;
     create_bgra_bitmap(bitmap.width, bitmap.height, &bitmap.premultiplied_bgra)

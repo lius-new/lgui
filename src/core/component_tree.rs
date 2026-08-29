@@ -719,7 +719,7 @@ mod tests {
             1_u32,
             UiElement::group(
                 UiId::owned("committed"),
-                super::super::UiRect::new(0, 0, 1, 1),
+                super::super::UiRect::new(0.0, 0.0, 1.0, 1.0),
             ),
         );
         tree.finish_component(root);
@@ -733,7 +733,7 @@ mod tests {
             2_u32,
             UiElement::group(
                 UiId::owned("abandoned"),
-                super::super::UiRect::new(0, 0, 1, 1),
+                super::super::UiRect::new(0.0, 0.0, 1.0, 1.0),
             ),
         );
         tree.finish_component(root);
@@ -781,7 +781,10 @@ mod tests {
         tree.commit_output(
             first,
             1_u32,
-            UiElement::group(UiId::owned("first"), super::super::UiRect::new(0, 0, 1, 1)),
+            UiElement::group(
+                UiId::owned("first"),
+                super::super::UiRect::new(0.0, 0.0, 1.0, 1.0),
+            ),
         );
         tree.finish_component(first);
         let second = tree.positioned_child(root, 1, 1, "child");
@@ -789,7 +792,10 @@ mod tests {
         tree.commit_output(
             second,
             2_u32,
-            UiElement::group(UiId::owned("second"), super::super::UiRect::new(1, 0, 1, 1)),
+            UiElement::group(
+                UiId::owned("second"),
+                super::super::UiRect::new(1.0, 0.0, 1.0, 1.0),
+            ),
         );
         tree.finish_component(second);
         tree.finish_component(root);
@@ -805,7 +811,10 @@ mod tests {
         tree.commit_output(
             first_again,
             1_u32,
-            UiElement::group(UiId::owned("first"), super::super::UiRect::new(0, 0, 1, 1)),
+            UiElement::group(
+                UiId::owned("first"),
+                super::super::UiRect::new(0.0, 0.0, 1.0, 1.0),
+            ),
         );
         tree.finish_component(first_again);
         let second_again = tree.positioned_child(root, 1, 1, "child");

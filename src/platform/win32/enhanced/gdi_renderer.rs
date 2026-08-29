@@ -49,15 +49,14 @@ use lgui::platform::win32::render_trace as trace;
 
 use super::{
     blur::with_backdrop_blur_bgra,
-    custom_paint::custom_paint_bgra,
     image,
     static_layer::{self, StaticLayerDrawBackend},
 };
 use lgui::core::{
     compositing_layer_damage, Color, CompositingLayerBackground, CompositingLayerSpec,
-    CustomPaintStyle, LayerTransform, OverlayStyle, PathStyle, Point, RadialGradientLayer, Scene,
-    ScenePrimitive, Stroke, TextAlign, TextStyle, UiId, UiPath, UiPathCommand, UiRect,
-    VerticalGradientLayer, VisualStyle,
+    LayerTransform, OverlayStyle, PathStyle, PhysicalRect, Point,
+    RadialGradientLayer, Scene, ScenePrimitive, Stroke, TextAlign, TextStyle, UiId, UiPath,
+    UiPathCommand, UiRect, VerticalGradientLayer, VisualStyle,
 };
 use lgui::platform::win32::{draw_svg_icon, ui_font_family_at, ui_font_family_count};
 use lgui::renderer::ClipRegion;
@@ -69,6 +68,23 @@ thread_local! {
     static GDI_COMPOSITING_LAYERS: RefCell<HashMap<GdiCompositingLayerKey, GdiCompositingLayer>> = RefCell::new(HashMap::new());
     static GDI_FRAME_BLIT_METRICS: RefCell<GdiFrameBlitMetrics> = RefCell::new(GdiFrameBlitMetrics::default());
     static GDI_FONT_FAMILY_CACHE: RefCell<HashMap<(char, i32, i32), usize>> = RefCell::new(HashMap::new());
+}
+
+fn raster_length(value: f32) -> i32 {
+    value.ceil().max(1.0) as i32
+}
+
+fn round_coord(value: f32) -> i32 {
+    value.round() as i32
+}
+
+fn pixel_rect_outward(rect: UiRect) -> PhysicalRect {
+    PhysicalRect::new(
+        rect.left.floor() as i32,
+        rect.top.floor() as i32,
+        rect.right.ceil() as i32,
+        rect.bottom.ceil() as i32,
+    )
 }
 
 pub fn clear_gdi_renderer_caches() {
@@ -130,7 +146,8 @@ pub fn take_gdi_frame_blit_metrics() -> GdiFrameBlitMetrics {
 }
 
 fn record_gdi_frame_blit(source: GdiFrameBlitSource, kind: GdiFrameBlitKind, rect: UiRect) {
-    let pixels = (rect.width().max(0) as u64).saturating_mul(rect.height().max(0) as u64);
+    let pixels =
+        (rect.width().max(0.0).ceil() as u64).saturating_mul(rect.height().max(0.0).ceil() as u64);
     GDI_FRAME_BLIT_METRICS.with(|metrics| {
         let mut metrics_ref = metrics.borrow_mut();
         let metrics = &mut *metrics_ref;
@@ -442,8 +459,8 @@ fn solid_bgra_pixels(width: i32, height: i32, color: [u8; 4]) -> Option<Vec<u8>>
     Some(pixels)
 }
 
-fn clipped_surface_region(surface: &GdiBitmapEntry, rect: UiRect) -> Option<UiRect> {
-    rect.intersect(UiRect::new(0, 0, surface.width, surface.height))
+fn clipped_surface_region(surface: &GdiBitmapEntry, rect: UiRect) -> Option<PhysicalRect> {
+    pixel_rect_outward(rect).intersect(PhysicalRect::new(0, 0, surface.width, surface.height))
 }
 
 fn fill_gdi_surface_region(surface: &mut GdiBitmapEntry, rect: UiRect, color: [u8; 4]) {
@@ -516,12 +533,13 @@ fn draw_gdi_commands_clipped(hdc: HDC, commands: &[ScenePrimitive], clip: UiRect
         return;
     }
     unsafe {
+        let clip_rect = win_rect(clip);
         let _ = windows::Win32::Graphics::Gdi::IntersectClipRect(
             hdc,
-            clip.left,
-            clip.top,
-            clip.right,
-            clip.bottom,
+            clip_rect.left,
+            clip_rect.top,
+            clip_rect.right,
+            clip_rect.bottom,
         );
     }
     let clip_region = ClipRegion::new(clip);
@@ -618,7 +636,17 @@ impl GdiRenderer {
             } => draw_backdrop_blur_path(hdc, *rect, path, *style, clip),
             ScenePrimitive::Custom {
                 rect, key, style, ..
-            } => draw_custom(hdc, *rect, key, *style),
+            } => {
+                if let (Some(style), Some(provider)) =
+                    (style, crate::assets::render_resources().custom_paint().cloned())
+                {
+                    if let Ok(Some(fragment)) = provider.record(key, *rect, *style) {
+                        for command in fragment.commands() {
+                            Self::draw_command_clipped(hdc, command, clip);
+                        }
+                    }
+                }
+            }
             ScenePrimitive::StaticLayer {
                 id,
                 rect,
@@ -744,8 +772,8 @@ fn draw_gdi_compositing_layer(
     commands: &[ScenePrimitive],
     content_signature: u64,
 ) {
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     let key = GdiCompositingLayerKey {
         scope: GDI_COMPOSITING_LAYER_SCOPE.with(Cell::get),
         id: id.clone(),
@@ -769,7 +797,7 @@ fn draw_gdi_compositing_layer(
     };
 
     if layer.content_signature != Some(content_signature) {
-        let bounds = UiRect::new(0, 0, width, height);
+        let bounds = UiRect::new(0.0, 0.0, width as f32, height as f32);
         let damage = if layer.commands.is_empty() {
             vec![bounds]
         } else {
@@ -825,6 +853,8 @@ fn draw_gdi_compositing_layer(
         dest.right - rect.left,
         dest.bottom - rect.top,
     );
+    let dest_px = pixel_rect_outward(dest);
+    let source_px = pixel_rect_outward(source);
     unsafe {
         if spec.opacity == 255 && layer.output.opaque {
             record_gdi_frame_blit(
@@ -834,13 +864,13 @@ fn draw_gdi_compositing_layer(
             );
             let _ = BitBlt(
                 hdc,
-                dest.left,
-                dest.top,
-                dest.width(),
-                dest.height(),
+                dest_px.left,
+                dest_px.top,
+                dest_px.width(),
+                dest_px.height(),
                 Some(layer.output.memory_dc),
-                source.left,
-                source.top,
+                source_px.left,
+                source_px.top,
                 SRCCOPY,
             );
         } else {
@@ -857,15 +887,15 @@ fn draw_gdi_compositing_layer(
             };
             let _ = AlphaBlend(
                 hdc,
-                dest.left,
-                dest.top,
-                dest.width(),
-                dest.height(),
+                dest_px.left,
+                dest_px.top,
+                dest_px.width(),
+                dest_px.height(),
                 layer.output.memory_dc,
-                source.left,
-                source.top,
-                source.width(),
-                source.height(),
+                source_px.left,
+                source_px.top,
+                source_px.width(),
+                source_px.height(),
                 blend,
             );
         }
@@ -983,7 +1013,12 @@ fn draw_gdi_compositing_layer_fallback(
         return;
     }
     unsafe {
-        let _ = windows::Win32::Graphics::Gdi::SetViewportOrgEx(hdc, rect.left, rect.top, None);
+        let _ = windows::Win32::Graphics::Gdi::SetViewportOrgEx(
+            hdc,
+            round_coord(rect.left),
+            round_coord(rect.top),
+            None,
+        );
     }
     let local_clip = clip
         .and_then(|clip| rect.intersect(clip))
@@ -1050,7 +1085,7 @@ fn draw_backdrop_blur(
                 hdc,
                 &key,
                 rect,
-                UiRect::new(0, 0, width, height),
+                UiRect::new(0.0, 0.0, width as f32, height as f32),
                 width,
                 height,
                 pixels,
@@ -1125,7 +1160,7 @@ fn draw_backdrop_blur_path(
                     hdc,
                     &key,
                     rect,
-                    UiRect::new(0, 0, width, height),
+                    UiRect::new(0.0, 0.0, width as f32, height as f32),
                     width,
                     height,
                     pixels,
@@ -1151,7 +1186,7 @@ fn draw_backdrop_blur_path(
             hdc,
             &key,
             rect,
-            UiRect::new(0, 0, width, height),
+            UiRect::new(0.0, 0.0, width as f32, height as f32),
             width,
             height,
             pixels,
@@ -1176,15 +1211,15 @@ fn backdrop_gdi_cache_key(rect: UiRect, style: lgui::core::BackdropBlurStyle) ->
     "backdrop-blur-gdi".hash(&mut hasher);
     style.source.hash(&mut hasher);
     style.fit.hash(&mut hasher);
-    rect.left.hash(&mut hasher);
-    rect.top.hash(&mut hasher);
-    rect.right.hash(&mut hasher);
-    rect.bottom.hash(&mut hasher);
-    style.source_rect.left.hash(&mut hasher);
-    style.source_rect.top.hash(&mut hasher);
-    style.source_rect.right.hash(&mut hasher);
-    style.source_rect.bottom.hash(&mut hasher);
-    style.radius.hash(&mut hasher);
+    rect.left.to_bits().hash(&mut hasher);
+    rect.top.to_bits().hash(&mut hasher);
+    rect.right.to_bits().hash(&mut hasher);
+    rect.bottom.to_bits().hash(&mut hasher);
+    style.source_rect.left.to_bits().hash(&mut hasher);
+    style.source_rect.top.to_bits().hash(&mut hasher);
+    style.source_rect.right.to_bits().hash(&mut hasher);
+    style.source_rect.bottom.to_bits().hash(&mut hasher);
+    style.radius.to_bits().hash(&mut hasher);
     style.tint.0.hash(&mut hasher);
     style.tint_alpha.to_bits().hash(&mut hasher);
     format!("backdrop:{:016x}", hasher.finish())
@@ -1205,6 +1240,7 @@ impl ClipGuard {
             if state == 0 {
                 return Self { hdc, state: None };
             }
+            let clip = win_rect(clip);
             let region = CreateRectRgn(clip.left, clip.top, clip.right, clip.bottom);
             if region.is_invalid() {
                 let _ = RestoreDC(hdc, state);
@@ -1255,6 +1291,7 @@ impl PolygonClipGuard {
             }
 
             if let Some(clip) = clip {
+                let clip = win_rect(clip);
                 let clip_region = CreateRectRgn(clip.left, clip.top, clip.right, clip.bottom);
                 if clip_region.is_invalid() {
                     let _ = DeleteObject(polygon_region.into());
@@ -1292,8 +1329,8 @@ fn polygon_points(path: &UiPath) -> Option<Vec<POINT>> {
         match *command {
             UiPathCommand::MoveTo(point) | UiPathCommand::LineTo(point) => {
                 points.push(POINT {
-                    x: point.x,
-                    y: point.y,
+                    x: round_coord(point.x),
+                    y: round_coord(point.y),
                 });
             }
             UiPathCommand::Close => {
@@ -1446,14 +1483,18 @@ impl StaticLayerDrawBackend for GdiStaticLayerBackend {
 }
 
 fn draw_line(hdc: HDC, start: Point, end: Point, stroke: Stroke) {
-    if stroke.alpha == 0 || stroke.width <= 0 {
+    if stroke.alpha == 0 || stroke.width <= 0.0 {
         return;
     }
     unsafe {
-        let pen = CreatePen(PS_SOLID, stroke.width, colorref(stroke.color));
+        let pen = CreatePen(
+            PS_SOLID,
+            raster_length(stroke.width),
+            colorref(stroke.color),
+        );
         let old_pen = SelectObject(hdc, pen.into());
-        let _ = MoveToEx(hdc, start.x, start.y, None);
-        let _ = LineTo(hdc, end.x, end.y);
+        let _ = MoveToEx(hdc, round_coord(start.x), round_coord(start.y), None);
+        let _ = LineTo(hdc, round_coord(end.x), round_coord(end.y));
         let _ = SelectObject(hdc, old_pen);
         let _ = DeleteObject(pen.into());
     }
@@ -1473,9 +1514,13 @@ fn draw_rect(hdc: HDC, rect: UiRect, style: VisualStyle) {
             .fill
             .map(|color| CreateSolidBrush(colorref(color)))
             .unwrap_or(HBRUSH::default());
-        let pen = style
-            .stroke
-            .map(|stroke| CreatePen(PS_SOLID, stroke.width, colorref(stroke.color)));
+        let pen = style.stroke.map(|stroke| {
+            CreatePen(
+                PS_SOLID,
+                raster_length(stroke.width),
+                colorref(stroke.color),
+            )
+        });
 
         if let Some(pen) = pen {
             let old_pen = SelectObject(hdc, pen.into());
@@ -1487,8 +1532,8 @@ fn draw_rect(hdc: HDC, rect: UiRect, style: VisualStyle) {
                     rect.top,
                     rect.right,
                     rect.bottom,
-                    style.radius * 2,
-                    style.radius * 2,
+                    raster_length(style.radius * 2.0),
+                    raster_length(style.radius * 2.0),
                 );
                 let _ = SelectObject(hdc, old_brush);
             } else {
@@ -1498,8 +1543,8 @@ fn draw_rect(hdc: HDC, rect: UiRect, style: VisualStyle) {
                     rect.top,
                     rect.right,
                     rect.bottom,
-                    style.radius * 2,
-                    style.radius * 2,
+                    raster_length(style.radius * 2.0),
+                    raster_length(style.radius * 2.0),
                 );
             }
             let _ = SelectObject(hdc, old_pen);
@@ -1525,9 +1570,13 @@ fn draw_ellipse(hdc: HDC, rect: UiRect, style: VisualStyle) {
 
     unsafe {
         let fill = style.fill.unwrap_or(Color::BLACK);
-        let stroke = style.stroke.unwrap_or(Stroke::new(fill, 1, 0));
+        let stroke = style.stroke.unwrap_or(Stroke::new(fill, 1.0, 0));
         let brush = CreateSolidBrush(colorref(fill));
-        let pen = CreatePen(PS_SOLID, stroke.width, colorref(stroke.color));
+        let pen = CreatePen(
+            PS_SOLID,
+            raster_length(stroke.width),
+            colorref(stroke.color),
+        );
         let old_brush = SelectObject(hdc, brush.into());
         let old_pen = SelectObject(hdc, pen.into());
         let _ = Ellipse(hdc, rect.left, rect.top, rect.right, rect.bottom);
@@ -1540,8 +1589,8 @@ fn draw_ellipse(hdc: HDC, rect: UiRect, style: VisualStyle) {
 
 fn draw_overlay(hdc: HDC, rect: UiRect, style: &OverlayStyle) {
     let start = Instant::now();
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     let key = OverlayCacheKey {
         width,
         height,
@@ -1559,7 +1608,7 @@ fn draw_overlay(hdc: HDC, rect: UiRect, style: &OverlayStyle) {
                 hdc,
                 &gdi_key,
                 rect,
-                UiRect::new(0, 0, width, height),
+                UiRect::new(0.0, 0.0, width as f32, height as f32),
                 width,
                 height,
                 pixels,
@@ -1615,29 +1664,6 @@ fn overlay_signature(style: &OverlayStyle) -> u64 {
         layer.radius.to_bits().hash(&mut hasher);
     }
     hasher.finish()
-}
-
-fn draw_custom(hdc: HDC, rect: UiRect, key: &str, style: Option<CustomPaintStyle>) {
-    let Some(style) = style else {
-        return;
-    };
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
-    let raster_start = Instant::now();
-    let Some(pixels) = custom_paint_bgra(key, width, height, style) else {
-        return;
-    };
-    trace_custom_duration("gdi.draw_custom.raster", key, raster_start.elapsed());
-    let blit_start = Instant::now();
-    blit_premultiplied_bgra_with_source(
-        GdiFrameBlitSource::Custom,
-        hdc,
-        rect,
-        width,
-        height,
-        &pixels,
-    );
-    trace_custom_duration("gdi.draw_custom.blit", key, blit_start.elapsed());
 }
 
 fn composite_vertical_gradient(
@@ -1760,7 +1786,7 @@ fn blit_premultiplied_bgra_alpha_with_source(
         source_kind,
         hdc,
         rect,
-        UiRect::new(0, 0, width, height),
+        UiRect::new(0.0, 0.0, width as f32, height as f32),
         width,
         height,
         pixels,
@@ -1790,7 +1816,11 @@ fn blit_cached_gdi_bitmap(
     pixels: &[u8],
     source_alpha: u8,
 ) -> bool {
-    if dest.width() <= 0 || dest.height() <= 0 || source.width() <= 0 || source.height() <= 0 {
+    if dest.width() <= 0.0
+        || dest.height() <= 0.0
+        || source.width() <= 0.0
+        || source.height() <= 0.0
+    {
         return true;
     }
     GDI_BITMAP_CACHE.with(|cache| {
@@ -1798,18 +1828,20 @@ fn blit_cached_gdi_bitmap(
         let Some(entry) = cache.entry(hdc, cache_key, width, height, pixels) else {
             return false;
         };
+        let dest_px = pixel_rect_outward(dest);
+        let source_px = pixel_rect_outward(source);
         unsafe {
             if source_alpha == 255 && entry.opaque {
                 record_gdi_frame_blit(source_kind, GdiFrameBlitKind::BitBlt, dest);
                 let _ = BitBlt(
                     hdc,
-                    dest.left,
-                    dest.top,
-                    dest.width(),
-                    dest.height(),
+                    dest_px.left,
+                    dest_px.top,
+                    dest_px.width(),
+                    dest_px.height(),
                     Some(entry.memory_dc),
-                    source.left,
-                    source.top,
+                    source_px.left,
+                    source_px.top,
                     SRCCOPY,
                 );
                 return true;
@@ -1823,15 +1855,15 @@ fn blit_cached_gdi_bitmap(
             };
             let _ = AlphaBlend(
                 hdc,
-                dest.left,
-                dest.top,
-                dest.width(),
-                dest.height(),
+                dest_px.left,
+                dest_px.top,
+                dest_px.width(),
+                dest_px.height(),
                 entry.memory_dc,
-                source.left,
-                source.top,
-                source.width(),
-                source.height(),
+                source_px.left,
+                source_px.top,
+                source_px.width(),
+                source_px.height(),
                 blend,
             );
         }
@@ -1870,6 +1902,8 @@ fn blit_premultiplied_bgra_region_alpha_with_source(
     pixels: &[u8],
     source_alpha: u8,
 ) {
+    let dest_px = pixel_rect_outward(dest);
+    let source_px = pixel_rect_outward(source);
     unsafe {
         record_gdi_frame_blit(source_kind, GdiFrameBlitKind::FallbackAlphaBlend, dest);
         let memory_dc = CreateCompatibleDC(Some(hdc));
@@ -1911,15 +1945,15 @@ fn blit_premultiplied_bgra_region_alpha_with_source(
         };
         let _ = AlphaBlend(
             hdc,
-            dest.left,
-            dest.top,
-            dest.width(),
-            dest.height(),
+            dest_px.left,
+            dest_px.top,
+            dest_px.width(),
+            dest_px.height(),
             memory_dc,
-            source.left,
-            source.top,
-            source.width(),
-            source.height(),
+            source_px.left,
+            source_px.top,
+            source_px.width(),
+            source_px.height(),
             blend,
         );
         let _ = SelectObject(memory_dc, old_bitmap);
@@ -2038,15 +2072,6 @@ fn trace_duration(label: &str, duration: Duration) {
     }
 }
 
-fn trace_custom_duration(label: &str, key: &str, duration: Duration) {
-    if trace::duration_detail_enabled(label) {
-        eprintln!(
-            "[ui-trace] {label}: key={key} {:.2}ms",
-            duration.as_secs_f64() * 1000.0
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2077,7 +2102,7 @@ mod tests {
 
     #[test]
     fn transformed_destination_points_follow_layer_origin() {
-        let rect = UiRect::new(10, 20, 30, 60);
+        let rect = UiRect::new(10.0, 20.0, 30.0, 60.0);
         let transform = LayerTransform::identity()
             .scale_xy(2.0, 1.0)
             .rotation_degrees(90.0)
@@ -2102,23 +2127,23 @@ mod tests {
         let mut layer =
             GdiCompositingLayer::new(seed, 32, 32, CompositingLayerBackground::Transparent)
                 .expect("create test layer");
-        let line = |id_value: &str, y| ScenePrimitive::Line {
+        let line = |id_value: &str, y: f32| ScenePrimitive::Line {
             id: UiId::owned(id_value.to_string()),
-            start: Point::new(4, y),
-            end: Point::new(24, y),
-            stroke: Stroke::new(Color::BLACK, 1, 255),
+            start: Point::new(4.0, y),
+            end: Point::new(24.0, y),
+            stroke: Stroke::new(Color::BLACK, 1.0, 255),
             phase: lgui::core::RenderPhase::Content,
         };
-        let previous = vec![line("black-line", 6)];
-        layer.redraw(&previous, &[UiRect::new(0, 0, 32, 32)]);
+        let previous = vec![line("black-line", 6.0)];
+        layer.redraw(&previous, &[UiRect::new(0.0, 0.0, 32.0, 32.0)]);
         assert_eq!(surface_pixel(&layer.output, 12, 6), [0, 0, 0, 255]);
         assert_eq!(surface_pixel(&layer.output, 12, 20), [0, 0, 0, 0]);
 
-        let next = vec![line("black-line", 20)];
+        let next = vec![line("black-line", 20.0)];
         let damage = compositing_layer_damage(
             &previous,
             &next,
-            UiRect::new(0, 0, layer.width, layer.height),
+            UiRect::new(0.0, 0.0, layer.width as f32, layer.height as f32),
         );
         layer.redraw(&next, &damage);
         assert_eq!(surface_pixel(&layer.output, 12, 6), [0, 0, 0, 0]);
@@ -2143,14 +2168,16 @@ fn draw_text(hdc: HDC, rect: UiRect, text: &str, style: TextStyle) {
         return;
     }
     unsafe {
-        let runs = gdi_text_runs(hdc, text, style.height, style.weight);
-        let previous_extra = SetTextCharacterExtra(hdc, style.tracking);
+        let height = round_coord(style.height);
+        let tracking = round_coord(style.tracking);
+        let runs = gdi_text_runs(hdc, text, height, style.weight);
+        let previous_extra = SetTextCharacterExtra(hdc, tracking);
         let _ = SetBkMode(hdc, TRANSPARENT);
         let _ = SetTextColor(hdc, colorref(style.color));
 
         if runs.len() <= 1 {
             let family_index = runs.first().map(|run| run.family_index).unwrap_or(0);
-            if let Some(font) = create_gdi_font(style.height, style.weight, family_index) {
+            if let Some(font) = create_gdi_font(height, style.weight, family_index) {
                 let old_font = SelectObject(hdc, font.into());
                 let align = match style.align {
                     TextAlign::Left => DT_LEFT,
@@ -2169,22 +2196,23 @@ fn draw_text(hdc: HDC, rect: UiRect, text: &str, style: TextStyle) {
                 let _ = DeleteObject(font.into());
             }
         } else {
-            let total_width =
-                gdi_text_runs_width(hdc, &runs, style.height, style.weight, style.tracking);
+            let total_width = gdi_text_runs_width(hdc, &runs, height, style.weight, tracking);
             let mut left = match style.align {
                 TextAlign::Left => rect.left,
-                TextAlign::Center => rect.left + ((rect.width() - total_width).max(0) / 2),
-                TextAlign::Right => rect.right - total_width,
+                TextAlign::Center => {
+                    rect.left + ((rect.width() - total_width as f32).max(0.0) / 2.0)
+                }
+                TextAlign::Right => rect.right - total_width as f32,
             };
             for run in &runs {
-                if let Some(font) = create_gdi_font(style.height, style.weight, run.family_index) {
+                if let Some(font) = create_gdi_font(height, style.weight, run.family_index) {
                     let old_font = SelectObject(hdc, font.into());
-                    let run_width = gdi_text_width(hdc, &run.text, style.tracking).unwrap_or(0);
+                    let run_width = gdi_text_width(hdc, &run.text, tracking).unwrap_or(0);
                     let mut run_rect = RECT {
-                        left,
-                        top: rect.top,
-                        right: rect.right,
-                        bottom: rect.bottom,
+                        left: round_coord(left),
+                        top: round_coord(rect.top),
+                        right: round_coord(rect.right),
+                        bottom: round_coord(rect.bottom),
                     };
                     let mut wide: Vec<u16> = run.text.encode_utf16().collect();
                     let _ = DrawTextW(
@@ -2193,7 +2221,7 @@ fn draw_text(hdc: HDC, rect: UiRect, text: &str, style: TextStyle) {
                         &mut run_rect,
                         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_LEFT,
                     );
-                    left += run_width;
+                    left += run_width as f32;
                     let _ = SelectObject(hdc, old_font);
                     let _ = DeleteObject(font.into());
                 }
@@ -2331,6 +2359,7 @@ fn colorref(color: Color) -> windows::Win32::Foundation::COLORREF {
 }
 
 fn win_rect(rect: UiRect) -> RECT {
+    let rect = pixel_rect_outward(rect);
     RECT {
         left: rect.left,
         top: rect.top,
@@ -2349,7 +2378,7 @@ fn draw_antialiased_rect(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
         let _ = GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
         let _ = GdipSetPixelOffsetMode(graphics, PixelOffsetModeHalf);
 
-        let path = create_rect_path(rect, style.radius);
+        let path = create_rect_path(rect, round_coord(style.radius));
         if path.is_null() {
             let _ = GdipDeleteGraphics(graphics);
             return false;
@@ -2394,11 +2423,11 @@ fn draw_antialiased_ellipse(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
         }
 
         if let Some(stroke) = style.stroke {
-            if stroke.alpha != 0 && stroke.width > 0 {
+            if stroke.alpha != 0 && stroke.width > 0.0 {
                 let mut pen: *mut GpPen = std::ptr::null_mut();
                 if GdipCreatePen1(
                     color_to_argb(stroke.color, stroke.alpha),
-                    stroke.width as f32,
+                    stroke.width,
                     UnitPixel,
                     &mut pen,
                 ) != GpOk
@@ -2407,14 +2436,15 @@ fn draw_antialiased_ellipse(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
                     let _ = GdipDeleteGraphics(graphics);
                     return false;
                 }
-                let inset = stroke.width / 2;
+                let inset = round_coord(stroke.width / 2.0);
+                let stroke_width = raster_length(stroke.width);
                 let _ = GdipDrawEllipseI(
                     graphics,
                     pen,
                     rect.left + inset,
                     rect.top + inset,
-                    (width - stroke.width).max(1),
-                    (height - stroke.width).max(1),
+                    (width - stroke_width).max(1),
+                    (height - stroke_width).max(1),
                 );
                 let _ = GdipDeletePen(pen);
             }
@@ -2439,11 +2469,11 @@ fn fill_and_stroke_path(graphics: *mut GpGraphics, path: *mut GpPath, style: Vis
         }
 
         if let Some(stroke) = style.stroke {
-            if stroke.alpha != 0 && stroke.width > 0 {
+            if stroke.alpha != 0 && stroke.width > 0.0 {
                 let mut pen: *mut GpPen = std::ptr::null_mut();
                 if GdipCreatePen1(
                     color_to_argb(stroke.color, stroke.alpha),
-                    stroke.width as f32,
+                    stroke.width,
                     UnitPixel,
                     &mut pen,
                 ) != GpOk
@@ -2473,11 +2503,11 @@ fn fill_and_stroke_ui_path(graphics: *mut GpGraphics, path: *mut GpPath, style: 
         }
 
         if let Some(stroke) = style.stroke {
-            if stroke.alpha != 0 && stroke.width > 0 {
+            if stroke.alpha != 0 && stroke.width > 0.0 {
                 let mut pen: *mut GpPen = std::ptr::null_mut();
                 if GdipCreatePen1(
                     color_to_argb(stroke.color, stroke.alpha),
-                    stroke.width as f32,
+                    stroke.width,
                     UnitPixel,
                     &mut pen,
                 ) != GpOk
@@ -2538,7 +2568,13 @@ fn create_ui_path(path: &UiPath) -> *mut GpPath {
                         continue;
                     };
                     current = Some(point);
-                    GdipAddPathLineI(gp_path, from.x, from.y, point.x, point.y)
+                    GdipAddPathLineI(
+                        gp_path,
+                        round_coord(from.x),
+                        round_coord(from.y),
+                        round_coord(point.x),
+                        round_coord(point.y),
+                    )
                 }
                 UiPathCommand::QuadraticTo { control, to } => {
                     let Some(from) = current else {
@@ -2547,17 +2583,24 @@ fn create_ui_path(path: &UiPath) -> *mut GpPath {
                         continue;
                     };
                     let control1 = Point::new(
-                        from.x + ((control.x - from.x) * 2) / 3,
-                        from.y + ((control.y - from.y) * 2) / 3,
+                        from.x + ((control.x - from.x) * 2.0) / 3.0,
+                        from.y + ((control.y - from.y) * 2.0) / 3.0,
                     );
                     let control2 = Point::new(
-                        to.x + ((control.x - to.x) * 2) / 3,
-                        to.y + ((control.y - to.y) * 2) / 3,
+                        to.x + ((control.x - to.x) * 2.0) / 3.0,
+                        to.y + ((control.y - to.y) * 2.0) / 3.0,
                     );
                     current = Some(to);
                     GdipAddPathBezierI(
-                        gp_path, from.x, from.y, control1.x, control1.y, control2.x, control2.y,
-                        to.x, to.y,
+                        gp_path,
+                        round_coord(from.x),
+                        round_coord(from.y),
+                        round_coord(control1.x),
+                        round_coord(control1.y),
+                        round_coord(control2.x),
+                        round_coord(control2.y),
+                        round_coord(to.x),
+                        round_coord(to.y),
                     )
                 }
                 UiPathCommand::CubicTo {
@@ -2572,8 +2615,15 @@ fn create_ui_path(path: &UiPath) -> *mut GpPath {
                     };
                     current = Some(to);
                     GdipAddPathBezierI(
-                        gp_path, from.x, from.y, control1.x, control1.y, control2.x, control2.y,
-                        to.x, to.y,
+                        gp_path,
+                        round_coord(from.x),
+                        round_coord(from.y),
+                        round_coord(control1.x),
+                        round_coord(control1.y),
+                        round_coord(control2.x),
+                        round_coord(control2.y),
+                        round_coord(to.x),
+                        round_coord(to.y),
                     )
                 }
                 UiPathCommand::Close => {

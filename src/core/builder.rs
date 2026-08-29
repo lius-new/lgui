@@ -332,13 +332,13 @@ mod tests {
             let executions = Arc::clone(&self.executions);
             component(self.props, move |_cx, _props| {
                 executions.fetch_add(1, Ordering::SeqCst);
-                group(UiRect::new(0, 0, 10, 10))
+                group(UiRect::new(0.0, 0.0, 10.0, 10.0))
             })
         }
     }
 
     fn mount(runtime: &UiRuntime, executions: Arc<AtomicUsize>, props: u32) {
-        let viewport = UiRect::new(0, 0, 10, 10);
+        let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
         let interaction = runtime.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(
@@ -363,7 +363,7 @@ mod tests {
         executions: Arc<AtomicUsize>,
         props: u32,
     ) -> (HostTree, HostProjectionMetrics) {
-        let viewport = UiRect::new(0, 0, 30, 10);
+        let viewport = UiRect::new(0.0, 0.0, 30.0, 10.0);
         let interaction = runtime.interaction_state();
         let mut builder = HostTreeBuilder::from_retained(tree);
         builder.mount(
@@ -394,9 +394,9 @@ mod tests {
             let executions = Arc::clone(&self.executions);
             component(self.props, move |_cx, _| {
                 executions.fetch_add(1, Ordering::SeqCst);
-                group(UiRect::new(0, 0, 30, 10)).content((
-                    group(UiRect::new(0, 0, 10, 10)),
-                    group(UiRect::new(10, 0, 20, 10)),
+                group(UiRect::new(0.0, 0.0, 30.0, 10.0)).content((
+                    group(UiRect::new(0.0, 0.0, 10.0, 10.0)),
+                    group(UiRect::new(10.0, 0.0, 20.0, 10.0)),
                 ))
             })
         }
@@ -486,7 +486,7 @@ mod tests {
                         .component_state_mut(&state_id, |state: &mut RetainedLocalState| {
                             state.value = 7;
                         });
-                    UiElement::group(cx.id, UiRect::new(0, 0, 10, 10))
+                    UiElement::group(cx.id, UiRect::new(0.0, 0.0, 10.0, 10.0))
                 })
             })
         }
@@ -504,7 +504,7 @@ mod tests {
                 executions,
                 state_id,
             },
-            UiRect::new(0, 0, 10, 10),
+            UiRect::new(0.0, 0.0, 10.0, 10.0),
             &runtime.interaction_state(),
             runtime.animations(),
             runtime.component_states(),
@@ -570,7 +570,7 @@ mod tests {
         executions: Arc<AtomicUsize>,
         state: Arc<Mutex<Option<super::super::State<u32>>>>,
     ) {
-        let viewport = UiRect::new(0, 0, 10, 10);
+        let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
         let interaction = runtime.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(
@@ -633,7 +633,7 @@ mod tests {
                         .lock()
                         .expect("context observation poisoned")
                         .push(super::super::use_context::<u32>());
-                    group(UiRect::new(0, 0, 10, 10))
+                    group(UiRect::new(0.0, 0.0, 10.0, 10.0))
                 }),
             )
         }
@@ -643,7 +643,7 @@ mod tests {
     fn declarative_context_hook_reads_from_deferred_descendants_and_tracks_changes() {
         let runtime = UiRuntime::new();
         let observed = Arc::new(Mutex::new(Vec::new()));
-        let viewport = UiRect::new(0, 0, 10, 10);
+        let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
         let interaction = runtime.interaction_state();
         for value in [7, 7, 9] {
             let mut builder = HostTreeBuilder::new();
@@ -695,7 +695,7 @@ mod tests {
                     .key(item)
                 })
                 .collect::<Vec<_>>();
-            group(UiRect::new(0, 0, 30, 30)).content(rows)
+            group(UiRect::new(0.0, 0.0, 30.0, 30.0)).content(rows)
         }
     }
 
@@ -705,7 +705,7 @@ mod tests {
         items: Vec<&'static str>,
         executions: Arc<Mutex<HashMap<&'static str, usize>>>,
     ) -> HostTree {
-        let viewport = UiRect::new(0, 0, 30, 30);
+        let viewport = UiRect::new(0.0, 0.0, 30.0, 30.0);
         let mut builder = HostTreeBuilder::from_retained(tree);
         builder.mount(
             KeyedListRoot { items, executions },
@@ -783,12 +783,13 @@ mod tests {
         fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
             if self.show_email {
                 return component((), |_cx, _| {
-                    group(UiRect::new(0, 0, 30, 30)).child(super::super::content_text("email"))
+                    group(UiRect::new(0.0, 0.0, 30.0, 30.0))
+                        .child(super::super::content_text("email"))
                 })
                 .key("email-form");
             }
 
-            group(UiRect::new(0, 0, 30, 30)).content((
+            group(UiRect::new(0.0, 0.0, 30.0, 30.0)).content((
                 super::super::content_text("remembered"),
                 super::super::content_text("remembered details"),
             ))
@@ -799,7 +800,7 @@ mod tests {
         let mut builder = HostTreeBuilder::from_retained(tree);
         builder.mount(
             RootBranchReplacement { show_email },
-            UiRect::new(0, 0, 30, 30),
+            UiRect::new(0.0, 0.0, 30.0, 30.0),
             &runtime.interaction_state(),
             runtime.animations(),
             runtime.component_states(),
@@ -834,7 +835,7 @@ mod tests {
         let runtime = UiRuntime::new();
         let executions = Arc::new(AtomicUsize::new(0));
         let effect_runs = Arc::new(AtomicUsize::new(0));
-        let viewport = UiRect::new(0, 0, 30, 10);
+        let viewport = UiRect::new(0.0, 0.0, 30.0, 10.0);
         let mount = |builder: &mut HostTreeBuilder, value, panic_during_render| {
             builder.mount(
                 TransactionRoot {

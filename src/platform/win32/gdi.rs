@@ -1,15 +1,16 @@
+use windows::Win32::{
+    Foundation::{COLORREF, RECT},
+    Graphics::Gdi::{BitBlt, CreateSolidBrush, DeleteObject, FillRect, HDC, SRCCOPY},
+};
+#[cfg(not(feature = "advanced-rendering"))]
 use windows::{
     core::PCWSTR,
-    Win32::{
-        Foundation::{COLORREF, RECT},
-        Graphics::Gdi::{
-            BitBlt, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, Ellipse,
-            FillRect, IntersectClipRect, LineTo, MoveToEx, RestoreDC, RoundRect, SaveDC,
-            SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, CLIP_DEFAULT_PRECIS,
-            DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DT_LEFT, DT_NOPREFIX,
-            DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HDC, HGDIOBJ, OUT_TT_ONLY_PRECIS,
-            PS_SOLID, SRCCOPY, TRANSPARENT,
-        },
+    Win32::Graphics::Gdi::{
+        CreateFontW, CreatePen, DrawTextW, Ellipse, IntersectClipRect, LineTo, MoveToEx, RestoreDC,
+        RoundRect, SaveDC, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx,
+        CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DT_LEFT,
+        DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HGDIOBJ, OUT_TT_ONLY_PRECIS,
+        PS_SOLID, TRANSPARENT,
     },
 };
 
@@ -18,10 +19,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::application::Win32RenderError;
 use super::backbuffer::LayeredBackbuffer;
 
+#[cfg(not(feature = "advanced-rendering"))]
+use crate::core::{ScenePrimitive, TextAlign, TextStyle, VisualStyle};
 use crate::{
     application::RenderErrorStage,
-    core::{Color, Scene, ScenePrimitive, TextAlign, TextStyle, UiRect, VisualStyle},
-    renderer::RenderBackend,
+    core::{Color, PhysicalRect, Scene, UiRect},
 };
 
 pub struct GdiRenderer {
@@ -45,12 +47,14 @@ impl GdiRenderer {
         fill_rect(target, rect, self.background);
     }
 
+    #[cfg(not(feature = "advanced-rendering"))]
     fn draw_commands(&self, target: HDC, commands: &[ScenePrimitive]) {
         for command in commands {
             self.draw_command(target, command);
         }
     }
 
+    #[cfg(not(feature = "advanced-rendering"))]
     fn draw_command(&self, target: HDC, command: &ScenePrimitive) {
         match command {
             ScenePrimitive::Rect { rect, style, .. } => draw_rect(target, *rect, *style),
@@ -109,8 +113,8 @@ impl GdiRenderer {
         &mut self,
         target: HDC,
         scene: &Scene,
-        viewport: UiRect,
-        damage: &[UiRect],
+        viewport: PhysicalRect,
+        damage: &[PhysicalRect],
     ) -> Result<(), Win32RenderError> {
         let replace = self.backbuffer.as_ref().is_none_or(|buffer| {
             buffer.width() != viewport.width() || buffer.height() != viewport.height()
@@ -166,9 +170,16 @@ impl GdiRenderer {
         presented
     }
 
-    fn draw_direct(&mut self, target: HDC, scene: &Scene, viewport: UiRect, clip: Option<UiRect>) {
-        let clear = clip.unwrap_or(viewport);
+    fn draw_direct(
+        &mut self,
+        target: HDC,
+        scene: &Scene,
+        viewport: PhysicalRect,
+        clip: Option<PhysicalRect>,
+    ) {
+        let clear = clip.unwrap_or(viewport).as_ui_rect();
         self.clear(target, clear);
+        let clip = clip.map(PhysicalRect::as_ui_rect);
         #[cfg(feature = "advanced-rendering")]
         super::enhanced::GdiRenderer::draw_scene_clipped_scoped(
             target,
@@ -177,25 +188,11 @@ impl GdiRenderer {
             self.compositing_layer_scope,
         );
         #[cfg(not(feature = "advanced-rendering"))]
-        crate::renderer::RenderBackend::draw_scene(self, target, scene, clip);
+        self.draw_scene_clipped(target, scene, clip);
     }
-}
 
-impl Default for GdiRenderer {
-    fn default() -> Self {
-        Self::new(Color(0x111418))
-    }
-}
-
-impl Drop for GdiRenderer {
-    fn drop(&mut self) {
-        #[cfg(feature = "advanced-rendering")]
-        super::enhanced::release_gdi_compositing_layer_scope(self.compositing_layer_scope);
-    }
-}
-
-impl RenderBackend<HDC> for GdiRenderer {
-    fn draw_scene(&mut self, target: HDC, scene: &Scene, clip: Option<UiRect>) {
+    #[cfg(not(feature = "advanced-rendering"))]
+    fn draw_scene_clipped(&self, target: HDC, scene: &Scene, clip: Option<UiRect>) {
         let saved = clip.map(|clip| unsafe {
             let saved = SaveDC(target);
             if saved != 0 {
@@ -212,6 +209,20 @@ impl RenderBackend<HDC> for GdiRenderer {
     }
 }
 
+impl Default for GdiRenderer {
+    fn default() -> Self {
+        Self::new(Color(0x111418))
+    }
+}
+
+impl Drop for GdiRenderer {
+    fn drop(&mut self) {
+        #[cfg(feature = "advanced-rendering")]
+        super::enhanced::release_gdi_compositing_layer_scope(self.compositing_layer_scope);
+    }
+}
+
+#[cfg(not(feature = "advanced-rendering"))]
 fn draw_rect(target: HDC, rect: UiRect, style: VisualStyle) {
     if let Some(fill) = style.fill {
         if style.radius > 0 {
@@ -249,6 +260,7 @@ fn draw_rect(target: HDC, rect: UiRect, style: VisualStyle) {
     }
 }
 
+#[cfg(not(feature = "advanced-rendering"))]
 fn draw_ellipse(target: HDC, rect: UiRect, style: VisualStyle) {
     let Some(fill) = style.fill else {
         return;
@@ -262,6 +274,7 @@ fn draw_ellipse(target: HDC, rect: UiRect, style: VisualStyle) {
     }
 }
 
+#[cfg(not(feature = "advanced-rendering"))]
 fn draw_line(
     target: HDC,
     start: crate::core::Point,
@@ -278,6 +291,7 @@ fn draw_line(
     }
 }
 
+#[cfg(not(feature = "advanced-rendering"))]
 fn draw_text(target: HDC, rect: UiRect, text: &str, style: TextStyle) {
     let font = unsafe {
         CreateFontW(
@@ -335,6 +349,12 @@ fn colorref(color: Color) -> COLORREF {
 }
 
 fn win_rect(rect: UiRect) -> RECT {
+    let rect = PhysicalRect::new(
+        rect.left.floor() as i32,
+        rect.top.floor() as i32,
+        rect.right.ceil() as i32,
+        rect.bottom.ceil() as i32,
+    );
     RECT {
         left: rect.left,
         top: rect.top,

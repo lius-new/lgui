@@ -2,9 +2,9 @@ use std::{any::Any, ops::RangeInclusive, sync::Arc};
 
 use crate::core::{
     AnimProperty, AnimationBinding, Color, ComponentActionOutcome, ComponentState, Element,
-    ElementKey, ElementRenderCx, InteractionRole, RenderPhase, Stroke, TextStyle, UiAction,
-    UiElement, UiEventContext, UiId, UiRect, VisualStyle, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION,
-    POINTER_UP_ACTION,
+    ElementKey, ElementRenderCx, InteractionRole, RenderPhase, SemanticAction, SemanticRole,
+    Semantics, Stroke, TextStyle, UiAction, UiElement, UiEventContext, UiId, UiRect, VisualStyle,
+    POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
 };
 use crate::theme::{ThemeContext, ThemeTokens};
 
@@ -12,8 +12,8 @@ pub type SliderChangeHandler = Arc<dyn Fn(&mut UiEventContext, f64) + Send + Syn
 pub type SliderValueFormatter = Arc<dyn Fn(f64) -> String + Send + Sync>;
 const SLIDER_HOVER_IN_MS: f32 = 110.0;
 const SLIDER_HOVER_OUT_MS: f32 = 150.0;
-const SLIDER_VALUE_WIDTH: i32 = 48;
-const SLIDER_VALUE_GAP: i32 = 10;
+const SLIDER_VALUE_WIDTH: f32 = 48.0;
+const SLIDER_VALUE_GAP: f32 = 10.0;
 const CHANGE_EVENT: &str = "slider.change";
 const COMMIT_EVENT: &str = "slider.commit";
 
@@ -43,8 +43,8 @@ pub struct SliderStyle {
     pub thumb: Color,
     pub thumb_border: Color,
     pub value_text: Color,
-    pub track_height: i32,
-    pub thumb_size: i32,
+    pub track_height: f32,
+    pub thumb_size: f32,
     pub disabled_alpha: u8,
 }
 
@@ -56,8 +56,8 @@ impl SliderStyle {
             thumb: theme.colors.accent,
             thumb_border: theme.colors.surface_raised,
             value_text: theme.colors.accent,
-            track_height: 4,
-            thumb_size: 14,
+            track_height: 4.0,
+            thumb_size: 14.0,
             disabled_alpha: 0x60,
         }
     }
@@ -162,7 +162,7 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
     });
     let geometry = slider_geometry(slider.rect, slider.value_formatter.is_some(), style);
     let controlled_value = clamp_value(slider.value, slider.min, slider.max);
-    let enabled = slider.enabled && slider.max > slider.min && geometry.track.width() > 0;
+    let enabled = slider.enabled && slider.max > slider.min && geometry.track.width() > 0.0;
     let display_value = cx
         .context
         .component_state_mut(&id, |state: &mut SliderState| {
@@ -178,12 +178,12 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
             state.display_value()
         });
     let progress = normalized_progress(display_value, slider.min, slider.max);
-    let thumb_x = geometry.track.left + (geometry.track.width() as f64 * progress).round() as i32;
+    let thumb_x = geometry.track.left + geometry.track.width() * progress as f32;
     let hover = smootherstep(cx.animation_value(AnimProperty::Hover));
     let pressed = smootherstep(cx.animation_value(AnimProperty::Pressed));
-    let thumb_size = style.thumb_size.max(6) + (pressed * 2.0).round() as i32;
-    let thumb_radius = thumb_size / 2;
-    let center_y = (slider.rect.top + slider.rect.bottom) / 2;
+    let thumb_size = style.thumb_size.max(6.0) + pressed * 2.0;
+    let thumb_radius = thumb_size / 2.0;
+    let center_y = (slider.rect.top + slider.rect.bottom) / 2.0;
     let track_color = mix_color(style.track, style.active_track, hover * 0.18);
     let thumb_color = mix_color(style.thumb, style.value_text, hover * 0.28 + pressed * 0.22);
     let alpha = if enabled { 0xFF } else { style.disabled_alpha };
@@ -191,6 +191,20 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
     let mut root = UiElement::panel(id.clone(), slider.rect, VisualStyle::default())
         .render_phase(slider.phase)
         .paint_bounds(slider.rect)
+        .semantics({
+            let mut semantics = Semantics::new(SemanticRole::Slider)
+                .value(display_value.to_string())
+                .action(SemanticAction::Focus)
+                .action(SemanticAction::SetValue)
+                .action(SemanticAction::Increment)
+                .action(SemanticAction::Decrement);
+            semantics.numeric_value = Some(display_value);
+            semantics.numeric_min = Some(slider.min);
+            semantics.numeric_max = Some(slider.max);
+            semantics.numeric_step = slider.step;
+            semantics.state.disabled = !enabled;
+            semantics
+        })
         .animation(
             AnimationBinding::new(AnimProperty::Hover, 0.0, 1.0)
                 .duration(SLIDER_HOVER_IN_MS, SLIDER_HOVER_OUT_MS),
@@ -214,7 +228,7 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
                 geometry.track,
                 VisualStyle::filled(track_color)
                     .alpha(mix_u8(0x90, 0xB8, hover).min(alpha))
-                    .radius(style.track_height.max(1) / 2),
+                    .radius(style.track_height.max(1.0) / 2.0),
             )
             .render_phase(slider.phase),
         )
@@ -229,7 +243,7 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
                 ),
                 VisualStyle::filled(style.active_track)
                     .alpha(alpha)
-                    .radius(style.track_height.max(1) / 2),
+                    .radius(style.track_height.max(1.0) / 2.0),
             )
             .render_phase(slider.phase),
         )
@@ -244,7 +258,7 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
                 ),
                 VisualStyle::filled(thumb_color)
                     .alpha(alpha)
-                    .stroked(Stroke::new(style.thumb_border, 2, alpha))
+                    .stroked(Stroke::new(style.thumb_border, 2.0, alpha))
                     .radius(thumb_radius),
             )
             .render_phase(slider.phase),
@@ -273,7 +287,7 @@ fn render_slider(cx: ElementRenderCx<'_, '_, '_>, slider: Slider) -> UiElement {
                 UiId::owned(format!("{}.value", id.as_str())),
                 label_rect,
                 formatter(display_value),
-                TextStyle::new(style.value_text, -15, 700).centered(),
+                TextStyle::new(style.value_text, -15.0, 700).centered(),
             )
             .render_phase(slider.phase),
         );
@@ -289,23 +303,23 @@ struct SliderGeometry {
 }
 
 fn slider_geometry(rect: UiRect, has_value_text: bool, style: SliderStyle) -> SliderGeometry {
-    let thumb_radius = (style.thumb_size.max(6) + 2) / 2;
-    let label_width = SLIDER_VALUE_WIDTH.min(rect.width().max(0));
+    let thumb_radius = (style.thumb_size.max(6.0) + 2.0) / 2.0;
+    let label_width = SLIDER_VALUE_WIDTH.min(rect.width().max(0.0));
     let label_left = rect.right - label_width;
     let content_right = if has_value_text {
         (label_left - SLIDER_VALUE_GAP).max(rect.left)
     } else {
         rect.right
     };
-    let center_y = (rect.top + rect.bottom) / 2;
-    let track_height = style.track_height.max(1).min(rect.height().max(1));
+    let center_y = (rect.top + rect.bottom) / 2.0;
+    let track_height = style.track_height.max(1.0).min(rect.height().max(1.0));
     let track_left = (rect.left + thumb_radius).min(content_right);
     let track_right = (content_right - thumb_radius).max(track_left);
     let track = UiRect::new(
         track_left,
-        center_y - track_height / 2,
+        center_y - track_height / 2.0,
         track_right,
-        center_y - track_height / 2 + track_height,
+        center_y - track_height / 2.0 + track_height,
     );
     SliderGeometry {
         track,
@@ -331,8 +345,8 @@ struct SliderState {
     min: f64,
     max: f64,
     step: Option<f64>,
-    pointer_start: i32,
-    pointer_width: i32,
+    pointer_start: f32,
+    pointer_width: f32,
     enabled: bool,
     dragging: bool,
 }
@@ -345,8 +359,8 @@ impl Default for SliderState {
             min: 0.0,
             max: 1.0,
             step: None,
-            pointer_start: 0,
-            pointer_width: 1,
+            pointer_start: 0.0,
+            pointer_width: 1.0,
             enabled: false,
             dragging: false,
         }
@@ -361,8 +375,8 @@ impl SliderState {
         min: f64,
         max: f64,
         step: Option<f64>,
-        pointer_start: i32,
-        pointer_width: i32,
+        pointer_start: f32,
+        pointer_width: f32,
         enabled: bool,
     ) {
         if !same_value(self.controlled_value, controlled_value) {
@@ -378,7 +392,7 @@ impl SliderState {
         self.max = max;
         self.step = step;
         self.pointer_start = pointer_start;
-        self.pointer_width = pointer_width.max(1);
+        self.pointer_width = pointer_width.max(1.0);
         self.enabled = enabled;
         if !enabled {
             self.preview_value = None;
@@ -390,7 +404,7 @@ impl SliderState {
         self.preview_value.unwrap_or(self.controlled_value)
     }
 
-    fn update_from_pointer(&mut self, x: i32) -> Option<f64> {
+    fn update_from_pointer(&mut self, x: f32) -> Option<f64> {
         if !self.enabled {
             return None;
         }
@@ -412,6 +426,20 @@ impl SliderState {
         self.preview_value = Some(value);
         Some(value)
     }
+
+    fn semantic_value(&mut self, value: f64) -> ComponentActionOutcome {
+        if !self.enabled {
+            return ComponentActionOutcome::ignored();
+        }
+        let value = quantize_value(value, self.min, self.max, self.step);
+        if same_value(self.display_value(), value) {
+            return ComponentActionOutcome::handled(false);
+        }
+        self.preview_value = Some(value);
+        ComponentActionOutcome::handled(true)
+            .emit(UiAction::new(CHANGE_EVENT).payload(value.to_string()))
+            .emit(UiAction::new(COMMIT_EVENT).payload(value.to_string()))
+    }
 }
 
 impl ComponentState for SliderState {
@@ -425,6 +453,16 @@ impl ComponentState for SliderState {
 
     fn handle_action(&mut self, action: &UiAction) -> ComponentActionOutcome {
         match action.id().as_str() {
+            "semantic.set_value" => action
+                .payload_value()
+                .and_then(|value| value.parse::<f64>().ok())
+                .map_or_else(ComponentActionOutcome::ignored, |value| self.semantic_value(value)),
+            "semantic.increment" => self.semantic_value(
+                self.display_value() + self.step.unwrap_or((self.max - self.min) / 100.0),
+            ),
+            "semantic.decrement" => self.semantic_value(
+                self.display_value() - self.step.unwrap_or((self.max - self.min) / 100.0),
+            ),
             POINTER_DOWN_ACTION if self.enabled => {
                 self.dragging = true;
                 let value = action
@@ -467,22 +505,22 @@ impl ComponentState for SliderState {
     }
 }
 
-fn parse_pointer_x(payload: &str) -> Option<i32> {
+fn parse_pointer_x(payload: &str) -> Option<f32> {
     payload
         .split_once(',')
-        .and_then(|(x, _)| x.parse::<i32>().ok())
+        .and_then(|(x, _)| x.parse::<f32>().ok())
 }
 
 fn value_from_pointer(
-    x: i32,
-    pointer_start: i32,
-    pointer_width: i32,
+    x: f32,
+    pointer_start: f32,
+    pointer_width: f32,
     min: f64,
     max: f64,
     step: Option<f64>,
 ) -> f64 {
-    let offset = (x - pointer_start).clamp(0, pointer_width.max(1));
-    let progress = offset as f64 / pointer_width.max(1) as f64;
+    let offset = (x - pointer_start).clamp(0.0, pointer_width.max(1.0));
+    let progress = offset as f64 / pointer_width.max(1.0) as f64;
     quantize_value(min + (max - min) * progress, min, max, step)
 }
 
@@ -561,15 +599,15 @@ mod tests {
     #[test]
     fn pointer_position_maps_to_continuous_values_and_clamps() {
         assert!(same_value(
-            value_from_pointer(50, 0, 200, -1.0, 1.0, None),
+            value_from_pointer(50.0, 0.0, 200.0, -1.0, 1.0, None),
             -0.5
         ));
         assert!(same_value(
-            value_from_pointer(-20, 0, 200, -1.0, 1.0, None),
+            value_from_pointer(-20.0, 0.0, 200.0, -1.0, 1.0, None),
             -1.0
         ));
         assert!(same_value(
-            value_from_pointer(240, 0, 200, -1.0, 1.0, None),
+            value_from_pointer(240.0, 0.0, 200.0, -1.0, 1.0, None),
             1.0
         ));
     }
@@ -577,7 +615,7 @@ mod tests {
     #[test]
     fn optional_step_quantizes_relative_to_the_minimum() {
         assert!(same_value(
-            value_from_pointer(44, 0, 100, 10.0, 20.0, Some(0.5)),
+            value_from_pointer(44.0, 0.0, 100.0, 10.0, 20.0, Some(0.5)),
             14.5
         ));
         assert!(same_value(
@@ -589,7 +627,7 @@ mod tests {
     #[test]
     fn slider_state_emits_dragged_values_and_commits_the_release_value() {
         let mut state = SliderState::default();
-        state.configure(20.0, 0.0, 100.0, Some(1.0), 7, 200, true);
+        state.configure(20.0, 0.0, 100.0, Some(1.0), 7.0, 200.0, true);
 
         let down = state.handle_action(&UiAction::new(POINTER_DOWN_ACTION).payload("107,12"));
         let unchanged = state.handle_action(&UiAction::new(POINTER_DRAG_ACTION).payload("107,20"));

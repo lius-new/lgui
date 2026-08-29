@@ -6,7 +6,7 @@ use super::{
     CompositingLayerSpec, EventPolicy, InteractionRole, LayoutSpec, RenderPhase, Size, TextStyle,
     UiElement, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
     UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, UiRenderContext, UiScope,
-    VisualStyle,
+    VisualStyle, Semantics,
 };
 
 // Declarative core shell only: this layer owns tree identity and composition,
@@ -59,6 +59,7 @@ pub struct Element {
     key: ElementKey,
     render: Box<dyn FnOnce(ElementRenderCx<'_, '_, '_>) -> UiElement>,
     interaction: Option<InteractionRole>,
+    semantics: Option<Semantics>,
     click_capture_handler: Option<UiEventHandler>,
     click_handler: Option<UiEventHandler>,
     input_event_handlers: Vec<UiInputEventBinding>,
@@ -140,6 +141,7 @@ impl Element {
             key,
             render: Box::new(render),
             interaction: None,
+            semantics: None,
             click_capture_handler: None,
             click_handler: None,
             input_event_handlers: Vec::new(),
@@ -182,6 +184,11 @@ impl Element {
 
     pub fn interaction(mut self, interaction: InteractionRole) -> Self {
         self.interaction = Some(interaction);
+        self
+    }
+
+    pub fn semantics(mut self, semantics: Semantics) -> Self {
+        self.semantics = Some(semantics);
         self
     }
 
@@ -260,55 +267,66 @@ impl Element {
 
     pub fn on_pointer_down<F>(self, handler: F) -> Self
     where
-        F: Fn(&mut UiEventContext, super::Point) + Send + Sync + 'static,
+        F: Fn(&mut UiEventContext, super::PointerData) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::PointerDown, move |cx, payload| {
-            if let UiEventPayload::PointerDown { point } = payload {
-                handler(cx, *point);
+            if let UiEventPayload::PointerDown { pointer } = payload {
+                handler(cx, *pointer);
             }
         })
     }
 
     pub fn on_pointer_move<F>(self, handler: F) -> Self
     where
-        F: Fn(&mut UiEventContext, super::Point) + Send + Sync + 'static,
+        F: Fn(&mut UiEventContext, super::PointerData) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::PointerMove, move |cx, payload| {
-            if let UiEventPayload::PointerMove { point } = payload {
-                handler(cx, *point);
+            if let UiEventPayload::PointerMove { pointer } = payload {
+                handler(cx, *pointer);
             }
         })
     }
 
     pub fn on_pointer_up<F>(self, handler: F) -> Self
     where
-        F: Fn(&mut UiEventContext, super::Point) + Send + Sync + 'static,
+        F: Fn(&mut UiEventContext, super::PointerData) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::PointerUp, move |cx, payload| {
-            if let UiEventPayload::PointerUp { point } = payload {
-                handler(cx, *point);
+            if let UiEventPayload::PointerUp { pointer } = payload {
+                handler(cx, *pointer);
             }
         })
     }
 
     pub fn on_wheel<F>(self, handler: F) -> Self
     where
-        F: Fn(&mut UiEventContext, i32) + Send + Sync + 'static,
+        F: Fn(&mut UiEventContext, super::WheelDelta) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::Wheel, move |cx, payload| {
-            if let UiEventPayload::Wheel { delta_y } = payload {
-                handler(cx, *delta_y);
+            if let UiEventPayload::Wheel { delta } = payload {
+                handler(cx, *delta);
             }
         })
     }
 
     pub fn on_key_down<F>(self, handler: F) -> Self
     where
-        F: Fn(&mut UiEventContext, super::KeyCode, super::KeyModifiers) + Send + Sync + 'static,
+        F: Fn(&mut UiEventContext, &super::KeyboardEvent) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::KeyDown, move |cx, payload| {
-            if let UiEventPayload::KeyDown { key, modifiers } = payload {
-                handler(cx, *key, *modifiers);
+            if let UiEventPayload::Keyboard { event } = payload {
+                handler(cx, event);
+            }
+        })
+    }
+
+    pub fn on_key_up<F>(self, handler: F) -> Self
+    where
+        F: Fn(&mut UiEventContext, &super::KeyboardEvent) + Send + Sync + 'static,
+    {
+        self.on_event(UiEventKind::KeyUp, move |cx, payload| {
+            if let UiEventPayload::Keyboard { event } = payload {
+                handler(cx, event);
             }
         })
     }
@@ -333,11 +351,11 @@ impl Element {
 
     pub fn on_composition_update<F>(self, handler: F) -> Self
     where
-        F: Fn(&mut UiEventContext, &str) + Send + Sync + 'static,
+        F: Fn(&mut UiEventContext, &str, Option<std::ops::Range<usize>>) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::CompositionUpdate, move |cx, payload| {
-            if let UiEventPayload::CompositionUpdate { text } = payload {
-                handler(cx, text);
+            if let UiEventPayload::CompositionUpdate { text, cursor } = payload {
+                handler(cx, text, cursor.clone());
             }
         })
     }
@@ -438,6 +456,9 @@ impl Element {
         });
         if let Some(interaction) = self.interaction {
             element = element.interaction(interaction);
+        }
+        if let Some(semantics) = self.semantics {
+            element = element.semantics(semantics);
         }
         if let Some(handler) = self.click_capture_handler {
             element = element.on_click_capture_handler(handler);
@@ -585,9 +606,9 @@ pub fn content_text(value: impl Into<Cow<'static, str>>) -> Element {
     let value = value.into();
     let height = 18;
     let width = (value.chars().count() as i32 * 9).max(1);
-    let rect = UiRect::new(0, 0, width, height);
-    text(rect, value, TextStyle::new(Color::WHITE, 16, 400))
-        .with_layout(LayoutSpec::Fixed(Size::new(width, height)))
+    let rect = UiRect::new(0.0, 0.0, width as f32, height as f32);
+    text(rect, value, TextStyle::new(Color::WHITE, 16.0, 400))
+        .with_layout(LayoutSpec::Fixed(Size::new(width as f32, height as f32)))
 }
 
 pub fn fragment(content: impl IntoElementContent) -> Fragment {
@@ -620,7 +641,7 @@ where
                 .iter()
                 .map(ui_element_paint_bounds)
                 .reduce(UiRect::union)
-                .unwrap_or_else(|| UiRect::new(0, 0, 0, 0));
+                .unwrap_or_else(|| UiRect::new(0.0, 0.0, 0.0, 0.0));
             UiElement::group(cx.id, cx.context.viewport())
                 .paint_bounds(bounds)
                 .children(children)
@@ -654,7 +675,7 @@ pub fn overlay(rect: UiRect, style: super::OverlayStyle) -> Element {
     Element::new(move |cx: ElementRenderCx<'_, '_, '_>| UiElement::overlay(cx.id, rect, style))
 }
 
-pub fn clip(rect: UiRect, offset_x: i32, offset_y: i32) -> Element {
+pub fn clip(rect: UiRect, offset_x: f32, offset_y: f32) -> Element {
     Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
         UiElement::clip(cx.id, rect, offset_x, offset_y).children(cx.children)
     })

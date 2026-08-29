@@ -27,6 +27,10 @@ thread_local! {
     static DECODED_IMAGE_CACHE: RefCell<HashMap<String, DecodedImage>> = RefCell::new(HashMap::new());
 }
 
+fn raster_length(value: f32) -> i32 {
+    value.ceil().max(1.0) as i32
+}
+
 struct DecodedImage {
     image: *mut GpImage,
     width: i32,
@@ -167,8 +171,8 @@ pub fn rasterize_image_bgra(
     rect: UiRect,
     fit: ImageFit,
 ) -> Option<RasterImage> {
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     if is_remote_url(source) {
         return rasterize_remote_image_bgra(source, width, height, fit);
     }
@@ -202,7 +206,12 @@ pub fn rasterize_ui_image_bgra(
 
 fn rasterize_image_bytes_bgra(bytes: &[u8], rect: UiRect, fit: ImageFit) -> Option<RasterImage> {
     let image = decode_image_bytes(bytes, 0, 0)?;
-    rasterize_decoded_image(&image, rect.width().max(1), rect.height().max(1), fit)
+    rasterize_decoded_image(
+        &image,
+        raster_length(rect.width()),
+        raster_length(rect.height()),
+        fit,
+    )
 }
 
 fn rasterize_cached_image_bgra(
@@ -210,8 +219,8 @@ fn rasterize_cached_image_bgra(
     rect: UiRect,
     fit: ImageFit,
 ) -> Option<RasterImage> {
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     let key = match source {
         cached_image::ImageSource::Url(url) => format!("url:{url}"),
         cached_image::ImageSource::File(path) => format!("file:{}", path.display()),
@@ -306,9 +315,10 @@ fn draw_decoded_image(hdc: HDC, rect: UiRect, image: &DecodedImage, fit: ImageFi
             return;
         }
 
-        let dest = rect;
-        let dest_width = (dest.right - dest.left).max(1);
-        let dest_height = (dest.bottom - dest.top).max(1);
+        let dest_left = rect.left.round() as i32;
+        let dest_top = rect.top.round() as i32;
+        let dest_width = raster_length(rect.width());
+        let dest_height = raster_length(rect.height());
         let ImageDrawLayout {
             dest_x,
             dest_y,
@@ -321,8 +331,8 @@ fn draw_decoded_image(hdc: HDC, rect: UiRect, image: &DecodedImage, fit: ImageFi
         } = image_draw_layout(
             image.width,
             image.height,
-            dest.left,
-            dest.top,
+            dest_left,
+            dest_top,
             dest_width,
             dest_height,
             fit,

@@ -1,9 +1,9 @@
 use super::{
     apply_events_to_animations, component_state::RetainedNodeUpdate, AnimProperty,
     AnimationRegistry, ComponentStateStore, ComponentTree, ContextRegistry, DirtyTracker,
-    EffectRegistry, HookStateStore, HostTree, InputEvent, KeyCode, UiAction, UiActionEvent,
-    UiEvent, UiEventDispatcher, UiEventPayload, UiHandlerEvent, UiId, UiRect, UiTaskSpawner,
-    UiUpdateQueue, UiWake,
+    EffectRegistry, HookStateStore, HostTree, InputEvent, KeyState, LogicalKey, NamedKey, UiAction,
+    UiActionEvent, UiEvent, UiEventDispatcher, UiEventPayload, UiHandlerEvent, UiId, UiRect,
+    UiTaskSpawner, UiUpdateQueue, UiWake,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -172,10 +172,12 @@ impl UiRuntime {
 
     pub fn handle_input(&mut self, tree: &HostTree, input: InputEvent) -> RuntimeOutput {
         let focus_traversal = match &input {
-            InputEvent::KeyDown {
-                key: KeyCode::Tab,
-                modifiers,
-            } => Some(modifiers.shift),
+            InputEvent::Keyboard(event)
+                if event.state == KeyState::Down
+                    && event.key == LogicalKey::Named(NamedKey::Tab) =>
+            {
+                Some(event.modifiers.shift())
+            }
             _ => None,
         };
         let mut events = self.events.dispatch(tree, input);
@@ -183,11 +185,11 @@ impl UiRuntime {
         let mut default_actions = Vec::new();
         events.retain(|event| {
             match event {
-                UiEvent::Wheel { hit, delta_y } => {
+                UiEvent::Wheel { hit, delta } => {
                     let Some(action) = hit.action.as_ref() else {
                         return true;
                     };
-                    let action = action.clone().payload(delta_y.to_string());
+                    let action = action.clone().payload(delta.y.to_string());
                     let target = hit.action_target.as_ref().unwrap_or(&hit.id);
                     default_actions.push(UiDefaultAction {
                         event_target: hit.id.clone(),
@@ -212,51 +214,85 @@ impl UiRuntime {
                         action: UiAction::new("text.input").payload(text.clone()),
                     });
                 }
-                UiEvent::Backspace { target } => {
+                UiEvent::SemanticValue { target, value } => {
                     default_actions.push(UiDefaultAction {
                         event_target: target.clone(),
                         action_target: target.clone(),
-                        action: UiAction::new("text.backspace"),
+                        action: UiAction::new("semantic.set_value").payload(value.clone()),
                     });
                 }
-                UiEvent::KeyDown {
-                    target,
-                    key,
-                    modifiers,
-                } => {
-                    let action = match key {
-                        KeyCode::ArrowLeft => {
-                            Some(UiAction::new("text.move.left").payload(if modifiers.shift {
-                                "extend"
-                            } else {
-                                "collapse"
-                            }))
+                UiEvent::SemanticAction { target, action } => {
+                    let id = match action {
+                        super::SemanticAction::Increment => "semantic.increment",
+                        super::SemanticAction::Decrement => "semantic.decrement",
+                        super::SemanticAction::ScrollIntoView => "semantic.scroll_into_view",
+                        super::SemanticAction::ScrollUp => "semantic.scroll_up",
+                        super::SemanticAction::ScrollDown => "semantic.scroll_down",
+                        super::SemanticAction::ScrollLeft => "semantic.scroll_left",
+                        super::SemanticAction::ScrollRight => "semantic.scroll_right",
+                        super::SemanticAction::SetTextSelection => "semantic.set_text_selection",
+                        super::SemanticAction::Click
+                        | super::SemanticAction::Focus
+                        | super::SemanticAction::Blur
+                        | super::SemanticAction::SetValue => return true,
+                    };
+                    default_actions.push(UiDefaultAction {
+                        event_target: target.clone(),
+                        action_target: target.clone(),
+                        action: UiAction::new(id),
+                    });
+                }
+                UiEvent::Keyboard { target, event } if event.state == KeyState::Down => {
+                    let action = match &event.key {
+                        LogicalKey::Named(NamedKey::Backspace) => {
+                            Some(UiAction::new("text.backspace"))
                         }
-                        KeyCode::ArrowRight => Some(UiAction::new("text.move.right").payload(
-                            if modifiers.shift {
+                        LogicalKey::Named(NamedKey::ArrowLeft) => Some(
+                            UiAction::new("text.move.left").payload(if event.modifiers.shift() {
                                 "extend"
                             } else {
                                 "collapse"
-                            },
-                        )),
-                        KeyCode::ArrowUp => {
-                            Some(UiAction::new("text.move.up").payload(if modifiers.shift {
+                            }),
+                        ),
+                        LogicalKey::Named(NamedKey::ArrowRight) => Some(
+                            UiAction::new("text.move.right").payload(if event.modifiers.shift() {
                                 "extend"
                             } else {
                                 "collapse"
-                            }))
+                            }),
+                        ),
+                        LogicalKey::Named(NamedKey::ArrowUp) => Some(
+                            UiAction::new("text.move.up").payload(if event.modifiers.shift() {
+                                "extend"
+                            } else {
+                                "collapse"
+                            }),
+                        ),
+                        LogicalKey::Named(NamedKey::ArrowDown) => Some(
+                            UiAction::new("text.move.down").payload(if event.modifiers.shift() {
+                                "extend"
+                            } else {
+                                "collapse"
+                            }),
+                        ),
+                        LogicalKey::Named(NamedKey::Enter) => {
+                            Some(UiAction::new("text.input").payload("\n"))
                         }
-                        KeyCode::ArrowDown => {
-                            Some(UiAction::new("text.move.down").payload(if modifiers.shift {
-                                "extend"
-                            } else {
-                                "collapse"
-                            }))
+                        LogicalKey::Character(key)
+                            if event.modifiers.ctrl() && key.eq_ignore_ascii_case("a") =>
+                        {
+                            Some(UiAction::new("text.select.all"))
                         }
-                        KeyCode::Enter => Some(UiAction::new("text.input").payload("\n")),
-                        KeyCode::A if modifiers.ctrl => Some(UiAction::new("text.select.all")),
-                        KeyCode::C if modifiers.ctrl => Some(UiAction::new("text.copy")),
-                        KeyCode::V if modifiers.ctrl => Some(UiAction::new("text.paste")),
+                        LogicalKey::Character(key)
+                            if event.modifiers.ctrl() && key.eq_ignore_ascii_case("c") =>
+                        {
+                            Some(UiAction::new("text.copy"))
+                        }
+                        LogicalKey::Character(key)
+                            if event.modifiers.ctrl() && key.eq_ignore_ascii_case("v") =>
+                        {
+                            Some(UiAction::new("text.paste"))
+                        }
                         _ => None,
                     };
                     if let Some(action) = action {
@@ -267,7 +303,9 @@ impl UiRuntime {
                         });
                     }
                 }
-                UiEvent::PointerPressed { hit, point } => {
+                UiEvent::Keyboard { .. } => {}
+                UiEvent::PointerPressed { hit, pointer } => {
+                    let point = pointer.point;
                     let payload = format!("{},{}", point.x - hit.rect.left, point.y - hit.rect.top);
                     let target = hit.action_target.as_ref().unwrap_or(&hit.id);
                     if self.component_states.contains(target) {
@@ -278,7 +316,8 @@ impl UiRuntime {
                         });
                     }
                 }
-                UiEvent::PointerDragged { hit, point } => {
+                UiEvent::PointerDragged { hit, pointer } => {
+                    let point = pointer.point;
                     let payload = format!("{},{}", point.x - hit.rect.left, point.y - hit.rect.top);
                     let target = hit.action_target.as_ref().unwrap_or(&hit.id);
                     if self.component_states.contains(target) {
@@ -289,7 +328,8 @@ impl UiRuntime {
                         });
                     }
                 }
-                UiEvent::PointerReleased { hit, point } => {
+                UiEvent::PointerReleased { hit, pointer } => {
+                    let point = pointer.point;
                     let payload = format!("{},{}", point.x - hit.rect.left, point.y - hit.rect.top);
                     let target = hit.action_target.as_ref().unwrap_or(&hit.id);
                     if self.component_states.contains(target) {
@@ -591,8 +631,9 @@ fn event_target_ids(event: &UiEvent) -> Vec<&UiId> {
         | UiEvent::ImeStarted { target }
         | UiEvent::ImeUpdated { target, .. }
         | UiEvent::ImeEnded { target }
-        | UiEvent::Backspace { target }
-        | UiEvent::KeyDown { target, .. } => vec![target],
+        | UiEvent::Keyboard { target, .. }
+        | UiEvent::SemanticValue { target, .. }
+        | UiEvent::SemanticAction { target, .. } => vec![target],
         UiEvent::FocusChanged { current, previous } => previous
             .iter()
             .chain(current.iter().map(|hit| &hit.id))
@@ -619,12 +660,12 @@ fn interaction_state_target_ids(event: &UiEvent) -> Vec<&UiId> {
         | UiEvent::ImeStarted { .. }
         | UiEvent::ImeUpdated { .. }
         | UiEvent::ImeEnded { .. }
-        | UiEvent::Backspace { .. }
-        | UiEvent::KeyDown { .. }
+        | UiEvent::Keyboard { .. }
         | UiEvent::PointerPressed { .. }
         | UiEvent::PointerMoved { .. }
         | UiEvent::PointerDragged { .. }
         | UiEvent::PointerReleased { .. } => Vec::new(),
+        UiEvent::SemanticValue { .. } | UiEvent::SemanticAction { .. } => Vec::new(),
     }
 }
 
@@ -634,11 +675,20 @@ mod tests {
 
     use super::super::{
         compile_scene, AnimationBinding, ComponentActionOutcome, ComponentState,
-        CompositingLayerAnimation, CompositingLayerSpec, InputEvent, InteractionRole, Point,
-        PointerButton, ScenePrimitive, UiNode, UiNodeKind, VisualStyle, POINTER_DOWN_ACTION,
-        POINTER_DRAG_ACTION, POINTER_UP_ACTION,
+        CompositingLayerAnimation, CompositingLayerSpec, ImeEvent, InputEvent, InteractionRole,
+        KeyModifiers, KeyboardEvent, Point, PointerButton, PointerData, ScenePrimitive, UiNode,
+        UiNodeKind, VisualStyle, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
     };
     use super::*;
+
+    fn key_down(key: NamedKey, modifiers: KeyModifiers) -> InputEvent {
+        InputEvent::Keyboard(KeyboardEvent {
+            state: KeyState::Down,
+            key: LogicalKey::Named(key),
+            modifiers,
+            ..Default::default()
+        })
+    }
 
     #[derive(Clone, Default)]
     struct RetainedLayerAnimation {
@@ -676,7 +726,10 @@ mod tests {
         let empty_tree = HostTree::new();
         let mut runtime = UiRuntime::new();
 
-        runtime.handle_input(&button_tree, InputEvent::PointerMove(Point::new(10, 10)));
+        runtime.handle_input(
+            &button_tree,
+            InputEvent::PointerMove(PointerData::mouse(Point::new(10.0, 10.0))),
+        );
         runtime.advance(&mut button_tree, 1000.0);
 
         assert_eq!(runtime.interaction_state().hovered, Some(button_id.clone()));
@@ -701,11 +754,16 @@ mod tests {
         let button_tree = interactive_button_tree(UiId::new("steady-hover"));
         let mut runtime = UiRuntime::new();
 
-        let entered =
-            runtime.handle_input(&button_tree, InputEvent::PointerMove(Point::new(10, 10)));
+        let entered = runtime.handle_input(
+            &button_tree,
+            InputEvent::PointerMove(PointerData::mouse(Point::new(10.0, 10.0))),
+        );
         assert!(entered.dirty_bounds.is_some());
 
-        let moved = runtime.handle_input(&button_tree, InputEvent::PointerMove(Point::new(11, 10)));
+        let moved = runtime.handle_input(
+            &button_tree,
+            InputEvent::PointerMove(PointerData::mouse(Point::new(11.0, 10.0))),
+        );
 
         assert!(moved
             .events
@@ -723,7 +781,7 @@ mod tests {
             UiNode::new(
                 switch_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 46, 24),
+                UiRect::new(0.0, 0.0, 46.0, 24.0),
             )
             .animation(AnimationBinding::new(AnimProperty::Active, 0.0, 1.0))
             .animation_target(AnimProperty::Active, true),
@@ -761,7 +819,7 @@ mod tests {
             UiNode::new(
                 UiId::owned("animated-node"),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 20, 20),
+                UiRect::new(0.0, 0.0, 20.0, 20.0),
             )
             .component_owner(owner)
             .animation(AnimationBinding::new(AnimProperty::Active, 0.0, 1.0))
@@ -790,7 +848,7 @@ mod tests {
         };
         let state_id = UiId::owned("rail.h.state.0");
         let target_id = UiId::owned("rail");
-        let target_bounds = UiRect::new(10, 20, 24, 220);
+        let target_bounds = UiRect::new(10.0, 20.0, 24.0, 220.0);
         let mut tree = HostTree::new();
         tree.push(
             UiNode::new(target_id.clone(), UiNodeKind::Panel, target_bounds).component_owner(owner),
@@ -830,16 +888,20 @@ mod tests {
             UiNode::new(
                 layer_id.clone(),
                 UiNodeKind::CompositingLayer,
-                UiRect::new(0, 0, 20, 20),
+                UiRect::new(0.0, 0.0, 20.0, 20.0),
             )
             .component_owner(owner)
             .compositing_layer(CompositingLayerSpec::new()),
         );
         tree.push(
-            UiNode::new(child_id, UiNodeKind::Panel, UiRect::new(2, 2, 18, 18))
-                .parent(layer_id.clone())
-                .component_owner(owner)
-                .style(VisualStyle::filled(super::super::Color::WHITE)),
+            UiNode::new(
+                child_id,
+                UiNodeKind::Panel,
+                UiRect::new(2.0, 2.0, 18.0, 18.0),
+            )
+            .parent(layer_id.clone())
+            .component_owner(owner)
+            .style(VisualStyle::filled(super::super::Color::WHITE)),
         );
         let _ = tree.take_projection_changes();
         let before_signature = compositing_content_signature(&compile_scene(&tree));
@@ -852,7 +914,7 @@ mod tests {
         let output = runtime.advance(&mut tree, 16.0);
 
         assert!(output.animation_changed);
-        assert_eq!(output.dirty_bounds, Some(UiRect::new(0, 0, 30, 20)));
+        assert_eq!(output.dirty_bounds, Some(UiRect::new(0.0, 0.0, 30.0, 20.0)));
         assert!(!runtime.component_tree().is_dirty(owner));
         assert_eq!(
             tree.node(&layer_id)
@@ -892,7 +954,7 @@ mod tests {
             UiNode::new(
                 rail_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 14, 200),
+                UiRect::new(0.0, 0.0, 14.0, 200.0),
             )
             .component_owner(owner),
         );
@@ -900,7 +962,7 @@ mod tests {
             UiNode::new(
                 animation_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(20, 0, 40, 20),
+                UiRect::new(20.0, 0.0, 40.0, 20.0),
             )
             .component_owner(owner)
             .animation(animation)
@@ -931,7 +993,7 @@ mod tests {
         runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
@@ -940,7 +1002,7 @@ mod tests {
         let output = runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(200, 200),
+                pointer: PointerData::mouse(Point::new(200.0, 200.0)),
                 button: PointerButton::Left,
             },
         );
@@ -965,7 +1027,7 @@ mod tests {
             UiNode::new(
                 background.clone(),
                 UiNodeKind::Button,
-                UiRect::new(0, 0, 40, 20),
+                UiRect::new(0.0, 0.0, 40.0, 20.0),
             )
             .interaction(InteractionRole::Button),
         );
@@ -974,13 +1036,13 @@ mod tests {
             UiNode::new(
                 scope.clone(),
                 UiNodeKind::Group,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .focus_scope(true),
         );
         for (id, rect) in [
-            (first.clone(), UiRect::new(10, 10, 40, 30)),
-            (second.clone(), UiRect::new(50, 10, 80, 30)),
+            (first.clone(), UiRect::new(10.0, 10.0, 40.0, 30.0)),
+            (second.clone(), UiRect::new(50.0, 10.0, 80.0, 30.0)),
         ] {
             modal_tree.push(
                 UiNode::new(id, UiNodeKind::Button, rect)
@@ -996,10 +1058,7 @@ mod tests {
 
         let output = runtime.handle_input(
             &modal_tree,
-            InputEvent::KeyDown {
-                key: KeyCode::Tab,
-                modifiers: super::super::KeyModifiers::default(),
-            },
+            key_down(NamedKey::Tab, KeyModifiers::default()),
         );
         assert_eq!(runtime.interaction_state().focused, Some(first));
         assert_eq!(output.default_actions.len(), 1);
@@ -1027,8 +1086,8 @@ mod tests {
 
         let mut tree = HostTree::new();
         for (id, rect) in [
-            (first.clone(), UiRect::new(0, 0, 40, 20)),
-            (second.clone(), UiRect::new(50, 0, 90, 20)),
+            (first.clone(), UiRect::new(0.0, 0.0, 40.0, 20.0)),
+            (second.clone(), UiRect::new(50.0, 0.0, 90.0, 20.0)),
         ] {
             tree.push(
                 UiNode::new(id, UiNodeKind::Button, rect)
@@ -1049,13 +1108,7 @@ mod tests {
             assert!(!components.is_dirty(owner));
         }
 
-        let output = runtime.handle_input(
-            &tree,
-            InputEvent::KeyDown {
-                key: KeyCode::Tab,
-                modifiers: super::super::KeyModifiers::default(),
-            },
-        );
+        let output = runtime.handle_input(&tree, key_down(NamedKey::Tab, KeyModifiers::default()));
         runtime.handle_default_action(&tree, output.default_actions[0].clone());
 
         assert_eq!(runtime.interaction_state().focused, Some(second));
@@ -1067,22 +1120,20 @@ mod tests {
         let id = UiId::owned("focusable");
         let mut tree = HostTree::new();
         tree.push(
-            UiNode::new(id.clone(), UiNodeKind::Button, UiRect::new(0, 0, 40, 20))
-                .interaction(InteractionRole::Button)
-                .on_event(super::super::UiEventKind::KeyDown, |context, _| {
-                    context.prevent_default();
-                }),
+            UiNode::new(
+                id.clone(),
+                UiNodeKind::Button,
+                UiRect::new(0.0, 0.0, 40.0, 20.0),
+            )
+            .interaction(InteractionRole::Button)
+            .on_event(super::super::UiEventKind::KeyDown, |context, _| {
+                context.prevent_default();
+            }),
         );
         let mut runtime = UiRuntime::new();
         assert!(runtime.focus_node(&tree, &id));
 
-        let output = runtime.handle_input(
-            &tree,
-            InputEvent::KeyDown {
-                key: KeyCode::Tab,
-                modifiers: super::super::KeyModifiers::default(),
-            },
-        );
+        let output = runtime.handle_input(&tree, key_down(NamedKey::Tab, KeyModifiers::default()));
 
         assert_eq!(output.handler_events.len(), 1);
         assert_eq!(output.default_actions.len(), 1);
@@ -1123,21 +1174,24 @@ mod tests {
         let output = runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
         for action in output.default_actions {
             runtime.handle_default_action(&tree, action);
         }
-        let output = runtime.handle_input(&tree, InputEvent::PointerMove(Point::new(180, 10)));
+        let output = runtime.handle_input(
+            &tree,
+            InputEvent::PointerMove(PointerData::mouse(Point::new(180.0, 10.0))),
+        );
         for action in output.default_actions {
             runtime.handle_default_action(&tree, action);
         }
         let output = runtime.handle_input(
             &tree,
             InputEvent::PointerUp {
-                point: Point::new(180, 10),
+                pointer: PointerData::mouse(Point::new(180.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
@@ -1162,7 +1216,7 @@ mod tests {
             UiNode::new(
                 component_id.clone(),
                 UiNodeKind::Button,
-                UiRect::new(0, 0, 100, 40),
+                UiRect::new(0.0, 0.0, 100.0, 40.0),
             )
             .interaction(InteractionRole::Button)
             .click_action(UiAction::new("component.choose"))
@@ -1176,14 +1230,14 @@ mod tests {
         runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
         let output = runtime.handle_input(
             &tree,
             InputEvent::PointerUp {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
@@ -1224,7 +1278,7 @@ mod tests {
             UiNode::new(
                 target.clone(),
                 UiNodeKind::Button,
-                UiRect::new(20, 30, 120, 70),
+                UiRect::new(20.0, 30.0, 120.0, 70.0),
             )
             .component_owner(owner),
         );
@@ -1242,7 +1296,10 @@ mod tests {
         );
 
         assert!(output.animation_changed);
-        assert_eq!(output.dirty_bounds, Some(UiRect::new(20, 30, 120, 70)));
+        assert_eq!(
+            output.dirty_bounds,
+            Some(UiRect::new(20.0, 30.0, 120.0, 70.0))
+        );
         assert!(runtime.component_tree().is_dirty(owner));
     }
 
@@ -1254,7 +1311,7 @@ mod tests {
             UiNode::new(
                 input_id.clone(),
                 UiNodeKind::Custom("test-input"),
-                UiRect::new(0, 0, 100, 40),
+                UiRect::new(0.0, 0.0, 100.0, 40.0),
             )
             .interaction(InteractionRole::Custom("input"))
             .on_event(super::super::UiEventKind::Input, |context, _| {
@@ -1265,7 +1322,7 @@ mod tests {
         runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
@@ -1286,7 +1343,7 @@ mod tests {
             UiNode::new(
                 input_id.clone(),
                 UiNodeKind::Custom("test-input"),
-                UiRect::new(0, 0, 100, 40),
+                UiRect::new(0.0, 0.0, 100.0, 40.0),
             )
             .on_event(super::super::UiEventKind::Change, |_, _| {}),
         );
@@ -1315,7 +1372,7 @@ mod tests {
             UiNode::new(
                 input_id.clone(),
                 UiNodeKind::Custom("test-input"),
-                UiRect::new(0, 0, 100, 40),
+                UiRect::new(0.0, 0.0, 100.0, 40.0),
             )
             .interaction(InteractionRole::Custom("input"))
             .on_event(super::super::UiEventKind::CompositionStart, |_, _| {})
@@ -1327,20 +1384,28 @@ mod tests {
         runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
 
-        let start = runtime.handle_input(&tree, InputEvent::ImeStart);
-        let update = runtime.handle_input(&tree, InputEvent::ImeUpdate("nǐ".to_owned()));
-        let commit = runtime.handle_input(&tree, InputEvent::ImeCommit("中文".to_owned()));
-        let end = runtime.handle_input(&tree, InputEvent::ImeEnd);
+        let start = runtime.handle_input(&tree, InputEvent::Ime(ImeEvent::Enabled));
+        let update = runtime.handle_input(
+            &tree,
+            InputEvent::Ime(ImeEvent::Preedit {
+                text: "nǐ".to_owned(),
+                cursor: Some(1..1),
+            }),
+        );
+        let commit =
+            runtime.handle_input(&tree, InputEvent::Ime(ImeEvent::Commit("中文".to_owned())));
+        let end = runtime.handle_input(&tree, InputEvent::Ime(ImeEvent::Disabled));
 
         assert_eq!(start.handler_events[0].target, input_id);
         assert!(matches!(
             update.handler_events[0].payload,
-            super::super::UiEventPayload::CompositionUpdate { ref text } if text == "nǐ"
+            super::super::UiEventPayload::CompositionUpdate { ref text, ref cursor }
+                if text == "nǐ" && cursor == &Some(1..1)
         ));
         assert_eq!(commit.default_actions.len(), 1);
         assert!(matches!(
@@ -1362,7 +1427,7 @@ mod tests {
             UiNode::new(
                 input_id.clone(),
                 UiNodeKind::Custom("test-input"),
-                UiRect::new(0, 0, 100, 40),
+                UiRect::new(0.0, 0.0, 100.0, 40.0),
             )
             .interaction(InteractionRole::Custom("input")),
         );
@@ -1370,12 +1435,15 @@ mod tests {
         runtime.handle_input(
             &tree,
             InputEvent::PointerDown {
-                point: Point::new(10, 10),
+                pointer: PointerData::mouse(Point::new(10.0, 10.0)),
                 button: PointerButton::Left,
             },
         );
 
-        let output = runtime.handle_input(&tree, InputEvent::Backspace);
+        let output = runtime.handle_input(
+            &tree,
+            key_down(NamedKey::Backspace, KeyModifiers::default()),
+        );
 
         assert_eq!(output.default_actions.len(), 1);
         assert_eq!(output.default_actions[0].event_target, input_id);
@@ -1491,7 +1559,7 @@ mod tests {
     fn interactive_button_tree(id: UiId) -> HostTree {
         let mut tree = HostTree::new();
         tree.push(
-            UiNode::new(id, UiNodeKind::Button, UiRect::new(0, 0, 100, 40))
+            UiNode::new(id, UiNodeKind::Button, UiRect::new(0.0, 0.0, 100.0, 40.0))
                 .interaction(InteractionRole::Button)
                 .animation(AnimationBinding::new(AnimProperty::Hover, 0.0, 1.0)),
         );

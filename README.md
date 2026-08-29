@@ -18,11 +18,11 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_i32);
     let increment = count.clone();
 
-    stack(UiRect::new(0, 0, 360, 200), Axis::Vertical)
+    stack(UiRect::new(0.0, 0.0, 360.0, 200.0), Axis::Vertical)
         .content((
-            text(UiRect::new(0, 0, 312, 56), format!("{}", count.get()), TextStyle::default()),
+            text(UiRect::new(0.0, 0.0, 312.0, 56.0), format!("{}", count.get()), TextStyle::default()),
             button(
-                UiRect::new(0, 0, 312, 48),
+                UiRect::new(0.0, 0.0, 312.0, 48.0),
                 "one up",
                 ButtonStyle::default(),
             )
@@ -32,13 +32,23 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
 }
 
 Application::new()
-    .window_options(WindowOptions::new("counter").size(Size::new(380, 240)))
+    .window_options(WindowOptions::new("counter").size(Size::new(380.0, 240.0)))
     .run(app)?;
 ```
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md), and
-[`BASELINE.md`](BASELINE.md). Build the portable core with:
+See [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md),
+[`BASELINE.md`](BASELINE.md), and the implementation/status contract in
+[`SKIA_DESIGN.md`](SKIA_DESIGN.md). Build the portable core with:
 
 ```powershell
 cargo test -p lgui --no-default-features
+```
+
+The Skia desktop backend uses winit with portable OpenGL or software presentation. Liuguang keeps
+Skia behind an explicit feature and runtime renderer choice during migration:
+
+```powershell
+cargo run --bin liugc --features renderer-skia -- --renderer skia
+cargo run --bin liugc --features renderer-skia -- --renderer skia-opengl
+cargo run --bin liugc --features renderer-skia -- --renderer skia-software
 ```

@@ -64,7 +64,7 @@ mod tests {
         let _runtime = GdiPlusRuntime::start().expect("GDI+ should start on Windows");
         let image = super::super::enhanced::image::rasterize_ui_image_bgra(
             &UiImageSource::bytes("test.pixel", 1, ONE_PIXEL_PNG.to_vec()),
-            UiRect::new(0, 0, 1, 1),
+            UiRect::new(0.0, 0.0, 1.0, 1.0),
             ImageFit::Fill,
         )
         .expect("PNG should decode while the runtime is alive");

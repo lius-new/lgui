@@ -75,8 +75,9 @@ impl DirtyTracker {
             | UiEvent::ImeStarted { target }
             | UiEvent::ImeUpdated { target, .. }
             | UiEvent::ImeEnded { target }
-            | UiEvent::Backspace { target }
-            | UiEvent::KeyDown { target, .. } => self.mark_id(target),
+            | UiEvent::Keyboard { target, .. }
+            | UiEvent::SemanticValue { target, .. }
+            | UiEvent::SemanticAction { target, .. } => self.mark_id(target),
             UiEvent::PointerPressed { hit, .. } => self.mark_id(hit.id),
             // Pointer coordinates are not paint state. Handlers that derive visuals from a move
             // enqueue their own state update; moving inside an unchanged hover target must not

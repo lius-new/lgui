@@ -25,18 +25,17 @@ mod basic {
                     DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
                     DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_WORD_WRAPPING_NO_WRAP,
                 },
-                Gdi::HDC,
             },
         },
     };
     use windows_numerics::Vector2;
 
     use crate::{
-        application::RenderErrorStage,
         core::{Color, Scene, ScenePrimitive, Stroke, TextAlign, TextStyle, UiRect, VisualStyle},
+        renderer::{FrameInfo, RenderErrorStage, RenderStats, RendererCapabilities, SceneRenderer},
     };
 
-    use super::{Win32RenderError, Win32Renderer, Win32RendererFactory};
+    use super::{Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer};
 
     #[derive(Clone, Copy, Debug, Default)]
     pub struct D2dRendererFactory;
@@ -46,7 +45,7 @@ mod basic {
             "d2d"
         }
 
-        fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
+        fn create(&self, hwnd: HWND) -> Result<Box<Win32SceneRenderer>> {
             Ok(Box::new(D2dRenderer::new(hwnd)?))
         }
     }
@@ -251,14 +250,24 @@ mod basic {
         }
     }
 
-    impl Win32Renderer for D2dRenderer {
-        fn draw(
+    impl SceneRenderer for D2dRenderer {
+        type Target = Win32RenderTarget;
+        type Error = Win32RenderError;
+
+        fn capabilities(&self) -> RendererCapabilities {
+            RendererCapabilities {
+                partial_redraw: false,
+                retained_surface: true,
+            }
+        }
+
+        fn render(
             &mut self,
-            _hwnd: HWND,
-            _target: HDC,
+            _target: &mut Self::Target,
             scene: &Scene,
-            viewport: UiRect,
-        ) -> std::result::Result<(), Win32RenderError> {
+            frame: &FrameInfo<'_>,
+        ) -> std::result::Result<RenderStats, Self::Error> {
+            let viewport = frame.viewport();
             self.resize(viewport).map_err(|source| {
                 Win32RenderError::new(RenderErrorStage::Prepare, "resize_d2d_target", source)
             })?;
@@ -273,7 +282,8 @@ mod basic {
             })?;
             present_result.map_err(|source| {
                 Win32RenderError::new(RenderErrorStage::Present, "end_d2d_draw", source)
-            })
+            })?;
+            Ok(RenderStats::for_frame(frame))
         }
     }
 

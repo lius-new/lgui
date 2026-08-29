@@ -8,21 +8,32 @@ readme = "README.md"
 [features]
 default = ["renderer-gdi", "router", "store", "widgets"]
 async = []
+desktop = ["backend-winit", "clipboard", "open-url", "dialogs", "accessibility"]
+backend-winit = ["dep:raw-window-handle", "dep:softbuffer", "dep:winit"]
+accessibility = ["backend-winit", "dep:accesskit", "dep:accesskit_winit"]
 advanced-rendering = [
   "renderer-d2d",
   "renderer-gdi",
+]
+renderer-skia = [
+  "dep:skia-safe",
+  "dep:ureq",
+  "images",
+  "svg",
+]
+renderer-skia-gl = [
+  "renderer-skia",
+  "backend-winit",
+  "dep:glutin",
 ]
 backend-win32 = [
   "dep:windows",
   "windows/Win32_System_ProcessStatus",
   "windows/Win32_System_Threading",
 ]
-clipboard = [
-  "backend-win32",
-  "windows/Win32_System_DataExchange",
-  "windows/Win32_System_Memory",
-]
-open-url = ["backend-win32", "windows/Win32_UI_Shell"]
+clipboard = ["dep:arboard"]
+dialogs = ["dep:rfd"]
+open-url = ["dep:open"]
 diagnostics = []
 diagnostics-serde = ["diagnostics", "dep:serde"]
 diagnostics-timing = ["diagnostics"]
@@ -31,13 +42,15 @@ system-diagnostics = [
   "backend-win32",
   "windows/Win32_System_SystemInformation",
 ]
-images = [
+images = []
+images-win32 = [
+  "images",
   "backend-win32",
   "windows/Win32_Graphics_GdiPlus",
   "windows/Win32_System_Com",
   "windows/Win32_UI_Shell",
 ]
-multi-window = ["backend-win32"]
+multi-window = []
 notifications = [
   "backend-win32",
   "windows/Data_Xml_Dom",
@@ -50,7 +63,7 @@ renderer-d2d = [
   "backend-win32",
   "dep:windows-numerics",
   "diagnostics",
-  "images",
+  "images-win32",
   "svg",
   "windows/Win32_Graphics_Direct3D",
   "windows/Win32_Graphics_Direct3D11",
@@ -60,7 +73,6 @@ renderer-d2d = [
 store = []
 svg = [
   "images",
-  "backend-win32",
   "dep:icondata",
   "dep:resvg",
   "dep:tiny-skia",
@@ -72,15 +84,29 @@ tray = ["backend-win32", "windows/Win32_UI_Shell"]
 widgets = ["theme"]
 
 [dependencies]
+accesskit = { version = "0.24", optional = true }
+accesskit_winit = { version = "0.33", optional = true, default-features = false, features = ["accesskit_unix", "async-io", "rwh_06"] }
+arboard = { version = "3.6", optional = true }
+glutin = { version = "0.32", optional = true }
+icondata = { version = "0.7.0", optional = true, default-features = false, features = ["lucide"] }
+keyboard-types = "0.8"
+open = { version = "5.3", optional = true }
+resvg = { version = "0.45", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+rfd = { version = "0.15", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
+softbuffer = { version = "0.4.8", optional = true, default-features = false, features = ["x11", "x11-dlopen", "wayland", "wayland-dlopen"] }
+tiny-skia = { version = "0.11", optional = true }
 tokio = { version = "1", optional = true, features = ["rt"] }
+usvg = { version = "0.45", optional = true }
+ureq = { version = "2.12", optional = true, default-features = true }
+winit = { version = "0.30.12", optional = true }
+# 0.99.0's official Windows binary matrix publishes this exact feature set. Keeping it exact
+# avoids a local LLVM/Ninja source build while still using the upstream rust-skia artifacts.
+skia-safe = { version = "=0.99.0", optional = true, default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics = { version = "0.3.1", optional = true }
-icondata = { version = "0.7.0", optional = true, default-features = false, features = ["lucide"] }
-resvg = { version = "0.45", optional = true }
-tiny-skia = { version = "0.11", optional = true }
-usvg = { version = "0.45", optional = true }
 windows = { version = "0.62.2", optional = true, features = [
   "Win32_Foundation",
   "Win32_Graphics_Direct2D",

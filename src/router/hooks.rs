@@ -89,7 +89,7 @@ mod tests {
             let router = self.router;
             let routed_executions = self.routed_executions;
             let unrelated_executions = self.unrelated_executions;
-            group(UiRect::new(0, 0, 10, 10)).content((
+            group(UiRect::new(0.0, 0.0, 10.0, 10.0)).content((
                 component((), move |cx, _| {
                     routed_executions.fetch_add(1, Ordering::SeqCst);
                     let snapshot = cx.use_router_snapshot(router.clone());
@@ -109,7 +109,7 @@ mod tests {
         routed_executions: Arc<AtomicUsize>,
         unrelated_executions: Arc<AtomicUsize>,
     ) {
-        let viewport = UiRect::new(0, 0, 10, 10);
+        let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
         let interaction = ui.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(

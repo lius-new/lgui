@@ -16,7 +16,7 @@ pub struct Panel {
     click_handler: Option<UiEventHandler>,
     animations: Vec<AnimationBinding>,
     animation_targets: Vec<(AnimProperty, bool)>,
-    animation_outset: Option<(i32, i32)>,
+    animation_outset: Option<(f32, f32)>,
     paint_bounds: Option<UiRect>,
     children: Vec<Element>,
 }
@@ -75,7 +75,7 @@ impl Panel {
         self
     }
 
-    pub fn animation_outset(mut self, x: i32, y: i32) -> Self {
+    pub fn animation_outset(mut self, x: f32, y: f32) -> Self {
         self.animation_outset = Some((x, y));
         self
     }

@@ -322,7 +322,7 @@ mod tests {
         application::AppView,
         core::{
             component, group, text, Color, Element, ElementRenderCx, InputEvent, InteractionRole,
-            Point, PointerButton, State, TextStyle, UiElement, UiId, VisualStyle,
+            Point, PointerButton, PointerData, State, TextStyle, UiElement, UiId, VisualStyle,
         },
     };
     use std::sync::{
@@ -370,20 +370,20 @@ mod tests {
         let view: AppView = Arc::new(move |cx| {
             let count = cx.state(0_i32);
             *captured.lock().expect("captured state poisoned") = Some(count.clone());
-            group(UiRect::new(0, 0, 400, 300)).content((
+            group(UiRect::new(0.0, 0.0, 400.0, 300.0)).content((
                 text(
-                    UiRect::new(20, 20, 180, 60),
+                    UiRect::new(20.0, 20.0, 180.0, 60.0),
                     "unchanged",
-                    TextStyle::new(Color::WHITE, 18, 400),
+                    TextStyle::new(Color::WHITE, 18.0, 400),
                 ),
                 text(
-                    UiRect::new(20, 80, 180, 120),
+                    UiRect::new(20.0, 80.0, 180.0, 120.0),
                     format!("count={}", count.get()),
-                    TextStyle::new(Color::WHITE, 18, 400),
+                    TextStyle::new(Color::WHITE, 18.0, 400),
                 ),
             ))
         });
-        let viewport = UiRect::new(0, 0, 400, 300);
+        let viewport = UiRect::new(0.0, 0.0, 400.0, 300.0);
         let mut session = UiSession::new();
 
         let first = session.render_view(&view, viewport, UiScale::ONE);
@@ -402,13 +402,10 @@ mod tests {
 
         assert!(!second.damage.dirty.is_full());
         assert!(!second.damage.dirty.is_empty());
-        assert!(second.damage.dirty.dirty_area() < second.damage.dirty.viewport_area() / 2);
-        assert!(second
-            .damage
-            .dirty
-            .effective_rects()
-            .iter()
-            .all(|rect| rect.intersect(UiRect::new(20, 20, 180, 60)).is_none()));
+        assert!(second.damage.dirty.dirty_area() < second.damage.dirty.viewport_area() / 2.0);
+        assert!(second.damage.dirty.effective_rects().iter().all(|rect| rect
+            .intersect(UiRect::new(20.0, 20.0, 180.0, 60.0))
+            .is_none()));
     }
 
     #[test]
@@ -453,15 +450,15 @@ mod tests {
                         })
                     })
                 };
-                group(UiRect::new(0, 0, 240, 120)).content((
+                group(UiRect::new(0.0, 0.0, 240.0, 120.0)).content((
                     field(
-                        UiRect::new(0, 0, 120, 40),
+                        UiRect::new(0.0, 0.0, 120.0, 40.0),
                         Arc::clone(&first_executions),
                         Arc::clone(&first_observed_focus),
                         Arc::clone(&first_id),
                     ),
                     field(
-                        UiRect::new(0, 60, 120, 100),
+                        UiRect::new(0.0, 60.0, 120.0, 100.0),
                         Arc::clone(&second_executions),
                         Arc::clone(&second_observed_focus),
                         Arc::clone(&second_id),
@@ -469,7 +466,7 @@ mod tests {
                 ))
             }
         });
-        let viewport = UiRect::new(0, 0, 240, 120);
+        let viewport = UiRect::new(0.0, 0.0, 240.0, 120.0);
         let mut session = UiSession::new();
 
         session.render_view(&view, viewport, UiScale::ONE);
@@ -484,14 +481,14 @@ mod tests {
             .clone()
             .expect("second id missing");
 
-        click(&mut session, Point::new(10, 10));
+        click(&mut session, Point::new(10.0, 10.0));
         assert_eq!(
             session.runtime().interaction_state().focused,
             Some(first_id)
         );
         session.render_view(&view, viewport, UiScale::ONE);
 
-        click(&mut session, Point::new(10, 70));
+        click(&mut session, Point::new(10.0, 70.0));
         assert_eq!(
             session.runtime().interaction_state().focused,
             Some(second_id)
@@ -517,11 +514,11 @@ mod tests {
     fn click(session: &mut UiSession, point: Point) {
         for input in [
             InputEvent::PointerDown {
-                point,
+                pointer: PointerData::mouse(point),
                 button: PointerButton::Left,
             },
             InputEvent::PointerUp {
-                point,
+                pointer: PointerData::mouse(point),
                 button: PointerButton::Left,
             },
         ] {

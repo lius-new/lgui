@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use lgui::core::{BackdropBlurStyle, UiRect};
+use lgui::core::{BackdropBlurStyle, PhysicalRect, UiRect};
 use lgui::platform::win32::render_trace;
 
 use super::image;
@@ -93,8 +93,8 @@ pub fn with_backdrop_blur_bgra<T>(
     draw: impl FnOnce(&[u8], i32, i32, f32) -> T,
 ) -> Option<T> {
     let total_start = Instant::now();
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = rect.width().ceil().max(1.0) as i32;
+    let height = rect.height().ceil().max(1.0) as i32;
     if width <= 0 || height <= 0 {
         return None;
     }
@@ -106,12 +106,13 @@ pub fn with_backdrop_blur_bgra<T>(
         rect.right - source_rect.left,
         rect.bottom - source_rect.top,
     );
+    let radius = style.radius.ceil().max(0.0) as usize;
     let key = BlurCacheKey {
         source: style.source,
         fit: style.fit,
         source_rect,
         sample_rect,
-        radius: style.radius,
+        radius,
         tint: style.tint.0,
         tint_alpha_bits: style.tint_alpha.to_bits(),
     };
@@ -119,7 +120,7 @@ pub fn with_backdrop_blur_bgra<T>(
     BLUR_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if !cache.contains_key(&key) {
-            trace_blur_miss(rect, width, height, style.radius);
+            trace_blur_miss(rect, width, height, radius);
             let blurred =
                 with_blurred_source(style.source, source_rect, style.fit, style, |source| {
                     let crop_start = Instant::now();
@@ -127,7 +128,7 @@ pub fn with_backdrop_blur_bgra<T>(
                         &source.premultiplied_bgra,
                         source.width,
                         source.height,
-                        sample_rect,
+                        physical_rect_outward(sample_rect),
                         width,
                         height,
                     )?;
@@ -156,7 +157,7 @@ fn with_blurred_source<T>(
         source,
         fit,
         source_rect,
-        radius: style.radius,
+        radius: style.radius.ceil().max(0.0) as usize,
         tint: style.tint.0,
         tint_alpha_bits: style.tint_alpha.to_bits(),
     };
@@ -175,7 +176,7 @@ fn with_blurred_source<T>(
                 &mut blurred,
                 source.width as usize,
                 source.height as usize,
-                style.radius,
+                style.radius.ceil().max(0.0) as usize,
             );
             trace_duration("blur.source_box_blur", blur_start.elapsed());
             let tint_start = Instant::now();
@@ -220,11 +221,20 @@ fn with_source_raster<T>(
     })
 }
 
+fn physical_rect_outward(rect: UiRect) -> PhysicalRect {
+    PhysicalRect::new(
+        rect.left.floor() as i32,
+        rect.top.floor() as i32,
+        rect.right.ceil() as i32,
+        rect.bottom.ceil() as i32,
+    )
+}
+
 fn crop_bgra(
     source: &[u8],
     source_width: i32,
     source_height: i32,
-    rect: UiRect,
+    rect: PhysicalRect,
     width: i32,
     height: i32,
 ) -> Option<Vec<u8>> {
@@ -429,10 +439,10 @@ fn apply_tint(pixels: &mut [u8], color: lgui::core::Color, alpha: f32) {
 }
 
 fn hash_rect<H: Hasher>(rect: &UiRect, state: &mut H) {
-    rect.left.hash(state);
-    rect.top.hash(state);
-    rect.right.hash(state);
-    rect.bottom.hash(state);
+    rect.left.to_bits().hash(state);
+    rect.top.to_bits().hash(state);
+    rect.right.to_bits().hash(state);
+    rect.bottom.to_bits().hash(state);
 }
 
 fn trace_duration(label: &str, duration: std::time::Duration) {

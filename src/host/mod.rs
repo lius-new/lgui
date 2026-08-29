@@ -6,8 +6,8 @@ use std::time::Instant;
 use crate::{
     core::{
         compile_scene_root, patch_compositing_layer_spec, scene_root_ids, CompositingLayerSpec,
-        HostTree, InteractionFlags, Scene, ScenePrimitive, UiId, UiInteractionState, UiNode,
-        UiNodeKind, UiRect,
+        HostTree, InteractionFlags, Scene, ScenePrimitive, SemanticNode, SemanticUpdate, UiId,
+        UiInteractionState, UiNode, UiNodeKind, UiRect,
     },
     frame::{DirtyRegionSet, InvalidationRequest, InvalidationSet},
 };
@@ -94,6 +94,7 @@ pub struct HostCommit {
     pub damage: DamageReport,
     pub scene: Scene,
     pub metrics: HostCommitMetrics,
+    pub semantics: SemanticUpdate,
     #[cfg(feature = "diagnostics-timing")]
     pub(crate) timings: HostCommitTimings,
 }
@@ -160,6 +161,7 @@ pub struct HostRuntime {
     scene_order: Vec<HostNodeId>,
     scene_ranges: HashMap<HostNodeId, (usize, usize)>,
     composed_scene: Scene,
+    semantics: HashMap<UiId, SemanticNode>,
     initialized: bool,
 }
 
@@ -206,6 +208,9 @@ impl HostRuntime {
     ) -> HostCommit {
         #[cfg(feature = "diagnostics-timing")]
         let change_scan_started = Instant::now();
+        let semantic_changed = changes.changed.clone();
+        let semantic_removed = changes.removed.clone();
+        let semantic_full = !self.initialized;
         let mut mutations = Vec::new();
         let mut dirty_scene_sources = HashSet::new();
         let mut compositing_updates = HashMap::new();
@@ -408,6 +413,13 @@ impl HostRuntime {
         #[cfg(feature = "diagnostics-timing")]
         let damage_started = Instant::now();
         let damage = self.calculate_damage(viewport, &mutations, invalidations);
+        let semantics = self.reconcile_semantics(
+            tree,
+            semantic_changed,
+            semantic_removed,
+            interaction.focused.clone(),
+            semantic_full,
+        );
         #[cfg(feature = "diagnostics-timing")]
         let damage_ms = elapsed_ms(damage_started);
         #[cfg(feature = "diagnostics-timing")]
@@ -430,6 +442,7 @@ impl HostRuntime {
             damage,
             scene,
             metrics,
+            semantics,
             #[cfg(feature = "diagnostics-timing")]
             timings: HostCommitTimings {
                 change_scan_ms,
@@ -444,6 +457,38 @@ impl HostRuntime {
 
     pub fn clear(&mut self) {
         *self = Self::default();
+    }
+
+    fn reconcile_semantics(
+        &mut self,
+        tree: &HostTree,
+        changed: HashSet<UiId>,
+        removed: HashSet<UiId>,
+        focus: Option<UiId>,
+        full: bool,
+    ) -> SemanticUpdate {
+        for id in &removed {
+            self.semantics.remove(id);
+        }
+        let candidates: Vec<&UiNode> = if full {
+            tree.nodes().iter().map(|node| node.as_ref()).collect()
+        } else {
+            tree.changed_nodes(&changed)
+        };
+        let mut nodes = Vec::new();
+        for node in candidates {
+            let semantic = SemanticNode::from_ui_node(node);
+            if full || self.semantics.get(&node.id) != Some(&semantic) {
+                nodes.push(semantic.clone());
+            }
+            self.semantics.insert(node.id.clone(), semantic);
+        }
+        SemanticUpdate {
+            nodes,
+            removed: removed.into_iter().collect(),
+            focus,
+            full,
+        }
     }
 
     fn scene_owner_source(&self, id: HostNodeId) -> Option<UiId> {
@@ -775,10 +820,10 @@ impl HostRuntime {
             parent: None,
             children: Vec::new(),
             kind: UiNodeKind::Root,
-            layout_bounds: UiRect::new(0, 0, 0, 0),
-            paint_bounds: UiRect::new(0, 0, 0, 0),
+            layout_bounds: UiRect::new(0.0, 0.0, 0.0, 0.0),
+            paint_bounds: UiRect::new(0.0, 0.0, 0.0, 0.0),
             interaction: InteractionFlags::default(),
-            node: UiNode::new(source, UiNodeKind::Root, UiRect::new(0, 0, 0, 0)),
+            node: UiNode::new(source, UiNodeKind::Root, UiRect::new(0.0, 0.0, 0.0, 0.0)),
         });
         id
     }
@@ -951,7 +996,9 @@ fn elapsed_ms(started: Instant) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{CompositingLayerSpec, Point, UiNode, VisualStyle};
+    use crate::core::{
+        CompositingLayerSpec, Point, SemanticRole, Semantics, UiNode, VisualStyle,
+    };
 
     fn compositing_content_signature(scene: &Scene, id: &UiId) -> u64 {
         scene
@@ -984,15 +1031,56 @@ mod tests {
     }
 
     #[test]
+    fn semantics_only_updates_do_not_damage_visual_content() {
+        let mut host = HostRuntime::new();
+        let interaction = UiInteractionState::default();
+        let viewport = UiRect::new(0.0, 0.0, 200.0, 100.0);
+        let id = UiId::owned("semantic-only");
+        let tree = |name: &str| {
+            let mut tree = HostTree::new();
+            tree.push(
+                UiNode::new(
+                    id.clone(),
+                    UiNodeKind::Button,
+                    UiRect::new(10.0, 10.0, 90.0, 40.0),
+                )
+                .style(VisualStyle::filled(crate::core::Color::WHITE))
+                .semantics(Semantics::new(SemanticRole::Button).name(name)),
+            );
+            tree
+        };
+        host.commit(
+            &tree("Before"),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+        let commit = host.commit(
+            &tree("After"),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+
+        assert!(commit.damage.dirty.is_empty());
+        assert_eq!(commit.semantics.nodes.len(), 1);
+        assert_eq!(commit.semantics.nodes[0].semantics.name.as_deref(), Some("After"));
+    }
+
+    #[test]
     fn moving_a_node_damages_old_and_new_bounds_without_a_frame_snapshot() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 500, 500);
+        let viewport = UiRect::new(0.0, 0.0, 500.0, 500.0);
         let id = UiId::owned("moving");
         let mut first = HostTree::new();
         first.push(
-            UiNode::new(id.clone(), UiNodeKind::Panel, UiRect::new(10, 10, 40, 40))
-                .style(VisualStyle::default()),
+            UiNode::new(
+                id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(10.0, 10.0, 40.0, 40.0),
+            )
+            .style(VisualStyle::default()),
         );
         host.commit(&first, &interaction, viewport, &mut InvalidationSet::new());
 
@@ -1000,7 +1088,7 @@ mod tests {
         second.push(UiNode::new(
             id,
             UiNodeKind::Panel,
-            UiRect::new(100, 100, 130, 130),
+            UiRect::new(100.0, 100.0, 130.0, 130.0),
         ));
         let commit = host.commit(&second, &interaction, viewport, &mut InvalidationSet::new());
 
@@ -1018,7 +1106,7 @@ mod tests {
     fn moving_layer_damages_old_and_new_bounds_without_recompiling_siblings() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 400, 300);
+        let viewport = UiRect::new(0.0, 0.0, 400.0, 300.0);
         let layer_id = UiId::owned("moving-layer");
         let child_id = UiId::owned("moving-layer-child");
         let make_tree = |layer_rect: UiRect, child_rect: UiRect| {
@@ -1044,15 +1132,18 @@ mod tests {
         };
 
         host.commit(
-            &make_tree(UiRect::new(10, 20, 90, 100), UiRect::new(20, 30, 40, 50)),
+            &make_tree(
+                UiRect::new(10.0, 20.0, 90.0, 100.0),
+                UiRect::new(20.0, 30.0, 40.0, 50.0),
+            ),
             &interaction,
             viewport,
             &mut InvalidationSet::new(),
         );
         let commit = host.commit(
             &make_tree(
-                UiRect::new(200, 160, 280, 240),
-                UiRect::new(210, 170, 230, 190),
+                UiRect::new(200.0, 160.0, 280.0, 240.0),
+                UiRect::new(210.0, 170.0, 230.0, 190.0),
             ),
             &interaction,
             viewport,
@@ -1060,10 +1151,16 @@ mod tests {
         );
 
         let dirty = commit.damage.dirty.effective_rects();
-        assert!(dirty.iter().any(|rect| rect.contains(Point::new(20, 30))));
-        assert!(dirty.iter().any(|rect| rect.contains(Point::new(210, 170))));
+        assert!(dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(20.0, 30.0))));
+        assert!(dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(210.0, 170.0))));
         assert!(
-            !dirty.iter().any(|rect| rect.contains(Point::new(150, 130))),
+            !dirty
+                .iter()
+                .any(|rect| rect.contains(Point::new(150.0, 130.0))),
             "moving a retained layer must not dirty the area between old and new bounds"
         );
         assert_eq!(commit.metrics.reused_scene_nodes, 2);
@@ -1081,14 +1178,14 @@ mod tests {
     fn shrinking_a_transformed_layer_damages_pixels_outside_its_layout_rect() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 200, 200);
+        let viewport = UiRect::new(0.0, 0.0, 200.0, 200.0);
         let make_tree = |scale| {
             let mut tree = HostTree::new();
             tree.push(
                 UiNode::new(
                     UiId::owned("transformed-layer"),
                     UiNodeKind::CompositingLayer,
-                    UiRect::new(40, 40, 120, 120),
+                    UiRect::new(40.0, 40.0, 120.0, 120.0),
                 )
                 .compositing_layer(CompositingLayerSpec::new().scale(scale)),
             );
@@ -1096,7 +1193,7 @@ mod tests {
                 UiNode::new(
                     UiId::owned("transformed-child"),
                     UiNodeKind::Panel,
-                    UiRect::new(50, 50, 110, 110),
+                    UiRect::new(50.0, 50.0, 110.0, 110.0),
                 )
                 .parent(UiId::owned("transformed-layer"))
                 .style(VisualStyle::filled(crate::core::Color::WHITE)),
@@ -1118,15 +1215,19 @@ mod tests {
         );
 
         let dirty = commit.damage.dirty.effective_rects();
-        assert!(dirty.iter().any(|rect| rect.contains(Point::new(33, 80))));
-        assert!(dirty.iter().any(|rect| rect.contains(Point::new(80, 80))));
+        assert!(dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(33.0, 80.0))));
+        assert!(dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(80.0, 80.0))));
     }
 
     #[test]
     fn composition_only_update_patches_the_retained_scene_without_compiling_children() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 200, 200);
+        let viewport = UiRect::new(0.0, 0.0, 200.0, 200.0);
         let layer_id = UiId::owned("retained-transform-layer");
         let child_id = UiId::owned("retained-transform-child");
         let mut tree = HostTree::new();
@@ -1134,7 +1235,7 @@ mod tests {
             UiNode::new(
                 layer_id.clone(),
                 UiNodeKind::CompositingLayer,
-                UiRect::new(0, 0, 40, 40),
+                UiRect::new(0.0, 0.0, 40.0, 40.0),
             )
             .compositing_layer(CompositingLayerSpec::new()),
         );
@@ -1142,7 +1243,7 @@ mod tests {
             UiNode::new(
                 child_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(5, 5, 35, 35),
+                UiRect::new(5.0, 5.0, 35.0, 35.0),
             )
             .parent(layer_id.clone())
             .style(VisualStyle::filled(crate::core::Color::WHITE)),
@@ -1211,7 +1312,7 @@ mod tests {
     fn inserting_content_into_a_large_layer_keeps_window_damage_local() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 800, 600);
+        let viewport = UiRect::new(0.0, 0.0, 800.0, 600.0);
         let layer_id = UiId::owned("large-layer");
         let make_tree = |include_inserted: bool| {
             let mut tree = HostTree::new();
@@ -1223,7 +1324,7 @@ mod tests {
                 UiNode::new(
                     UiId::owned("stable-child"),
                     UiNodeKind::Panel,
-                    UiRect::new(20, 20, 80, 80),
+                    UiRect::new(20.0, 20.0, 80.0, 80.0),
                 )
                 .parent(layer_id.clone())
                 .style(VisualStyle::filled(crate::core::Color::WHITE)),
@@ -1233,7 +1334,7 @@ mod tests {
                     UiNode::new(
                         UiId::owned("inserted-child"),
                         UiNodeKind::Panel,
-                        UiRect::new(120, 100, 180, 160),
+                        UiRect::new(120.0, 100.0, 180.0, 160.0),
                     )
                     .parent(layer_id.clone())
                     .style(VisualStyle::filled(crate::core::Color::WHITE)),
@@ -1258,17 +1359,17 @@ mod tests {
         let damage = commit.damage.dirty.effective_rects();
         assert!(damage
             .iter()
-            .any(|rect| rect.contains(Point::new(140, 120))));
+            .any(|rect| rect.contains(Point::new(140.0, 120.0))));
         assert!(!damage
             .iter()
-            .any(|rect| rect.contains(Point::new(700, 500))));
+            .any(|rect| rect.contains(Point::new(700.0, 500.0))));
     }
 
     #[test]
     fn removing_and_reinserting_uses_a_new_generation() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 100, 100);
+        let viewport = UiRect::new(0.0, 0.0, 100.0, 100.0);
         let mut tree = HostTree::new();
         tree.push(UiNode::new(
             UiId::owned("node"),
@@ -1299,11 +1400,13 @@ mod tests {
         for iteration in 0..32 {
             let mut host = HostRuntime::new();
             let interaction = UiInteractionState::default();
-            let viewport = UiRect::new(0, 0, 100, 100);
+            let viewport = UiRect::new(0.0, 0.0, 100.0, 100.0);
             let parent = UiId::owned(format!("parent-{iteration}"));
             let child = UiId::owned(format!("child-{iteration}"));
             let mut tree = HostTree::new();
-            tree.push(UiNode::new(parent.clone(), UiNodeKind::Clip, viewport).clip(viewport, 0, 0));
+            tree.push(
+                UiNode::new(parent.clone(), UiNodeKind::Clip, viewport).clip(viewport, 0.0, 0.0),
+            );
             tree.push(
                 UiNode::new(child, UiNodeKind::Panel, viewport)
                     .parent(parent)
@@ -1333,7 +1436,7 @@ mod tests {
     fn paint_change_recompiles_only_its_retained_scene_root() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 200, 100);
+        let viewport = UiRect::new(0.0, 0.0, 200.0, 100.0);
         let first_id = UiId::owned("first");
         let second_id = UiId::owned("second");
         let make_tree = |first_fill| {
@@ -1342,7 +1445,7 @@ mod tests {
                 UiNode::new(
                     first_id.clone(),
                     UiNodeKind::Panel,
-                    UiRect::new(0, 0, 100, 100),
+                    UiRect::new(0.0, 0.0, 100.0, 100.0),
                 )
                 .style(VisualStyle::filled(first_fill)),
             );
@@ -1350,7 +1453,7 @@ mod tests {
                 UiNode::new(
                     second_id.clone(),
                     UiNodeKind::Panel,
-                    UiRect::new(100, 0, 200, 100),
+                    UiRect::new(100.0, 0.0, 200.0, 100.0),
                 )
                 .style(VisualStyle::filled(crate::core::Color::WHITE)),
             );
@@ -1384,7 +1487,7 @@ mod tests {
     fn nested_clip_change_recompiles_only_the_clip_scene_root() {
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 240, 120);
+        let viewport = UiRect::new(0.0, 0.0, 240.0, 120.0);
         let clip_id = UiId::owned("clip");
         let child_id = UiId::owned("clip-child");
         let sibling_id = UiId::owned("sibling");
@@ -1394,15 +1497,15 @@ mod tests {
                 UiNode::new(
                     clip_id.clone(),
                     UiNodeKind::Clip,
-                    UiRect::new(0, 0, 120, 120),
+                    UiRect::new(0.0, 0.0, 120.0, 120.0),
                 )
-                .clip(UiRect::new(0, 0, 120, 120), 0, 0),
+                .clip(UiRect::new(0.0, 0.0, 120.0, 120.0), 0.0, 0.0),
             );
             tree.push(
                 UiNode::new(
                     child_id.clone(),
                     UiNodeKind::Panel,
-                    UiRect::new(0, 0, 120, 120),
+                    UiRect::new(0.0, 0.0, 120.0, 120.0),
                 )
                 .parent(clip_id.clone())
                 .style(VisualStyle::filled(fill)),
@@ -1411,7 +1514,7 @@ mod tests {
                 UiNode::new(
                     sibling_id.clone(),
                     UiNodeKind::Panel,
-                    UiRect::new(120, 0, 240, 120),
+                    UiRect::new(120.0, 0.0, 240.0, 120.0),
                 )
                 .style(VisualStyle::filled(crate::core::Color::WHITE)),
             );
@@ -1446,15 +1549,15 @@ mod tests {
             UiNode::new(
                 clip_id.clone(),
                 UiNodeKind::Clip,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
-            .clip(UiRect::new(0, 0, 100, 100), 0, 0),
+            .clip(UiRect::new(0.0, 0.0, 100.0, 100.0), 0.0, 0.0),
         );
         tree.push(
             UiNode::new(
                 UiId::owned("clipped-content"),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .parent(clip_id.clone())
             .style(VisualStyle::filled(crate::core::Color::BLACK)),
@@ -1463,7 +1566,7 @@ mod tests {
             UiNode::new(
                 UiId::owned("popup"),
                 UiNodeKind::Panel,
-                UiRect::new(80, 80, 180, 180),
+                UiRect::new(80.0, 80.0, 180.0, 180.0),
             )
             .parent(clip_id)
             .render_phase(crate::core::RenderPhase::Popup)
@@ -1473,7 +1576,7 @@ mod tests {
         let commit = host.commit(
             &tree,
             &UiInteractionState::default(),
-            UiRect::new(0, 0, 200, 200),
+            UiRect::new(0.0, 0.0, 200.0, 200.0),
             &mut InvalidationSet::new(),
         );
 
@@ -1492,13 +1595,17 @@ mod tests {
         let mut tree = HostTree::new();
         for id in [&first_id, &popup_id, &last_id] {
             tree.push(
-                UiNode::new(id.clone(), UiNodeKind::Panel, UiRect::new(0, 0, 20, 20))
-                    .style(VisualStyle::filled(crate::core::Color::WHITE)),
+                UiNode::new(
+                    id.clone(),
+                    UiNodeKind::Panel,
+                    UiRect::new(0.0, 0.0, 20.0, 20.0),
+                )
+                .style(VisualStyle::filled(crate::core::Color::WHITE)),
             );
         }
         let mut host = HostRuntime::new();
         let interaction = UiInteractionState::default();
-        let viewport = UiRect::new(0, 0, 20, 20);
+        let viewport = UiRect::new(0.0, 0.0, 20.0, 20.0);
         let changes = tree.take_projection_changes();
         host.commit_projection(
             &tree,

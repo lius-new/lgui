@@ -17,6 +17,11 @@ use lgui::core::{
     StaticLayerSource, StaticLayerSpec, UiId, UiRect, VisualStyle,
 };
 use lgui::platform::win32::render_trace;
+use lgui::renderer::{StaticLayerMemoryCachePrefixStats, StaticLayerMemoryCacheStats};
+
+fn raster_length(value: f32) -> i32 {
+    value.ceil().max(1.0) as i32
+}
 
 fn static_layer_cache() -> &'static Mutex<StaticLayerMemoryCache> {
     static CACHE: OnceLock<Mutex<StaticLayerMemoryCache>> = OnceLock::new();
@@ -46,23 +51,6 @@ struct StaticLayerMemoryCache {
     misses: u64,
     stores: u64,
     evictions: u64,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct StaticLayerMemoryCacheStats {
-    pub entry_count: usize,
-    pub bytes: usize,
-    pub budget_bytes: usize,
-    pub hits: u64,
-    pub misses: u64,
-    pub stores: u64,
-    pub evictions: u64,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct StaticLayerMemoryCachePrefixStats {
-    pub entry_count: usize,
-    pub bytes: usize,
 }
 
 impl StaticLayerBitmap {
@@ -304,8 +292,8 @@ pub fn draw_static_layer<B: StaticLayerDrawBackend>(
 ) {
     let start = Instant::now();
     let draw_rect = rect.translate(spec.offset_x, spec.offset_y);
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     let key = static_layer_raster_cache::cache_key(id, spec, width, height, child_signature);
     let use_memory_cache = matches!(
         spec.cache_policy,
@@ -380,8 +368,8 @@ pub fn draw_static_layer_region<B: StaticLayerDrawBackend>(
 ) -> bool {
     let start = Instant::now();
     let draw_rect = rect.translate(spec.offset_x, spec.offset_y);
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     let key = static_layer_raster_cache::cache_key(id, spec, width, height, child_signature);
     let use_memory_cache = matches!(
         spec.cache_policy,
@@ -552,10 +540,10 @@ fn warm_scroll_raster_tile<B: StaticLayerDrawBackend>(
 }
 
 fn scroll_raster_tile_rect(viewport: UiRect, spec: &ScrollRasterSpec, tile_index: usize) -> UiRect {
-    let tile_height = spec.tile_height_px.max(1);
-    let top = viewport.top + (tile_index as i32 * tile_height);
+    let tile_height = spec.tile_height_px.max(1.0);
+    let top = viewport.top + tile_index as f32 * tile_height;
     let bottom = (top + tile_height).min(viewport.top + spec.content_height);
-    UiRect::new(viewport.left, top, viewport.right, bottom.max(top + 1))
+    UiRect::new(viewport.left, top, viewport.right, bottom.max(top + 1.0))
 }
 
 fn scroll_raster_tile_id(id: &UiId, tile_index: usize) -> UiId {
@@ -571,7 +559,7 @@ fn scroll_raster_tile_spec(spec: &ScrollRasterSpec, opacity: u8) -> StaticLayerS
     StaticLayerSpec::new(StaticLayerSource::runtime())
         .cache_policy(StaticLayerCachePolicy::Memory)
         .memory_budget_bytes(spec.memory_budget_bytes)
-        .paint_offset(0, -spec.scroll_y)
+        .paint_offset(0.0, -spec.scroll_y)
         .opacity(opacity as f32 / 255.0)
         .revision("scroll-raster-height-tile-v1")
         .background(background)
@@ -601,8 +589,8 @@ fn scroll_raster_tile_cache_key(
     static_layer_raster_cache::cache_key(
         id,
         spec,
-        rect.width().max(1),
-        rect.height().max(1),
+        raster_length(rect.width()),
+        raster_length(rect.height()),
         scroll_raster_tile_signature(raster_spec, child_signature),
     )
 }
@@ -610,8 +598,8 @@ fn scroll_raster_tile_cache_key(
 fn scroll_raster_tile_signature(spec: &ScrollRasterSpec, child_signature: u64) -> u64 {
     let mut hasher = DefaultHasher::new();
     spec.cache_epoch.hash(&mut hasher);
-    spec.tile_height_px.hash(&mut hasher);
-    spec.content_height.hash(&mut hasher);
+    spec.tile_height_px.to_bits().hash(&mut hasher);
+    spec.content_height.to_bits().hash(&mut hasher);
     spec.background_fill.hash(&mut hasher);
     child_signature.hash(&mut hasher);
     hasher.finish()
@@ -647,11 +635,11 @@ fn render_static_layer_bitmap<B: StaticLayerDrawBackend>(
     spec: &StaticLayerSpec,
     commands: &[ScenePrimitive],
 ) -> Option<StaticLayerBitmap> {
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
     B::with_dib_section(hdc, width, height, |memory_dc, bits| {
         B::clear_alpha_buffer(bits, width, height);
-        let local_rect = UiRect::new(0, 0, width, height);
+        let local_rect = UiRect::new(0.0, 0.0, width as f32, height as f32);
         match &spec.source {
             StaticLayerSource::BakedAsset { key, fit } => {
                 draw_image(memory_dc, local_rect, key, *fit);
@@ -700,7 +688,7 @@ impl From<&StaticLayerBitmap> for StaticLayerRaster {
     }
 }
 
-fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimitive {
+fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> ScenePrimitive {
     let translate_rect = |rect: UiRect| {
         UiRect::new(
             rect.left + dx,
@@ -945,7 +933,7 @@ fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimiti
     }
 }
 
-fn translate_path(path: &lgui::core::UiPath, dx: i32, dy: i32) -> lgui::core::UiPath {
+fn translate_path(path: &lgui::core::UiPath, dx: f32, dy: f32) -> lgui::core::UiPath {
     use lgui::core::{Point, UiPath, UiPathCommand};
 
     let translate = |point: Point| Point::new(point.x + dx, point.y + dy);
@@ -1007,7 +995,7 @@ fn blit_cached_static_layer<B: StaticLayerDrawBackend>(
             hdc,
             key,
             rect,
-            UiRect::new(0, 0, bitmap.width, bitmap.height),
+            UiRect::new(0.0, 0.0, bitmap.width as f32, bitmap.height as f32),
             bitmap.width,
             bitmap.height,
             &bitmap.pixels,

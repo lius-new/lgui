@@ -25,7 +25,7 @@ impl Win32NotificationService {
     }
 }
 
-pub(super) fn initialize_process_identity(app_user_model_id: &str) -> io::Result<()> {
+pub(crate) fn initialize_process_identity(app_user_model_id: &str) -> io::Result<()> {
     unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(app_user_model_id)) }
         .map_err(windows_error)
 }

@@ -43,11 +43,10 @@ use windows::{
 };
 
 use super::{
-    blur::with_backdrop_blur_bgra, custom_paint::custom_paint_bgra, image,
-    static_layer_raster_cache,
+    blur::with_backdrop_blur_bgra, image, static_layer_raster_cache,
 };
 use lgui::core::{
-    compositing_layer_damage, Color, CompositingLayerBackground, CustomPaintStyle, IconStyle,
+    compositing_layer_damage, Color, CompositingLayerBackground, IconStyle,
     ImageFit, LayerTransform, OverlayStyle, PathStyle, Scene, ScenePrimitive,
     StaticLayerBackground, StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke,
     TextAlign, UiId, UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
@@ -67,6 +66,14 @@ pub struct D2dRenderer {
 
 const D2D_BITMAP_CACHE_MIN_BUDGET_BYTES: usize = 32 * 1024 * 1024;
 const D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER: usize = 4;
+
+fn raster_length(value: f32) -> i32 {
+    value.ceil().max(1.0) as i32
+}
+
+fn raster_size(rect: UiRect) -> (i32, i32) {
+    (raster_length(rect.width()), raster_length(rect.height()))
+}
 
 fn d2d_bitmap_cache_budget(width: i32, height: i32) -> usize {
     (width.max(1) as usize)
@@ -390,8 +397,7 @@ impl D2dRenderer {
                 content_signature,
                 ..
             } => {
-                let width = rect.width().max(1);
-                let height = rect.height().max(1);
+                let (width, height) = raster_size(*rect);
                 let previous = self.compositing_layers.remove(id);
                 let mut layer = match previous {
                     Some(layer)
@@ -407,7 +413,7 @@ impl D2dRenderer {
                     for command in commands {
                         self.ensure_static_layer_command(command, None)?;
                     }
-                    let bounds = UiRect::new(0, 0, width, height);
+                    let bounds = UiRect::new(0.0, 0.0, width as f32, height as f32);
                     let damage = if layer.commands.is_empty() {
                         vec![bounds]
                     } else {
@@ -439,8 +445,8 @@ impl D2dRenderer {
                 let cache_key = static_layer_cache_key(
                     id,
                     spec,
-                    rect.width().max(1),
-                    rect.height().max(1),
+                    raster_length(rect.width()),
+                    raster_length(rect.height()),
                     *child_signature,
                 );
                 if spec.cache_policy == StaticLayerCachePolicy::Disabled {
@@ -483,7 +489,7 @@ impl D2dRenderer {
                     .or(Some(*viewport));
                 let translated = commands
                     .iter()
-                    .map(|command| translate_command(command, 0, -spec.scroll_y))
+                    .map(|command| translate_command(command, 0.0, -spec.scroll_y))
                     .collect::<Vec<_>>();
                 for command in &translated {
                     self.ensure_static_layer_command(command, nested_clip)?;
@@ -554,7 +560,7 @@ fn collect_bitmap_cache_keys(commands: &[ScenePrimitive], keys: &mut HashSet<D2d
             } => {
                 if let Some((source, fit)) = pure_static_layer_image(spec, commands) {
                     keys.insert(image_cache_key(
-                        UiRect::new(0, 0, rect.width().max(1), rect.height().max(1)),
+                        UiRect::new(0.0, 0.0, rect.width(), rect.height()),
                         &UiImageSource::Static(source),
                         fit,
                     ));
@@ -564,8 +570,8 @@ fn collect_bitmap_cache_keys(commands: &[ScenePrimitive], keys: &mut HashSet<D2d
                     keys.insert(static_layer_cache_key(
                         id,
                         spec,
-                        rect.width().max(1),
-                        rect.height().max(1),
+                        raster_length(rect.width()),
+                        raster_length(rect.height()),
                         *child_signature,
                     ));
                 }
@@ -704,7 +710,18 @@ fn draw_command_d2d(resources: &mut D2dRenderer, command: &ScenePrimitive) -> Re
             rect, key, style, ..
         } => {
             if let Some(style) = style {
-                draw_custom_effect(resources, *rect, key, *style)
+                let provider = crate::assets::render_resources().custom_paint().cloned();
+                if let Some(provider) = provider {
+                    if let Some(fragment) = provider.record(key, *rect, *style).map_err(|error| {
+                        Error::new(HRESULT(0x80004005_u32 as i32), error.to_string())
+                    })? {
+                        draw_commands_d2d(resources, fragment.commands(), Some(*rect))
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    Ok(())
+                }
             } else {
                 Ok(())
             }
@@ -731,7 +748,7 @@ fn draw_command_d2d(resources: &mut D2dRenderer, command: &ScenePrimitive) -> Re
             }
             let translated = commands
                 .iter()
-                .map(|command| translate_command(command, 0, -spec.scroll_y))
+                .map(|command| translate_command(command, 0.0, -spec.scroll_y))
                 .collect::<Vec<_>>();
             let result = draw_commands_d2d(resources, &translated, Some(*viewport));
             unsafe {
@@ -797,7 +814,7 @@ fn draw_rect(context: &ID2D1DeviceContext, rect: UiRect, style: VisualStyle) -> 
     unsafe {
         if let Some(fill) = style.fill {
             let brush = solid_brush(context, fill, style.fill_alpha)?;
-            if style.radius > 0 {
+            if style.radius > 0.0 {
                 let rounded = rounded_rect(rect, style.radius);
                 context.FillRoundedRectangle(&rounded, &brush);
             } else {
@@ -807,12 +824,12 @@ fn draw_rect(context: &ID2D1DeviceContext, rect: UiRect, style: VisualStyle) -> 
         }
         if let Some(stroke) = style.stroke {
             let brush = solid_brush(context, stroke.color, stroke.alpha)?;
-            if style.radius > 0 {
+            if style.radius > 0.0 {
                 let rounded = rounded_rect(rect, style.radius);
-                context.DrawRoundedRectangle(&rounded, &brush, stroke.width as f32, None);
+                context.DrawRoundedRectangle(&rounded, &brush, stroke.width, None);
             } else {
                 let rect = d2d_rect(rect);
-                context.DrawRectangle(&rect, &brush, stroke.width as f32, None);
+                context.DrawRectangle(&rect, &brush, stroke.width, None);
             }
         }
     }
@@ -822,11 +839,11 @@ fn draw_rect(context: &ID2D1DeviceContext, rect: UiRect, style: VisualStyle) -> 
 fn draw_ellipse(context: &ID2D1DeviceContext, rect: UiRect, style: VisualStyle) -> Result<()> {
     let ellipse = D2D1_ELLIPSE {
         point: windows_numerics::Vector2 {
-            X: (rect.left + rect.right) as f32 / 2.0,
-            Y: (rect.top + rect.bottom) as f32 / 2.0,
+            X: (rect.left + rect.right) / 2.0,
+            Y: (rect.top + rect.bottom) / 2.0,
         },
-        radiusX: rect.width() as f32 / 2.0,
-        radiusY: rect.height() as f32 / 2.0,
+        radiusX: rect.width() / 2.0,
+        radiusY: rect.height() / 2.0,
     };
     unsafe {
         if let Some(fill) = style.fill {
@@ -835,7 +852,7 @@ fn draw_ellipse(context: &ID2D1DeviceContext, rect: UiRect, style: VisualStyle) 
         }
         if let Some(stroke) = style.stroke {
             let brush = solid_brush(context, stroke.color, stroke.alpha)?;
-            context.DrawEllipse(&ellipse, &brush, stroke.width as f32, None);
+            context.DrawEllipse(&ellipse, &brush, stroke.width, None);
         }
     }
     Ok(())
@@ -853,9 +870,9 @@ fn draw_path(context: &ID2D1DeviceContext, path: &UiPath, style: PathStyle) -> R
             context.FillGeometry(&geometry, &brush, None);
         }
         if let Some(stroke) = style.stroke {
-            if stroke.alpha != 0 && stroke.width > 0 {
+            if stroke.alpha != 0 && stroke.width > 0.0 {
                 let brush = solid_brush(context, stroke.color, stroke.alpha)?;
-                context.DrawGeometry(&geometry, &brush, stroke.width as f32, None);
+                context.DrawGeometry(&geometry, &brush, stroke.width, None);
             }
         }
     }
@@ -973,11 +990,12 @@ fn draw_image(
 }
 
 fn image_cache_key(rect: UiRect, source: &UiImageSource, fit: ImageFit) -> D2dBitmapCacheKey {
+    let (width, height) = raster_size(rect);
     D2dBitmapCacheKey::Image {
         source: source.clone(),
         fit,
-        width: rect.width().max(1),
-        height: rect.height().max(1),
+        width,
+        height,
     }
 }
 
@@ -1034,12 +1052,13 @@ fn draw_icon(
 }
 
 fn icon_cache_key(rect: UiRect, key: &'static str, style: IconStyle) -> D2dBitmapCacheKey {
+    let (width, height) = raster_size(rect);
     D2dBitmapCacheKey::Icon {
         key,
         color: style.color.0,
         alpha: style.alpha,
-        width: rect.width().max(1),
-        height: rect.height().max(1),
+        width,
+        height,
     }
 }
 
@@ -1115,10 +1134,9 @@ fn draw_static_layer(
     child_signature: u64,
 ) -> Result<()> {
     let draw_rect = rect.translate(spec.offset_x, spec.offset_y);
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let (width, height) = raster_size(rect);
     if let Some((source, fit)) = pure_static_layer_image(spec, commands) {
-        let local_rect = UiRect::new(0, 0, width, height);
+        let local_rect = UiRect::new(0.0, 0.0, width as f32, height as f32);
         if let Some(bitmap) =
             image_bitmap(resources, local_rect, &UiImageSource::Static(source), fit)?
         {
@@ -1179,8 +1197,7 @@ fn render_static_layer_bitmap(
         }
     }
 
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
+    let (width, height) = raster_size(rect);
     let bitmap = create_scene_bitmap(&resources.context, width, height)?;
     unsafe {
         resources.context.SetTarget(&bitmap);
@@ -1189,7 +1206,7 @@ fn render_static_layer_bitmap(
             .context
             .Clear(Some(&static_layer_clear_color(spec)));
     }
-    let local_rect = UiRect::new(0, 0, width, height);
+    let local_rect = UiRect::new(0.0, 0.0, width as f32, height as f32);
     match &spec.source {
         StaticLayerSource::BakedAsset { key, fit } => {
             draw_image(resources, local_rect, &UiImageSource::Static(key), *fit)?;
@@ -1214,7 +1231,7 @@ fn render_static_layer_bitmap(
     Ok(bitmap)
 }
 
-fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimitive {
+fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> ScenePrimitive {
     let translate_rect = |rect: UiRect| {
         UiRect::new(
             rect.left + dx,
@@ -1459,7 +1476,7 @@ fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimiti
     }
 }
 
-fn translate_path(path: &UiPath, dx: i32, dy: i32) -> UiPath {
+fn translate_path(path: &UiPath, dx: f32, dy: f32) -> UiPath {
     use lgui::core::Point;
 
     let translate = |point: Point| Point::new(point.x + dx, point.y + dy);
@@ -1481,30 +1498,6 @@ fn translate_path(path: &UiPath, dx: i32, dy: i32) -> UiPath {
         },
         UiPathCommand::Close => UiPathCommand::Close,
     }))
-}
-
-fn draw_custom_effect(
-    resources: &mut D2dRenderer,
-    rect: UiRect,
-    key_name: &'static str,
-    style: CustomPaintStyle,
-) -> Result<()> {
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
-    // Custom paint can be animation-frame dependent. Do not store these bitmaps in the
-    // long-lived D2D bitmap cache; cache only stable assets/layers with reusable keys.
-    let raster_start = Instant::now();
-    let Some(pixels) = custom_paint_bgra(key_name, width, height, style) else {
-        return Ok(());
-    };
-    trace_custom_duration("d2d.draw_custom.raster", key_name, raster_start.elapsed());
-    let bitmap_start = Instant::now();
-    let bitmap = create_bgra_bitmap(&resources.context, width, height, &pixels)?;
-    trace_custom_duration("d2d.draw_custom.bitmap", key_name, bitmap_start.elapsed());
-    let draw_start = Instant::now();
-    draw_bitmap(&resources.context, rect, &bitmap);
-    trace_custom_duration("d2d.draw_custom.draw", key_name, draw_start.elapsed());
-    Ok(())
 }
 
 fn draw_overlay(resources: &mut D2dRenderer, rect: UiRect, style: &OverlayStyle) -> Result<()> {
@@ -1537,8 +1530,8 @@ fn ensure_overlay_brush_set(
         return Ok(key);
     }
 
-    let width = rect.width().max(1) as f32;
-    let height = rect.height().max(1) as f32;
+    let width = rect.width().max(1.0);
+    let height = rect.height().max(1.0);
     let mut linear = Vec::with_capacity(style.vertical_layers.len());
     let mut radial = Vec::with_capacity(style.radial_layers.len());
     unsafe {
@@ -1671,10 +1664,11 @@ fn backdrop_blur_cache_key(
     rect: UiRect,
     style: lgui::core::BackdropBlurStyle,
 ) -> D2dBitmapCacheKey {
+    let (width, height) = raster_size(rect);
     D2dBitmapCacheKey::BackdropBlur {
         signature: backdrop_blur_signature(rect, style),
-        width: rect.width().max(1),
-        height: rect.height().max(1),
+        width,
+        height,
     }
 }
 
@@ -1823,7 +1817,7 @@ fn mask_polygon(
 ) {
     for y in 0..height {
         for x in 0..width {
-            if !point_in_polygon(rect.left + x, rect.top + y, points) {
+            if !point_in_polygon(rect.left + x as f32, rect.top + y as f32, points) {
                 let index = ((y * width + x) * 4) as usize;
                 pixels[index..index + 4].fill(0);
             }
@@ -1831,16 +1825,15 @@ fn mask_polygon(
     }
 }
 
-fn point_in_polygon(x: i32, y: i32, points: &[lgui::core::Point]) -> bool {
+fn point_in_polygon(x: f32, y: f32, points: &[lgui::core::Point]) -> bool {
     let mut inside = false;
     let mut previous = points.len() - 1;
     for current in 0..points.len() {
         let a = points[current];
         let b = points[previous];
         if (a.y > y) != (b.y > y) {
-            let intersection_x =
-                (b.x - a.x) as f32 * (y - a.y) as f32 / (b.y - a.y) as f32 + a.x as f32;
-            if (x as f32) < intersection_x {
+            let intersection_x = (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x;
+            if x < intersection_x {
                 inside = !inside;
             }
         }
@@ -1854,15 +1847,15 @@ fn backdrop_blur_signature(rect: UiRect, style: lgui::core::BackdropBlurStyle) -
     "backdrop-blur-bitmap".hash(&mut hasher);
     style.source.hash(&mut hasher);
     style.fit.hash(&mut hasher);
-    rect.left.hash(&mut hasher);
-    rect.top.hash(&mut hasher);
-    rect.right.hash(&mut hasher);
-    rect.bottom.hash(&mut hasher);
-    style.source_rect.left.hash(&mut hasher);
-    style.source_rect.top.hash(&mut hasher);
-    style.source_rect.right.hash(&mut hasher);
-    style.source_rect.bottom.hash(&mut hasher);
-    style.radius.hash(&mut hasher);
+    rect.left.to_bits().hash(&mut hasher);
+    rect.top.to_bits().hash(&mut hasher);
+    rect.right.to_bits().hash(&mut hasher);
+    rect.bottom.to_bits().hash(&mut hasher);
+    style.source_rect.left.to_bits().hash(&mut hasher);
+    style.source_rect.top.to_bits().hash(&mut hasher);
+    style.source_rect.right.to_bits().hash(&mut hasher);
+    style.source_rect.bottom.to_bits().hash(&mut hasher);
+    style.radius.to_bits().hash(&mut hasher);
     style.tint.0.hash(&mut hasher);
     style.tint_alpha.to_bits().hash(&mut hasher);
     hasher.finish()
@@ -1889,7 +1882,7 @@ fn draw_text(
             DWRITE_FONT_WEIGHT(style.weight),
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            style.height.unsigned_abs() as f32,
+            style.height.abs(),
             &locale,
         )?
     };
@@ -1907,14 +1900,14 @@ fn draw_text(
         let layout = dwrite_factory.CreateTextLayout(
             &text_wide,
             &format,
-            rect.width().max(1) as f32,
-            rect.height().max(1) as f32,
+            rect.width().max(1.0),
+            rect.height().max(1.0),
         )?;
-        if style.tracking != 0 {
+        if style.tracking != 0.0 {
             if let Ok(layout1) = layout.cast::<IDWriteTextLayout1>() {
                 layout1.SetCharacterSpacing(
                     0.0,
-                    style.tracking as f32,
+                    style.tracking,
                     0.0,
                     DWRITE_TEXT_RANGE {
                         startPosition: 0,
@@ -1926,9 +1919,8 @@ fn draw_text(
 
         let mut metrics = DWRITE_TEXT_METRICS::default();
         layout.GetMetrics(&mut metrics)?;
-        let x = rect.left as f32;
-        let y =
-            (rect.top as f32 + ((rect.height() as f32 - metrics.height).max(0.0) / 2.0)).round();
+        let x = rect.left;
+        let y = rect.top + ((rect.height() - metrics.height).max(0.0) / 2.0);
         context.DrawTextLayout(
             windows_numerics::Vector2 { X: x, Y: y },
             &layout,
@@ -1949,25 +1941,22 @@ fn solid_brush(
 
 fn d2d_rect(rect: UiRect) -> D2D_RECT_F {
     D2D_RECT_F {
-        left: rect.left as f32,
-        top: rect.top as f32,
-        right: rect.right as f32,
-        bottom: rect.bottom as f32,
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
     }
 }
 
-fn vector2(x: i32, y: i32) -> windows_numerics::Vector2 {
-    windows_numerics::Vector2 {
-        X: x as f32,
-        Y: y as f32,
-    }
+fn vector2(x: f32, y: f32) -> windows_numerics::Vector2 {
+    windows_numerics::Vector2 { X: x, Y: y }
 }
 
-fn rounded_rect(rect: UiRect, radius: i32) -> D2D1_ROUNDED_RECT {
+fn rounded_rect(rect: UiRect, radius: f32) -> D2D1_ROUNDED_RECT {
     D2D1_ROUNDED_RECT {
         rect: d2d_rect(rect),
-        radiusX: radius as f32,
-        radiusY: radius as f32,
+        radiusX: radius,
+        radiusY: radius,
     }
 }
 
@@ -2090,7 +2079,7 @@ fn trace_d2d_regions(label: &str, rects: Option<&[UiRect]>) {
         Some(rects) => {
             let area: i64 = rects
                 .iter()
-                .map(|rect| rect.width().max(0) as i64 * rect.height().max(0) as i64)
+                .map(|rect| rect.width().max(0.0) as i64 * rect.height().max(0.0) as i64)
                 .sum();
             eprintln!(
                 "[ui-trace] {label}: rects={} area={} rect_list={:?}",
@@ -2127,7 +2116,7 @@ mod tests {
 
     #[test]
     fn d2d_matrix_matches_backend_neutral_layer_transform() {
-        let rect = UiRect::new(10, 20, 30, 60);
+        let rect = UiRect::new(10.0, 20.0, 30.0, 60.0);
         let transform = LayerTransform::identity()
             .scale_xy(2.0, 1.0)
             .rotation_degrees(90.0)
@@ -2149,17 +2138,17 @@ mod tests {
     #[test]
     fn bitmap_cache_budget_evicts_oldest_entries_and_keeps_one_oversized_entry() {
         let first = image_cache_key(
-            UiRect::new(0, 0, 10, 10),
+            UiRect::new(0.0, 0.0, 10.0, 10.0),
             &UiImageSource::Static("first"),
             ImageFit::Fill,
         );
         let second = image_cache_key(
-            UiRect::new(0, 0, 20, 10),
+            UiRect::new(0.0, 0.0, 20.0, 10.0),
             &UiImageSource::Static("second"),
             ImageFit::Fill,
         );
         let third = image_cache_key(
-            UiRect::new(0, 0, 30, 10),
+            UiRect::new(0.0, 0.0, 30.0, 10.0),
             &UiImageSource::Static("third"),
             ImageFit::Fill,
         );
@@ -2204,7 +2193,7 @@ mod tests {
 
     #[test]
     fn overlay_brush_cache_reachability_tracks_style_and_rect() {
-        let rect = UiRect::new(0, 0, 320, 180);
+        let rect = UiRect::new(0.0, 0.0, 320.0, 180.0);
         let style = OverlayStyle::new()
             .vertical(lgui::core::VerticalGradientLayer::new(
                 Color(0x112233),
@@ -2229,7 +2218,8 @@ mod tests {
         assert_eq!(keys.len(), 1);
         assert!(keys.contains(&overlay_brush_cache_key(rect, &style)));
 
-        let moved_keys = overlay_brush_cache_keys(&[overlay(rect.translate(10, 0), style.clone())]);
+        let moved_keys =
+            overlay_brush_cache_keys(&[overlay(rect.translate(10.0, 0.0), style.clone())]);
         let changed_style = style.radial(lgui::core::RadialGradientLayer::new(
             Color(0x778899),
             0.3,
@@ -2245,7 +2235,7 @@ mod tests {
 
     #[test]
     fn transparent_pure_image_static_layer_reuses_the_image_cache_key() {
-        let rect = UiRect::new(0, 0, 320, 180);
+        let rect = UiRect::new(0.0, 0.0, 320.0, 180.0);
         let spec = StaticLayerSpec::new(StaticLayerSource::hybrid(
             Some("background"),
             ImageFit::Cover,
@@ -2272,7 +2262,7 @@ mod tests {
 
         assert_eq!(keys.len(), 1);
         assert!(keys.contains(&image_cache_key(
-            UiRect::new(0, 0, rect.width(), rect.height()),
+            UiRect::new(0.0, 0.0, rect.width(), rect.height()),
             &UiImageSource::Static("background"),
             ImageFit::Cover,
         )));
@@ -2287,7 +2277,7 @@ mod tests {
     fn bitmap_cache_reachability_replaces_keys_from_the_previous_scene() {
         let image = |name| ScenePrimitive::Image {
             id: UiId::owned(format!("{name}-image")),
-            rect: UiRect::new(0, 0, 64, 64),
+            rect: UiRect::new(0.0, 0.0, 64.0, 64.0),
             source: UiImageSource::Static(name),
             fit: ImageFit::Cover,
             phase: lgui::core::RenderPhase::Content,
@@ -2300,7 +2290,7 @@ mod tests {
         assert_eq!(lobby_keys.len(), 1);
         assert!(login_keys.is_disjoint(&lobby_keys));
         assert!(lobby_keys.contains(&image_cache_key(
-            UiRect::new(0, 0, 64, 64),
+            UiRect::new(0.0, 0.0, 64.0, 64.0),
             &UiImageSource::Static("lobby"),
             ImageFit::Cover,
         )));

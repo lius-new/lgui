@@ -5,7 +5,7 @@ use super::{
     CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, RenderPhase,
     ScrollRasterSpec, StaticLayerSpec, TextStyle, UiAction, UiActionBinding, UiActionHandler,
     UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId, UiInputEventBinding,
-    UiInputEventHandler, UiPath, UiRect, VisualStyle,
+    UiInputEventHandler, UiPath, UiRect, VisualStyle, Semantics,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +66,10 @@ impl UiImageSource {
         Self::File(path.into())
     }
 
+    pub fn url(url: impl Into<String>) -> Self {
+        Self::Url(url.into())
+    }
+
     pub fn bytes(key: impl Into<String>, version: u64, bytes: impl Into<Arc<Vec<u8>>>) -> Self {
         Self::Bytes {
             key: key.into(),
@@ -112,6 +116,7 @@ pub struct UiNode {
     pub hit_rect: UiRect,
     pub paint_bounds: UiRect,
     pub interaction: InteractionRole,
+    pub semantics: Option<Semantics>,
     pub click_capture_handler: Option<UiEventHandler>,
     pub click_handler: Option<UiEventHandler>,
     pub input_event_handlers: Vec<UiInputEventBinding>,
@@ -124,7 +129,7 @@ pub struct UiNode {
     pub focus_scope: bool,
     pub animation_bindings: Vec<AnimationBinding>,
     pub animation_targets: Vec<(super::AnimProperty, bool)>,
-    pub animation_outset: (i32, i32),
+    pub animation_outset: (f32, f32),
     pub layout: LayoutSpec,
     pub style: VisualStyle,
     pub path: Option<UiPath>,
@@ -141,7 +146,7 @@ pub struct UiNode {
     pub static_layer: Option<StaticLayerSpec>,
     pub scroll_raster: Option<ScrollRasterSpec>,
     pub clip_rect: Option<UiRect>,
-    pub content_offset: (i32, i32),
+    pub content_offset: (f32, f32),
     pub text: Option<Cow<'static, str>>,
     pub text_style: Option<TextStyle>,
     pub render_phase: RenderPhase,
@@ -159,6 +164,7 @@ impl UiNode {
             hit_rect: layout_rect,
             paint_bounds: layout_rect,
             interaction: InteractionRole::None,
+            semantics: None,
             click_capture_handler: None,
             click_handler: None,
             input_event_handlers: Vec::new(),
@@ -171,7 +177,7 @@ impl UiNode {
             focus_scope: false,
             animation_bindings: Vec::new(),
             animation_targets: Vec::new(),
-            animation_outset: (0, 0),
+            animation_outset: (0.0, 0.0),
             layout: LayoutSpec::default(),
             style: VisualStyle::default(),
             path: None,
@@ -188,7 +194,7 @@ impl UiNode {
             static_layer: None,
             scroll_raster: None,
             clip_rect: None,
-            content_offset: (0, 0),
+            content_offset: (0.0, 0.0),
             text: None,
             text_style: None,
             render_phase: RenderPhase::Content,
@@ -203,6 +209,7 @@ impl UiNode {
             && self.hit_rect == other.hit_rect
             && self.paint_bounds == other.paint_bounds
             && self.interaction == other.interaction
+            && self.semantics == other.semantics
             && self.event_policy == other.event_policy
             && self.auto_focus == other.auto_focus
             && self.focus_scope == other.focus_scope
@@ -254,6 +261,11 @@ impl UiNode {
         self
     }
 
+    pub fn semantics(mut self, semantics: Semantics) -> Self {
+        self.semantics = Some(semantics);
+        self
+    }
+
     pub fn on_click<F>(self, handler: F) -> Self
     where
         F: Fn(&mut UiEventContext) + Send + Sync + 'static,
@@ -300,6 +312,7 @@ impl UiNode {
                 self.event_policy.press = true;
             }
             UiEventKind::KeyDown
+            | UiEventKind::KeyUp
             | UiEventKind::Input
             | UiEventKind::CompositionStart
             | UiEventKind::CompositionUpdate
@@ -381,7 +394,7 @@ impl UiNode {
         self
     }
 
-    pub fn animation_outset(mut self, x: i32, y: i32) -> Self {
+    pub fn animation_outset(mut self, x: f32, y: f32) -> Self {
         self.animation_outset = (x, y);
         self
     }
@@ -456,12 +469,12 @@ impl UiNode {
 
     pub fn scroll_raster(mut self, spec: ScrollRasterSpec) -> Self {
         self.clip_rect = Some(self.layout_rect);
-        self.content_offset = (0, -spec.scroll_y);
+        self.content_offset = (0.0, -spec.scroll_y);
         self.scroll_raster = Some(spec);
         self
     }
 
-    pub fn clip(mut self, rect: UiRect, offset_x: i32, offset_y: i32) -> Self {
+    pub fn clip(mut self, rect: UiRect, offset_x: f32, offset_y: f32) -> Self {
         self.clip_rect = Some(rect);
         self.content_offset = (offset_x, offset_y);
         self
@@ -472,7 +485,7 @@ impl UiNode {
         self
     }
 
-    pub fn translate(mut self, x: i32, y: i32) -> Self {
+    pub fn translate(mut self, x: f32, y: f32) -> Self {
         self.layout_rect = self.layout_rect.translate(x, y);
         self.hit_rect = self.hit_rect.translate(x, y);
         self.paint_bounds = self.paint_bounds.translate(x, y);
@@ -482,7 +495,7 @@ impl UiNode {
     }
 }
 
-fn translate_path(path: &UiPath, x: i32, y: i32) -> UiPath {
+fn translate_path(path: &UiPath, x: f32, y: f32) -> UiPath {
     let translate = |point: super::Point| super::Point::new(point.x + x, point.y + y);
     UiPath::new(path.commands().iter().map(|command| match *command {
         super::UiPathCommand::MoveTo(point) => super::UiPathCommand::MoveTo(translate(point)),

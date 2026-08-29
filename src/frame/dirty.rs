@@ -4,7 +4,7 @@ use crate::core::UiRect;
 pub struct DirtyStrategy {
     pub max_rects: usize,
     pub full_area_ratio: f32,
-    pub dirty_outset: i32,
+    pub dirty_outset: f32,
 }
 
 impl Default for DirtyStrategy {
@@ -12,7 +12,7 @@ impl Default for DirtyStrategy {
         Self {
             max_rects: 12,
             full_area_ratio: 0.90,
-            dirty_outset: 2,
+            dirty_outset: 2.0,
         }
     }
 }
@@ -67,7 +67,7 @@ impl DirtyRegionSet {
         else {
             return;
         };
-        if rect.width() <= 0 || rect.height() <= 0 {
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
             return;
         }
 
@@ -110,7 +110,7 @@ impl DirtyRegionSet {
         }
     }
 
-    pub fn dirty_area(&self) -> i64 {
+    pub fn dirty_area(&self) -> f64 {
         if self.full {
             area(self.viewport)
         } else {
@@ -118,16 +118,16 @@ impl DirtyRegionSet {
         }
     }
 
-    pub fn viewport_area(&self) -> i64 {
+    pub fn viewport_area(&self) -> f64 {
         area(self.viewport)
     }
 
     pub fn area_ratio(&self) -> f32 {
         let viewport_area = self.viewport_area();
-        if viewport_area <= 0 {
+        if viewport_area <= 0.0 {
             return 1.0;
         }
-        self.dirty_area() as f32 / viewport_area as f32
+        (self.dirty_area() / viewport_area) as f32
     }
 
     pub fn viewport(&self) -> UiRect {
@@ -152,25 +152,25 @@ impl DirtyRegionSet {
             return;
         }
         let viewport_area = area(self.viewport);
-        if viewport_area <= 0 {
+        if viewport_area <= 0.0 {
             self.mark_full_with_reason("invalid-viewport");
             return;
         }
-        let dirty_area: i64 = self.rects.iter().map(|rect| area(*rect)).sum();
-        if dirty_area as f32 / viewport_area as f32 >= self.strategy.full_area_ratio {
+        let dirty_area: f64 = self.rects.iter().map(|rect| area(*rect)).sum();
+        if (dirty_area / viewport_area) as f32 >= self.strategy.full_area_ratio {
             self.mark_full_with_reason("area-threshold");
         }
     }
 }
 
 fn should_merge(a: UiRect, b: UiRect) -> bool {
-    a.intersect(b).is_some() || expanded(a, 2).intersect(b).is_some()
+    a.intersect(b).is_some() || expanded(a, 2.0).intersect(b).is_some()
 }
 
-fn expanded(rect: UiRect, amount: i32) -> UiRect {
+fn expanded(rect: UiRect, amount: f32) -> UiRect {
     rect.inflate(amount, amount)
 }
 
-fn area(rect: UiRect) -> i64 {
-    rect.width().max(0) as i64 * rect.height().max(0) as i64
+fn area(rect: UiRect) -> f64 {
+    rect.width().max(0.0) as f64 * rect.height().max(0.0) as f64
 }

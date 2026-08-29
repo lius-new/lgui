@@ -128,7 +128,7 @@ impl UiElement {
         Self::new(id, UiNodeKind::ScrollRaster, viewport).scroll_raster_spec(spec)
     }
 
-    pub fn clip(id: UiId, rect: UiRect, offset_x: i32, offset_y: i32) -> Self {
+    pub fn clip(id: UiId, rect: UiRect, offset_x: f32, offset_y: f32) -> Self {
         Self::new(id, UiNodeKind::Clip, rect).clip_content(rect, offset_x, offset_y)
     }
 
@@ -168,6 +168,11 @@ impl UiElement {
 
     pub fn interaction(mut self, interaction: InteractionRole) -> Self {
         self.node = self.node.interaction(interaction);
+        self
+    }
+
+    pub fn semantics(mut self, semantics: super::Semantics) -> Self {
+        self.node = self.node.semantics(semantics);
         self
     }
 
@@ -283,7 +288,7 @@ impl UiElement {
         self
     }
 
-    pub fn animation_outset(mut self, x: i32, y: i32) -> Self {
+    pub fn animation_outset(mut self, x: f32, y: f32) -> Self {
         self.node = self.node.animation_outset(x, y);
         self
     }
@@ -358,7 +363,7 @@ impl UiElement {
         self
     }
 
-    pub fn clip_content(mut self, rect: UiRect, offset_x: i32, offset_y: i32) -> Self {
+    pub fn clip_content(mut self, rect: UiRect, offset_x: f32, offset_y: f32) -> Self {
         self.node = self.node.clip(rect, offset_x, offset_y);
         self
     }
@@ -378,7 +383,7 @@ impl UiElement {
         self
     }
 
-    pub fn translate(mut self, x: i32, y: i32) -> Self {
+    pub fn translate(mut self, x: f32, y: f32) -> Self {
         self.node = self.node.translate(x, y);
         self.children = Arc::new(
             self.children

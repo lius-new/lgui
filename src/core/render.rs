@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+use super::geometry::normalized_f32_bits;
 use super::{
     BackdropBlurStyle, Color, CompositingLayerSpec, CustomPaintStyle, HostTree, OverlayStyle,
     PathStyle, StaticLayerSpec, TextStyle, UiId, UiImageSource, UiNode, UiNodeKind, UiPath,
@@ -146,18 +147,100 @@ pub enum ScenePrimitive {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ScenePrimitiveKind {
+    Rect,
+    Ellipse,
+    Text,
+    Custom,
+    Line,
+    Path,
+    Image,
+    Icon,
+    Glow,
+    BackdropBlur,
+    BackdropBlurPath,
+    Overlay,
+    CompositingLayer,
+    StaticLayer,
+    ScrollRaster,
+    Clip,
+    ClipPath,
+}
+
+impl ScenePrimitiveKind {
+    pub const ALL: [Self; 17] = [
+        Self::Rect,
+        Self::Ellipse,
+        Self::Text,
+        Self::Custom,
+        Self::Line,
+        Self::Path,
+        Self::Image,
+        Self::Icon,
+        Self::Glow,
+        Self::BackdropBlur,
+        Self::BackdropBlurPath,
+        Self::Overlay,
+        Self::CompositingLayer,
+        Self::StaticLayer,
+        Self::ScrollRaster,
+        Self::Clip,
+        Self::ClipPath,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rect => "Rect",
+            Self::Ellipse => "Ellipse",
+            Self::Text => "Text",
+            Self::Custom => "Custom",
+            Self::Line => "Line",
+            Self::Path => "Path",
+            Self::Image => "Image",
+            Self::Icon => "Icon",
+            Self::Glow => "Glow",
+            Self::BackdropBlur => "BackdropBlur",
+            Self::BackdropBlurPath => "BackdropBlurPath",
+            Self::Overlay => "Overlay",
+            Self::CompositingLayer => "CompositingLayer",
+            Self::StaticLayer => "StaticLayer",
+            Self::ScrollRaster => "ScrollRaster",
+            Self::Clip => "Clip",
+            Self::ClipPath => "ClipPath",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScrollRasterSpec {
     pub cache_epoch: u64,
-    pub content_height: i32,
-    pub scroll_y: i32,
-    pub tile_height_px: i32,
+    pub content_height: f32,
+    pub scroll_y: f32,
+    pub tile_height_px: f32,
     pub memory_budget_bytes: usize,
     pub background_fill: Option<Color>,
     pub visible_tiles: Vec<usize>,
     pub prefetch_tiles: Vec<usize>,
     pub max_prefetch_tiles_per_frame: usize,
     pub max_prefetch_ms_per_frame: u32,
+}
+
+impl Eq for ScrollRasterSpec {}
+
+impl Hash for ScrollRasterSpec {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.cache_epoch.hash(state);
+        normalized_f32_bits(self.content_height).hash(state);
+        normalized_f32_bits(self.scroll_y).hash(state);
+        normalized_f32_bits(self.tile_height_px).hash(state);
+        self.memory_budget_bytes.hash(state);
+        self.background_fill.hash(state);
+        self.visible_tiles.hash(state);
+        self.prefetch_tiles.hash(state);
+        self.max_prefetch_tiles_per_frame.hash(state);
+        self.max_prefetch_ms_per_frame.hash(state);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -168,6 +251,28 @@ pub enum ImageFit {
 }
 
 impl ScenePrimitive {
+    pub const fn kind(&self) -> ScenePrimitiveKind {
+        match self {
+            Self::Rect { .. } => ScenePrimitiveKind::Rect,
+            Self::Ellipse { .. } => ScenePrimitiveKind::Ellipse,
+            Self::Text { .. } => ScenePrimitiveKind::Text,
+            Self::Custom { .. } => ScenePrimitiveKind::Custom,
+            Self::Line { .. } => ScenePrimitiveKind::Line,
+            Self::Path { .. } => ScenePrimitiveKind::Path,
+            Self::Image { .. } => ScenePrimitiveKind::Image,
+            Self::Icon { .. } => ScenePrimitiveKind::Icon,
+            Self::Glow { .. } => ScenePrimitiveKind::Glow,
+            Self::BackdropBlur { .. } => ScenePrimitiveKind::BackdropBlur,
+            Self::BackdropBlurPath { .. } => ScenePrimitiveKind::BackdropBlurPath,
+            Self::Overlay { .. } => ScenePrimitiveKind::Overlay,
+            Self::CompositingLayer { .. } => ScenePrimitiveKind::CompositingLayer,
+            Self::StaticLayer { .. } => ScenePrimitiveKind::StaticLayer,
+            Self::ScrollRaster { .. } => ScenePrimitiveKind::ScrollRaster,
+            Self::Clip { .. } => ScenePrimitiveKind::Clip,
+            Self::ClipPath { .. } => ScenePrimitiveKind::ClipPath,
+        }
+    }
+
     pub fn id(&self) -> &UiId {
         match self {
             ScenePrimitive::Rect { id, .. }
@@ -234,8 +339,8 @@ impl ScenePrimitive {
             ScenePrimitive::Line { start, end, .. } => UiRect::new(
                 start.x.min(end.x),
                 start.y.min(end.y),
-                start.x.max(end.x) + 1,
-                start.y.max(end.y) + 1,
+                start.x.max(end.x) + 1.0,
+                start.y.max(end.y) + 1.0,
             ),
         }
     }
@@ -249,15 +354,15 @@ impl ScenePrimitive {
         };
         let stroke_width = match self {
             ScenePrimitive::Rect { style, .. } | ScenePrimitive::Ellipse { style, .. } => {
-                style.stroke.map(|stroke| stroke.width).unwrap_or(0)
+                style.stroke.map(|stroke| stroke.width).unwrap_or(0.0)
             }
             ScenePrimitive::Line { stroke, .. } => stroke.width,
             ScenePrimitive::Path { style, .. } => {
-                style.stroke.map(|stroke| stroke.width).unwrap_or(0)
+                style.stroke.map(|stroke| stroke.width).unwrap_or(0.0)
             }
-            _ => 0,
+            _ => 0.0,
         };
-        let outset = (stroke_width.max(0) + 1) / 2;
+        let outset = (stroke_width.max(0.0) + 1.0) / 2.0;
         rect.inflate(outset, outset)
     }
 
@@ -299,16 +404,20 @@ impl LayerDamageAccumulator {
         if self.full {
             return;
         }
-        let Some(rect) = rect.inflate(2, 2).intersect(self.bounds) else {
+        let Some(rect) = rect.inflate(2.0, 2.0).intersect(self.bounds) else {
             return;
         };
-        if rect.width() <= 0 || rect.height() <= 0 {
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
             return;
         }
         let mut merged = rect;
         let mut index = 0;
         while index < self.rects.len() {
-            if self.rects[index].inflate(2, 2).intersect(merged).is_some() {
+            if self.rects[index]
+                .inflate(2.0, 2.0)
+                .intersect(merged)
+                .is_some()
+            {
                 merged = self.rects.remove(index).union(merged);
             } else {
                 index += 1;
@@ -316,11 +425,8 @@ impl LayerDamageAccumulator {
         }
         self.rects.push(merged);
         let bounds_area = rect_area(self.bounds);
-        let dirty_area = self.rects.iter().copied().map(rect_area).sum::<i64>();
-        if self.rects.len() > 12
-            || bounds_area <= 0
-            || dirty_area as f32 / bounds_area as f32 >= 0.90
-        {
+        let dirty_area = self.rects.iter().copied().map(rect_area).sum::<f64>();
+        if self.rects.len() > 12 || bounds_area <= 0.0 || dirty_area / bounds_area >= 0.90 {
             self.full = true;
             self.rects.clear();
         }
@@ -400,7 +506,7 @@ fn collect_nested_command_damage(
             && previous_spec == next_spec
             && previous_phase == next_phase =>
         {
-            let local_bounds = UiRect::new(0, 0, next_rect.width(), next_rect.height());
+            let local_bounds = UiRect::new(0.0, 0.0, next_rect.width(), next_rect.height());
             for rect in compositing_layer_damage(previous_commands, next_commands, local_bounds) {
                 damage.add(rect.translate(next_rect.left, next_rect.top));
             }
@@ -457,8 +563,8 @@ fn collect_nested_command_damage(
     }
 }
 
-fn rect_area(rect: UiRect) -> i64 {
-    rect.width().max(0) as i64 * rect.height().max(0) as i64
+fn rect_area(rect: UiRect) -> f64 {
+    rect.width().max(0.0) as f64 * rect.height().max(0.0) as f64
 }
 
 #[derive(Clone, Debug, Default)]
@@ -472,11 +578,11 @@ const SCROLL_RASTER_COMMAND_CACHE_LIMIT: usize = 8;
 struct ScrollRasterCommandCacheKey {
     id: String,
     cache_epoch: u64,
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-    content_height: i32,
+    left: u32,
+    top: u32,
+    right: u32,
+    bottom: u32,
+    content_height: u32,
 }
 
 #[derive(Clone)]
@@ -610,7 +716,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Rect {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             style: project_visual_style(*style, scale),
             phase: *phase,
         },
@@ -621,7 +727,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Ellipse {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             style: project_visual_style(*style, scale),
             phase: *phase,
         },
@@ -633,7 +739,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Text {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             text: text.clone(),
             style: project_text_style(*style, scale),
             phase: *phase,
@@ -646,7 +752,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Custom {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             key,
             style: *style,
             phase: *phase,
@@ -659,8 +765,8 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Line {
             id: id.clone(),
-            start: scale.physical_point(*start),
-            end: scale.physical_point(*end),
+            start: scale.physical_ui_point(*start),
+            end: scale.physical_ui_point(*end),
             stroke: project_stroke(*stroke, scale),
             phase: *phase,
         },
@@ -672,7 +778,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Path {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             path: project_path(path, scale),
             style: project_path_style(*style, scale),
             phase: *phase,
@@ -685,7 +791,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Image {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             source: source.clone(),
             fit: *fit,
             phase: *phase,
@@ -698,7 +804,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Icon {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             key,
             style: *style,
             phase: *phase,
@@ -711,7 +817,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Glow {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             color: *color,
             alpha: *alpha,
             phase: *phase,
@@ -723,7 +829,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::BackdropBlur {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             style: project_backdrop_blur_style(*style, scale),
             phase: *phase,
         },
@@ -735,7 +841,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::BackdropBlurPath {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             path: project_path(path, scale),
             style: project_backdrop_blur_style(*style, scale),
             phase: *phase,
@@ -747,7 +853,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Overlay {
             id: id.clone(),
-            rect: scale.physical_rect(*rect),
+            rect: scale.physical_ui_rect(*rect),
             style: style.clone(),
             phase: *phase,
         },
@@ -763,7 +869,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             spec.transform = spec.transform.project_to_physical(scale);
             ScenePrimitive::CompositingLayer {
                 id: id.clone(),
-                rect: scale.physical_rect(*rect),
+                rect: scale.physical_ui_rect(*rect),
                 spec,
                 commands: commands
                     .iter()
@@ -782,11 +888,11 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => {
             let mut spec = spec.clone();
-            spec.offset_x = scale.physical_value(spec.offset_x);
-            spec.offset_y = scale.physical_value(spec.offset_y);
+            spec.offset_x = scale.physical_ui_value(spec.offset_x);
+            spec.offset_y = scale.physical_ui_value(spec.offset_y);
             ScenePrimitive::StaticLayer {
                 id: id.clone(),
-                rect: scale.physical_rect(*rect),
+                rect: scale.physical_ui_rect(*rect),
                 spec,
                 commands: commands
                     .iter()
@@ -806,12 +912,12 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
         } => {
             let mut spec = spec.clone();
             spec.cache_epoch ^= signature_scale;
-            spec.content_height = scale.physical_length(spec.content_height);
-            spec.scroll_y = scale.physical_value(spec.scroll_y);
-            spec.tile_height_px = scale.physical_length(spec.tile_height_px);
+            spec.content_height = scale.physical_ui_length(spec.content_height);
+            spec.scroll_y = scale.physical_ui_value(spec.scroll_y);
+            spec.tile_height_px = scale.physical_ui_length(spec.tile_height_px);
             ScenePrimitive::ScrollRaster {
                 id: id.clone(),
-                viewport: scale.physical_rect(*viewport),
+                viewport: scale.physical_ui_rect(*viewport),
                 spec,
                 commands: commands
                     .iter()
@@ -829,7 +935,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::Clip {
             id: id.clone(),
-            rect: scale.physical_rect_outward(*rect),
+            rect: scale.physical_ui_rect(*rect),
             commands: commands
                 .iter()
                 .map(|command| project_command(command, scale))
@@ -846,7 +952,7 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             phase,
         } => ScenePrimitive::ClipPath {
             id: id.clone(),
-            rect: scale.physical_rect_outward(*rect),
+            rect: scale.physical_ui_rect(*rect),
             path: project_path(path, scale),
             commands: commands
                 .iter()
@@ -859,12 +965,12 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
 }
 
 fn project_stroke(mut stroke: super::Stroke, scale: UiScale) -> super::Stroke {
-    stroke.width = scale.physical_length(stroke.width);
+    stroke.width = scale.physical_ui_length(stroke.width);
     stroke
 }
 
 fn project_visual_style(mut style: VisualStyle, scale: UiScale) -> VisualStyle {
-    style.radius = scale.physical_length(style.radius);
+    style.radius = scale.physical_ui_length(style.radius);
     style.stroke = style.stroke.map(|stroke| project_stroke(stroke, scale));
     style
 }
@@ -875,33 +981,33 @@ fn project_path_style(mut style: PathStyle, scale: UiScale) -> PathStyle {
 }
 
 fn project_text_style(mut style: TextStyle, scale: UiScale) -> TextStyle {
-    style.height = scale.physical_signed_length(style.height);
-    style.tracking = scale.physical_value(style.tracking);
+    style.height = scale.physical_ui_signed_length(style.height);
+    style.tracking = scale.physical_ui_value(style.tracking);
     style
 }
 
 fn project_backdrop_blur_style(mut style: BackdropBlurStyle, scale: UiScale) -> BackdropBlurStyle {
-    style.source_rect = scale.physical_rect(style.source_rect);
-    style.radius = scale.physical_length(style.radius as i32) as usize;
+    style.source_rect = scale.physical_ui_rect(style.source_rect);
+    style.radius = scale.physical_ui_length(style.radius);
     style
 }
 
 fn project_path(path: &UiPath, scale: UiScale) -> UiPath {
     UiPath::new(path.commands().iter().map(|command| match *command {
-        UiPathCommand::MoveTo(point) => UiPathCommand::MoveTo(scale.physical_point(point)),
-        UiPathCommand::LineTo(point) => UiPathCommand::LineTo(scale.physical_point(point)),
+        UiPathCommand::MoveTo(point) => UiPathCommand::MoveTo(scale.physical_ui_point(point)),
+        UiPathCommand::LineTo(point) => UiPathCommand::LineTo(scale.physical_ui_point(point)),
         UiPathCommand::QuadraticTo { control, to } => UiPathCommand::QuadraticTo {
-            control: scale.physical_point(control),
-            to: scale.physical_point(to),
+            control: scale.physical_ui_point(control),
+            to: scale.physical_ui_point(to),
         },
         UiPathCommand::CubicTo {
             control1,
             control2,
             to,
         } => UiPathCommand::CubicTo {
-            control1: scale.physical_point(control1),
-            control2: scale.physical_point(control2),
-            to: scale.physical_point(to),
+            control1: scale.physical_ui_point(control1),
+            control2: scale.physical_ui_point(control2),
+            to: scale.physical_ui_point(to),
         },
         UiPathCommand::Close => UiPathCommand::Close,
     }))
@@ -1141,7 +1247,7 @@ fn translate_popup_root_commands(
         return;
     }
     let (offset_x, offset_y) = tree.ancestor_content_offset(node);
-    if offset_x == 0 && offset_y == 0 {
+    if offset_x == 0.0 && offset_y == 0.0 {
         return;
     }
     for command in &mut Arc::make_mut(&mut list.commands)[command_start..] {
@@ -1284,11 +1390,11 @@ fn scroll_raster_command_cache_key_for(
     ScrollRasterCommandCacheKey {
         id: id.as_str().to_string(),
         cache_epoch: spec.cache_epoch,
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-        content_height: spec.content_height,
+        left: normalized_f32_bits(rect.left),
+        top: normalized_f32_bits(rect.top),
+        right: normalized_f32_bits(rect.right),
+        bottom: normalized_f32_bits(rect.bottom),
+        content_height: normalized_f32_bits(spec.content_height),
     }
 }
 
@@ -1336,8 +1442,8 @@ fn compile_clip_child(
     id: &UiId,
     commands: &mut Vec<ScenePrimitive>,
     skip: &mut HashSet<UiId>,
-    offset_x: i32,
-    offset_y: i32,
+    offset_x: f32,
+    offset_y: f32,
     include_popup_subtree: bool,
 ) {
     let Some(node) = tree.node(id) else {
@@ -1792,8 +1898,8 @@ fn command_signature_part(command: &ScenePrimitive, hasher: &mut DefaultHasher) 
             hash_rect(rect, hasher);
             spec.cache_signature().hash(hasher);
             spec.opacity.hash(hasher);
-            spec.offset_x.hash(hasher);
-            spec.offset_y.hash(hasher);
+            normalized_f32_bits(spec.offset_x).hash(hasher);
+            normalized_f32_bits(spec.offset_y).hash(hasher);
             child_signature.hash(hasher);
             phase.hash(hasher);
         }
@@ -1843,14 +1949,14 @@ fn command_signature_part(command: &ScenePrimitive, hasher: &mut DefaultHasher) 
     }
 }
 
-fn translate_commands(commands: Vec<ScenePrimitive>, dx: i32, dy: i32) -> Vec<ScenePrimitive> {
+fn translate_commands(commands: Vec<ScenePrimitive>, dx: f32, dy: f32) -> Vec<ScenePrimitive> {
     commands
         .into_iter()
         .map(|command| translate_command(&command, dx, dy))
         .collect()
 }
 
-fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimitive {
+fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> ScenePrimitive {
     let translate_rect = |rect: UiRect| rect.translate(dx, dy);
     let translate_point = |point: super::Point| super::Point::new(point.x + dx, point.y + dy);
     match command {
@@ -2078,7 +2184,7 @@ fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimiti
     }
 }
 
-fn translate_path(path: &UiPath, dx: i32, dy: i32) -> UiPath {
+fn translate_path(path: &UiPath, dx: f32, dy: f32) -> UiPath {
     let translate = |point: super::Point| super::Point::new(point.x + dx, point.y + dy);
     UiPath::new(path.commands().iter().map(|command| match *command {
         UiPathCommand::MoveTo(point) => UiPathCommand::MoveTo(translate(point)),
@@ -2112,22 +2218,22 @@ fn hash_backdrop_blur_style(style: &BackdropBlurStyle, hasher: &mut DefaultHashe
     style.source.hash(hasher);
     style.fit.hash(hasher);
     hash_rect(&style.source_rect, hasher);
-    style.radius.hash(hasher);
+    normalized_f32_bits(style.radius).hash(hasher);
     style.opacity.to_bits().hash(hasher);
     hash_color(&style.tint, hasher);
     style.tint_alpha.to_bits().hash(hasher);
 }
 
 fn hash_rect(rect: &UiRect, hasher: &mut DefaultHasher) {
-    rect.left.hash(hasher);
-    rect.top.hash(hasher);
-    rect.right.hash(hasher);
-    rect.bottom.hash(hasher);
+    normalized_f32_bits(rect.left).hash(hasher);
+    normalized_f32_bits(rect.top).hash(hasher);
+    normalized_f32_bits(rect.right).hash(hasher);
+    normalized_f32_bits(rect.bottom).hash(hasher);
 }
 
 fn hash_point(point: &super::Point, hasher: &mut DefaultHasher) {
-    point.x.hash(hasher);
-    point.y.hash(hasher);
+    normalized_f32_bits(point.x).hash(hasher);
+    normalized_f32_bits(point.y).hash(hasher);
 }
 
 fn hash_color(color: &super::Color, hasher: &mut DefaultHasher) {
@@ -2136,7 +2242,7 @@ fn hash_color(color: &super::Color, hasher: &mut DefaultHasher) {
 
 fn hash_stroke(stroke: &super::Stroke, hasher: &mut DefaultHasher) {
     hash_color(&stroke.color, hasher);
-    stroke.width.hash(hasher);
+    normalized_f32_bits(stroke.width).hash(hasher);
     stroke.alpha.hash(hasher);
 }
 
@@ -2190,14 +2296,14 @@ fn hash_visual_style(style: &VisualStyle, hasher: &mut DefaultHasher) {
     if let Some(stroke) = &style.stroke {
         hash_stroke(stroke, hasher);
     }
-    style.radius.hash(hasher);
+    normalized_f32_bits(style.radius).hash(hasher);
 }
 
 fn hash_text_style(style: &TextStyle, hasher: &mut DefaultHasher) {
     hash_color(&style.color, hasher);
-    style.height.hash(hasher);
+    normalized_f32_bits(style.height).hash(hasher);
     style.weight.hash(hasher);
-    style.tracking.hash(hasher);
+    normalized_f32_bits(style.tracking).hash(hasher);
     style.align.hash(hasher);
     style.alpha.hash(hasher);
 }
@@ -2335,26 +2441,26 @@ mod tests {
     #[test]
     fn compositing_layer_commands_use_layer_local_coordinates() {
         let scene = compile_scene(&compositing_layer_tree(
-            UiRect::new(100, 200, 300, 400),
-            UiRect::new(120, 230, 180, 290),
+            UiRect::new(100.0, 200.0, 300.0, 400.0),
+            UiRect::new(120.0, 230.0, 180.0, 290.0),
         ));
         let ScenePrimitive::CompositingLayer { rect, commands, .. } = &scene.commands()[0] else {
             panic!("expected compositing layer");
         };
-        assert_eq!(*rect, UiRect::new(100, 200, 300, 400));
+        assert_eq!(*rect, UiRect::new(100.0, 200.0, 300.0, 400.0));
         assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].rect(), UiRect::new(20, 30, 80, 90));
+        assert_eq!(commands[0].rect(), UiRect::new(20.0, 30.0, 80.0, 90.0));
     }
 
     #[test]
     fn moving_a_compositing_layer_preserves_its_content_signature() {
         let first = compile_scene(&compositing_layer_tree(
-            UiRect::new(100, 200, 300, 400),
-            UiRect::new(120, 230, 180, 290),
+            UiRect::new(100.0, 200.0, 300.0, 400.0),
+            UiRect::new(120.0, 230.0, 180.0, 290.0),
         ));
         let second = compile_scene(&compositing_layer_tree(
-            UiRect::new(500, 600, 700, 800),
-            UiRect::new(520, 630, 580, 690),
+            UiRect::new(500.0, 600.0, 700.0, 800.0),
+            UiRect::new(520.0, 630.0, 580.0, 690.0),
         ));
         let ScenePrimitive::CompositingLayer {
             content_signature: first_signature,
@@ -2375,8 +2481,8 @@ mod tests {
 
     #[test]
     fn transforming_a_compositing_layer_preserves_its_content_signature() {
-        let rect = UiRect::new(100, 200, 300, 400);
-        let child = UiRect::new(120, 230, 180, 290);
+        let rect = UiRect::new(100.0, 200.0, 300.0, 400.0);
+        let child = UiRect::new(120.0, 230.0, 180.0, 290.0);
         let first = compile_scene(&compositing_layer_tree_with_spec(
             rect,
             child,
@@ -2420,15 +2526,15 @@ mod tests {
             .translation(100.0, -20.0)
             .transform_origin(0.2, 0.8);
         let scene = compile_scene(&compositing_layer_tree_with_spec(
-            UiRect::new(10, 20, 110, 220),
-            UiRect::new(20, 30, 50, 60),
+            UiRect::new(10.0, 20.0, 110.0, 220.0),
+            UiRect::new(20.0, 30.0, 50.0, 60.0),
             transform_spec,
         ));
         let projected = scene.project_to_physical(UiScale::new(1.5));
         let ScenePrimitive::CompositingLayer { rect, spec, .. } = &projected.commands()[0] else {
             panic!("expected compositing layer");
         };
-        assert_eq!(*rect, UiRect::new(15, 30, 165, 330));
+        assert_eq!(*rect, UiRect::new(15.0, 30.0, 165.0, 330.0));
         assert_eq!(spec.transform.rotation_degrees_f32(), 42.5);
         assert_eq!(
             (spec.transform.scale_x(), spec.transform.scale_y()),
@@ -2451,7 +2557,7 @@ mod tests {
     fn transformed_layer_damage_stays_inside_the_parent_layer() {
         let command = |spec| ScenePrimitive::CompositingLayer {
             id: id("animated-layer"),
-            rect: UiRect::new(40, 40, 120, 120),
+            rect: UiRect::new(40.0, 40.0, 120.0, 120.0),
             spec,
             commands: Vec::new(),
             content_signature: 7,
@@ -2463,7 +2569,7 @@ mod tests {
                 .rotation_degrees(30.0)
                 .scale(1.2),
         )];
-        let parent = UiRect::new(0, 0, 160, 160);
+        let parent = UiRect::new(0.0, 0.0, 160.0, 160.0);
         let damage = compositing_layer_damage(&previous, &next, parent);
         assert!(!damage.is_empty());
         assert!(damage
@@ -2479,7 +2585,7 @@ mod tests {
             UiNode::new(
                 id("background"),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .style(VisualStyle::filled(Color::BLACK)),
         );
@@ -2487,7 +2593,7 @@ mod tests {
             UiNode::new(
                 layer_id.clone(),
                 UiNodeKind::CompositingLayer,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .compositing_layer(CompositingLayerSpec::new()),
         );
@@ -2495,7 +2601,7 @@ mod tests {
             UiNode::new(
                 id("layer-content"),
                 UiNodeKind::Panel,
-                UiRect::new(10, 10, 20, 20),
+                UiRect::new(10.0, 10.0, 20.0, 20.0),
             )
             .parent(layer_id)
             .style(VisualStyle::filled(Color::WHITE)),
@@ -2504,7 +2610,7 @@ mod tests {
             UiNode::new(
                 id("foreground"),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 100, 100),
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
             )
             .style(VisualStyle::filled(Color::WHITE)),
         );
@@ -2522,13 +2628,13 @@ mod tests {
         let previous = vec![
             ScenePrimitive::Rect {
                 id: id("moving"),
-                rect: UiRect::new(10, 10, 30, 30),
+                rect: UiRect::new(10.0, 10.0, 30.0, 30.0),
                 style,
                 phase: RenderPhase::Content,
             },
             ScenePrimitive::Rect {
                 id: id("removed"),
-                rect: UiRect::new(60, 10, 80, 30),
+                rect: UiRect::new(60.0, 10.0, 80.0, 30.0),
                 style,
                 phase: RenderPhase::Content,
             },
@@ -2536,23 +2642,32 @@ mod tests {
         let next = vec![
             ScenePrimitive::Rect {
                 id: id("moving"),
-                rect: UiRect::new(20, 50, 40, 70),
+                rect: UiRect::new(20.0, 50.0, 40.0, 70.0),
                 style,
                 phase: RenderPhase::Content,
             },
             ScenePrimitive::Rect {
                 id: id("inserted"),
-                rect: UiRect::new(70, 60, 90, 80),
+                rect: UiRect::new(70.0, 60.0, 90.0, 80.0),
                 style,
                 phase: RenderPhase::Content,
             },
         ];
 
-        let damage = compositing_layer_damage(&previous, &next, UiRect::new(0, 0, 100, 100));
-        assert!(damage.iter().any(|rect| rect.contains(Point::new(15, 15))));
-        assert!(damage.iter().any(|rect| rect.contains(Point::new(25, 55))));
-        assert!(damage.iter().any(|rect| rect.contains(Point::new(65, 15))));
-        assert!(damage.iter().any(|rect| rect.contains(Point::new(75, 65))));
+        let damage =
+            compositing_layer_damage(&previous, &next, UiRect::new(0.0, 0.0, 100.0, 100.0));
+        assert!(damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(15.0, 15.0))));
+        assert!(damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(25.0, 55.0))));
+        assert!(damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(65.0, 15.0))));
+        assert!(damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(75.0, 65.0))));
     }
 
     #[test]
@@ -2566,7 +2681,7 @@ mod tests {
             };
             ScenePrimitive::CompositingLayer {
                 id: id("nested"),
-                rect: UiRect::new(100, 80, 300, 280),
+                rect: UiRect::new(100.0, 80.0, 300.0, 280.0),
                 spec: CompositingLayerSpec::new(),
                 content_signature: child.signature(),
                 commands: vec![child],
@@ -2574,18 +2689,20 @@ mod tests {
             }
         };
         let damage = compositing_layer_damage(
-            &[nested(UiRect::new(10, 10, 30, 30))],
-            &[nested(UiRect::new(20, 20, 40, 40))],
-            UiRect::new(0, 0, 500, 400),
+            &[nested(UiRect::new(10.0, 10.0, 30.0, 30.0))],
+            &[nested(UiRect::new(20.0, 20.0, 40.0, 40.0))],
+            UiRect::new(0.0, 0.0, 500.0, 400.0),
         );
 
-        assert!(damage.iter().any(|rect| rect.contains(Point::new(115, 95))));
         assert!(damage
             .iter()
-            .any(|rect| rect.contains(Point::new(125, 105))));
+            .any(|rect| rect.contains(Point::new(115.0, 95.0))));
         assert!(damage
             .iter()
-            .all(|rect| rect.right < 200 && rect.bottom < 180));
+            .any(|rect| rect.contains(Point::new(125.0, 105.0))));
+        assert!(damage
+            .iter()
+            .all(|rect| rect.right < 200.0 && rect.bottom < 180.0));
     }
 
     #[test]
@@ -2598,7 +2715,7 @@ mod tests {
             UiNode::new(
                 layer_id.clone(),
                 UiNodeKind::CompositingLayer,
-                UiRect::new(100, 100, 300, 300),
+                UiRect::new(100.0, 100.0, 300.0, 300.0),
             )
             .compositing_layer(CompositingLayerSpec::new()),
         );
@@ -2606,7 +2723,7 @@ mod tests {
             UiNode::new(
                 content_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(120, 130, 180, 190),
+                UiRect::new(120.0, 130.0, 180.0, 190.0),
             )
             .parent(layer_id.clone())
             .style(VisualStyle::filled(Color::WHITE)),
@@ -2615,7 +2732,7 @@ mod tests {
             UiNode::new(
                 popup_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(140, 150, 240, 250),
+                UiRect::new(140.0, 150.0, 240.0, 250.0),
             )
             .parent(layer_id)
             .style(VisualStyle::filled(Color::WHITE))
@@ -2629,7 +2746,7 @@ mod tests {
         };
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].id(), &content_id);
-        assert_eq!(commands[0].rect(), UiRect::new(20, 30, 80, 90));
+        assert_eq!(commands[0].rect(), UiRect::new(20.0, 30.0, 80.0, 90.0));
         assert_eq!(scene.commands()[1].id(), &popup_id);
     }
 
@@ -2641,17 +2758,18 @@ mod tests {
         let overlay_id = id("overlay");
         let mut tree = HostTree::new();
         tree.push(
-            UiNode::new(clip_id.clone(), UiNodeKind::Clip, UiRect::new(0, 0, 20, 20)).clip(
-                UiRect::new(0, 0, 20, 20),
-                0,
-                -12,
-            ),
+            UiNode::new(
+                clip_id.clone(),
+                UiNodeKind::Clip,
+                UiRect::new(0.0, 0.0, 20.0, 20.0),
+            )
+            .clip(UiRect::new(0.0, 0.0, 20.0, 20.0), 0.0, -12.0),
         );
         tree.push(
             UiNode::new(
                 content_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 10, 10),
+                UiRect::new(0.0, 0.0, 10.0, 10.0),
             )
             .parent(clip_id.clone())
             .style(VisualStyle::filled(Color::WHITE)),
@@ -2660,7 +2778,7 @@ mod tests {
             UiNode::new(
                 popup_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(20, 20, 40, 40),
+                UiRect::new(20.0, 20.0, 40.0, 40.0),
             )
             .parent(clip_id)
             .style(VisualStyle::filled(Color::WHITE))
@@ -2670,7 +2788,7 @@ mod tests {
             UiNode::new(
                 overlay_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(20, 20, 40, 40),
+                UiRect::new(20.0, 20.0, 40.0, 40.0),
             )
             .style(VisualStyle::filled(Color::BLACK))
             .render_phase(RenderPhase::Overlay),
@@ -2681,7 +2799,10 @@ mod tests {
         assert_eq!(list.commands()[0].id(), &id("clip"));
         assert_eq!(list.commands()[1].id(), &overlay_id);
         assert_eq!(list.commands()[2].id(), &popup_id);
-        assert_eq!(list.commands()[2].rect(), UiRect::new(20, 8, 40, 28));
+        assert_eq!(
+            list.commands()[2].rect(),
+            UiRect::new(20.0, 8.0, 40.0, 28.0)
+        );
         let ScenePrimitive::Clip { commands, .. } = &list.commands()[0] else {
             panic!("expected clip command");
         };
@@ -2698,16 +2819,16 @@ mod tests {
             UiNode::new(
                 popup_clip_id.clone(),
                 UiNodeKind::Clip,
-                UiRect::new(10, 10, 50, 50),
+                UiRect::new(10.0, 10.0, 50.0, 50.0),
             )
-            .clip(UiRect::new(10, 10, 50, 50), 0, 0)
+            .clip(UiRect::new(10.0, 10.0, 50.0, 50.0), 0.0, 0.0)
             .render_phase(RenderPhase::Popup),
         );
         tree.push(
             UiNode::new(
                 popup_child_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(12, 12, 48, 48),
+                UiRect::new(12.0, 12.0, 48.0, 48.0),
             )
             .parent(popup_clip_id.clone())
             .style(VisualStyle::filled(Color::WHITE))
@@ -2734,15 +2855,15 @@ mod tests {
             UiNode::new(
                 ancestor_id.clone(),
                 UiNodeKind::Clip,
-                UiRect::new(0, 0, 60, 60),
+                UiRect::new(0.0, 0.0, 60.0, 60.0),
             )
-            .clip(UiRect::new(0, 0, 60, 60), 0, -12),
+            .clip(UiRect::new(0.0, 0.0, 60.0, 60.0), 0.0, -12.0),
         );
         tree.push(
             UiNode::new(
                 popup_layer_id.clone(),
                 UiNodeKind::StaticLayer,
-                UiRect::new(20, 20, 40, 40),
+                UiRect::new(20.0, 20.0, 40.0, 40.0),
             )
             .parent(ancestor_id)
             .static_layer(StaticLayerSpec::new(StaticLayerSource::runtime()))
@@ -2752,7 +2873,7 @@ mod tests {
             UiNode::new(
                 popup_child_id.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(22, 22, 38, 38),
+                UiRect::new(22.0, 22.0, 38.0, 38.0),
             )
             .parent(popup_layer_id.clone())
             .style(VisualStyle::filled(Color::WHITE))
@@ -2765,24 +2886,24 @@ mod tests {
             panic!("expected popup static layer command");
         };
         assert_eq!(list.commands()[1].id(), &popup_layer_id);
-        assert_eq!(*rect, UiRect::new(20, 8, 40, 28));
+        assert_eq!(*rect, UiRect::new(20.0, 8.0, 40.0, 28.0));
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].id(), &popup_child_id);
-        assert_eq!(commands[0].rect(), UiRect::new(22, 10, 38, 26));
+        assert_eq!(commands[0].rect(), UiRect::new(22.0, 10.0, 38.0, 26.0));
     }
 
     #[test]
     fn physical_projection_scales_nested_raster_commands_and_cache_keys() {
         let text = ScenePrimitive::Text {
             id: id("text"),
-            rect: UiRect::new(2, 4, 12, 14),
+            rect: UiRect::new(2.0, 4.0, 12.0, 14.0),
             text: Cow::Borrowed("DPI"),
-            style: TextStyle::new(Color::WHITE, -11, 700).tracking(2),
+            style: TextStyle::new(Color::WHITE, -11.0, 700).tracking(2.0),
             phase: RenderPhase::Content,
         };
         let clip = ScenePrimitive::Clip {
             id: id("clip"),
-            rect: UiRect::new(1, 1, 3, 3),
+            rect: UiRect::new(1.0, 1.0, 3.0, 3.0),
             commands: vec![text],
             child_signature: 5,
             phase: RenderPhase::Content,
@@ -2790,12 +2911,12 @@ mod tests {
         let list = Scene {
             commands: Arc::new(vec![ScenePrimitive::ScrollRaster {
                 id: id("raster"),
-                viewport: UiRect::new(0, 0, 100, 80),
+                viewport: UiRect::new(0.0, 0.0, 100.0, 80.0),
                 spec: ScrollRasterSpec {
                     cache_epoch: 11,
-                    content_height: 200,
-                    scroll_y: 4,
-                    tile_height_px: 32,
+                    content_height: 200.0,
+                    scroll_y: 4.0,
+                    tile_height_px: 32.0,
                     memory_budget_bytes: 1024,
                     background_fill: Some(Color::BLACK),
                     visible_tiles: vec![0, 1],
@@ -2820,10 +2941,10 @@ mod tests {
         else {
             panic!("expected scroll raster");
         };
-        assert_eq!(*viewport, UiRect::new(0, 0, 150, 120));
-        assert_eq!(spec.content_height, 300);
-        assert_eq!(spec.scroll_y, 6);
-        assert_eq!(spec.tile_height_px, 48);
+        assert_eq!(*viewport, UiRect::new(0.0, 0.0, 150.0, 120.0));
+        assert_eq!(spec.content_height, 300.0);
+        assert_eq!(spec.scroll_y, 6.0);
+        assert_eq!(spec.tile_height_px, 48.0);
         assert_ne!(spec.cache_epoch, 11);
         assert_ne!(*child_signature, 7);
 
@@ -2836,22 +2957,22 @@ mod tests {
         else {
             panic!("expected clip");
         };
-        assert_eq!(*rect, UiRect::new(1, 1, 5, 5));
+        assert_eq!(*rect, UiRect::new(1.5, 1.5, 4.5, 4.5));
         assert_ne!(*child_signature, 5);
 
         let ScenePrimitive::Text { rect, style, .. } = &commands[0] else {
             panic!("expected text");
         };
-        assert_eq!(*rect, UiRect::new(3, 6, 18, 21));
-        assert_eq!(style.height, -17);
-        assert_eq!(style.tracking, 3);
+        assert_eq!(*rect, UiRect::new(3.0, 6.0, 18.0, 21.0));
+        assert_eq!(style.height, -16.5);
+        assert_eq!(style.tracking, 3.0);
     }
 
     #[test]
     fn physical_projection_scales_compositing_bounds_and_local_commands() {
         let child = ScenePrimitive::Rect {
             id: id("layer-child"),
-            rect: UiRect::new(2, 4, 12, 14),
+            rect: UiRect::new(2.0, 4.0, 12.0, 14.0),
             style: VisualStyle::filled(Color::WHITE),
             phase: RenderPhase::Content,
         };
@@ -2859,7 +2980,7 @@ mod tests {
         let scene = Scene {
             commands: Arc::new(vec![ScenePrimitive::CompositingLayer {
                 id: id("layer"),
-                rect: UiRect::new(10, 20, 110, 120),
+                rect: UiRect::new(10.0, 20.0, 110.0, 120.0),
                 spec: CompositingLayerSpec::new(),
                 commands: vec![child],
                 content_signature,
@@ -2877,18 +2998,18 @@ mod tests {
         else {
             panic!("expected compositing layer");
         };
-        assert_eq!(*rect, UiRect::new(15, 30, 165, 180));
-        assert_eq!(commands[0].rect(), UiRect::new(3, 6, 18, 21));
+        assert_eq!(*rect, UiRect::new(15.0, 30.0, 165.0, 180.0));
+        assert_eq!(commands[0].rect(), UiRect::new(3.0, 6.0, 18.0, 21.0));
         assert_ne!(*projected_signature, content_signature);
     }
 
     #[test]
     fn physical_projection_scales_paths_strokes_radii_and_static_offsets() {
         let path = UiPath::new([
-            UiPathCommand::MoveTo(Point::new(2, 3)),
+            UiPathCommand::MoveTo(Point::new(2.0, 3.0)),
             UiPathCommand::QuadraticTo {
-                control: Point::new(4, 5),
-                to: Point::new(6, 7),
+                control: Point::new(4.0, 5.0),
+                to: Point::new(6.0, 7.0),
             },
             UiPathCommand::Close,
         ]);
@@ -2896,27 +3017,28 @@ mod tests {
             commands: Arc::new(vec![
                 ScenePrimitive::Rect {
                     id: id("rect"),
-                    rect: UiRect::new(1, 2, 11, 12),
+                    rect: UiRect::new(1.0, 2.0, 11.0, 12.0),
                     style: VisualStyle::filled(Color::WHITE)
-                        .radius(3)
-                        .stroked(Stroke::new(Color::BLACK, 2, 255)),
+                        .radius(3.0)
+                        .stroked(Stroke::new(Color::BLACK, 2.0, 255)),
                     phase: RenderPhase::Background,
                 },
                 ScenePrimitive::Path {
                     id: id("path"),
-                    rect: UiRect::new(0, 0, 8, 8),
+                    rect: UiRect::new(0.0, 0.0, 8.0, 8.0),
                     path,
                     style: PathStyle {
                         fill: None,
                         fill_alpha: 255,
-                        stroke: Some(Stroke::new(Color::WHITE, 2, 255)),
+                        stroke: Some(Stroke::new(Color::WHITE, 2.0, 255)),
                     },
                     phase: RenderPhase::Content,
                 },
                 ScenePrimitive::StaticLayer {
                     id: id("static"),
-                    rect: UiRect::new(0, 0, 10, 10),
-                    spec: StaticLayerSpec::new(StaticLayerSource::runtime()).paint_offset(-2, 3),
+                    rect: UiRect::new(0.0, 0.0, 10.0, 10.0),
+                    spec: StaticLayerSpec::new(StaticLayerSource::runtime())
+                        .paint_offset(-2.0, 3.0),
                     commands: Vec::new(),
                     child_signature: 13,
                     phase: RenderPhase::Background,
@@ -2928,8 +3050,8 @@ mod tests {
         let ScenePrimitive::Rect { style, .. } = &projected.commands[0] else {
             panic!("expected rect");
         };
-        assert_eq!(style.radius, 4);
-        assert_eq!(style.stroke.expect("stroke").width, 3);
+        assert_eq!(style.radius, 3.75);
+        assert_eq!(style.stroke.expect("stroke").width, 2.5);
 
         let ScenePrimitive::Path { path, style, .. } = &projected.commands[1] else {
             panic!("expected path");
@@ -2937,15 +3059,15 @@ mod tests {
         assert_eq!(
             path.commands(),
             &[
-                UiPathCommand::MoveTo(Point::new(3, 4)),
+                UiPathCommand::MoveTo(Point::new(2.5, 3.75)),
                 UiPathCommand::QuadraticTo {
-                    control: Point::new(5, 6),
-                    to: Point::new(8, 9),
+                    control: Point::new(5.0, 6.25),
+                    to: Point::new(7.5, 8.75),
                 },
                 UiPathCommand::Close,
             ]
         );
-        assert_eq!(style.stroke.expect("stroke").width, 3);
+        assert_eq!(style.stroke.expect("stroke").width, 2.5);
 
         let ScenePrimitive::StaticLayer {
             spec,
@@ -2955,7 +3077,7 @@ mod tests {
         else {
             panic!("expected static layer");
         };
-        assert_eq!((spec.offset_x, spec.offset_y), (-3, 4));
+        assert_eq!((spec.offset_x, spec.offset_y), (-2.5, 3.75));
         assert_ne!(*child_signature, 13);
     }
 }

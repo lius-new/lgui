@@ -154,6 +154,12 @@ pub struct FramePresentMetrics {
     pub bitblt_count: usize,
     pub alphablend_count: usize,
     pub fallback_count: usize,
+    pub cache_budget_bytes: usize,
+    pub cache_resident_bytes: usize,
+    pub cache_entries: usize,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub cache_evictions: u64,
     pub blit_pixels: u64,
     pub static_layer_blits: FrameBlitSourceMetrics,
     pub overlay_blits: FrameBlitSourceMetrics,
@@ -177,6 +183,8 @@ pub struct FrameSample {
     pub submit_scope: &'static str,
     pub fallback_reason: Option<&'static str>,
     pub primary_reason: Option<&'static str>,
+    pub recovery_state: &'static str,
+    pub recovery_attempt: u8,
     pub render: FrameRenderMetrics,
     pub present: FramePresentMetrics,
 }
@@ -327,6 +335,8 @@ mod tests {
             submit_scope: "test",
             fallback_reason: None,
             primary_reason: None,
+            recovery_state: "healthy",
+            recovery_attempt: 0,
             render: FrameRenderMetrics::default(),
             present: FramePresentMetrics::default(),
         }
@@ -359,7 +369,7 @@ mod tests {
         registration.record(
             sample(1, 2.0, DiagnosticPresentMode::Dirty),
             &HostTree::new(),
-            UiRect::new(0, 0, 100, 80),
+            UiRect::new(0.0, 0.0, 100.0, 80.0),
         );
 
         assert_eq!(count.load(Ordering::SeqCst), 1);

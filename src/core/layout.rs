@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
+};
 
 use super::{EdgeInsets, HostTree, Size, UiId, UiRect};
 
@@ -16,16 +19,39 @@ pub enum Align {
     Stretch,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LayoutSpec {
     Absolute,
     Stack {
         axis: Axis,
-        gap: i32,
+        gap: f32,
         padding: EdgeInsets,
         align: Align,
     },
     Fixed(Size),
+}
+
+impl Eq for LayoutSpec {}
+
+impl Hash for LayoutSpec {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::Absolute => {}
+            Self::Stack {
+                axis,
+                gap,
+                padding,
+                align,
+            } => {
+                axis.hash(state);
+                gap.to_bits().hash(state);
+                padding.hash(state);
+                align.hash(state);
+            }
+            Self::Fixed(size) => size.hash(state),
+        }
+    }
 }
 
 impl Default for LayoutSpec {
@@ -356,8 +382,8 @@ fn layout_subtree(tree: &mut HostTree, root: UiId) {
     }
 }
 
-fn translate_subtree(tree: &mut HostTree, root: &UiId, x: i32, y: i32) {
-    if x == 0 && y == 0 {
+fn translate_subtree(tree: &mut HostTree, root: &UiId, x: f32, y: f32) {
+    if x == 0.0 && y == 0.0 {
         return;
     }
     let Some(node) = tree.node(root).cloned() else {
@@ -372,12 +398,12 @@ fn translate_subtree(tree: &mut HostTree, root: &UiId, x: i32, y: i32) {
     }
 }
 
-fn stack_child_rect(content: UiRect, axis: Axis, align: Align, cursor: i32, size: Size) -> UiRect {
+fn stack_child_rect(content: UiRect, axis: Axis, align: Align, cursor: f32, size: Size) -> UiRect {
     match axis {
         Axis::Horizontal => {
             let top = match align {
                 Align::Start => content.top,
-                Align::Center => content.top + (content.height() - size.height) / 2,
+                Align::Center => content.top + (content.height() - size.height) / 2.0,
                 Align::End => content.bottom - size.height,
                 Align::Stretch => content.top,
             };
@@ -391,7 +417,7 @@ fn stack_child_rect(content: UiRect, axis: Axis, align: Align, cursor: i32, size
         Axis::Vertical => {
             let left = match align {
                 Align::Start => content.left,
-                Align::Center => content.left + (content.width() - size.width) / 2,
+                Align::Center => content.left + (content.width() - size.width) / 2.0,
                 Align::End => content.right - size.width,
                 Align::Stretch => content.left,
             };
@@ -420,12 +446,12 @@ mod tests {
             UiNode::new(
                 root_id.clone(),
                 UiNodeKind::Group,
-                UiRect::new(10, 20, 210, 220),
+                UiRect::new(10.0, 20.0, 210.0, 220.0),
             )
             .layout(LayoutSpec::Stack {
                 axis: Axis::Vertical,
-                gap: 4,
-                padding: EdgeInsets::all(8),
+                gap: 4.0,
+                padding: EdgeInsets::all(8.0),
                 align: Align::Start,
             }),
         );
@@ -433,16 +459,16 @@ mod tests {
             UiNode::new(
                 child_id.clone(),
                 UiNodeKind::Group,
-                UiRect::new(0, 0, 40, 30),
+                UiRect::new(0.0, 0.0, 40.0, 30.0),
             )
             .parent(root_id)
-            .layout(LayoutSpec::Fixed(Size::new(40, 30))),
+            .layout(LayoutSpec::Fixed(Size::new(40.0, 30.0))),
         );
         tree.push(
             UiNode::new(
                 grandchild_id.clone(),
                 UiNodeKind::Text,
-                UiRect::new(5, 5, 15, 15),
+                UiRect::new(5.0, 5.0, 15.0, 15.0),
             )
             .parent(child_id.clone()),
         );
@@ -451,11 +477,11 @@ mod tests {
 
         assert_eq!(
             tree.node(&child_id).unwrap().layout_rect,
-            UiRect::new(18, 28, 58, 58)
+            UiRect::new(18.0, 28.0, 58.0, 58.0)
         );
         assert_eq!(
             tree.node(&grandchild_id).unwrap().layout_rect,
-            UiRect::new(23, 33, 33, 43)
+            UiRect::new(23.0, 33.0, 33.0, 43.0)
         );
     }
 
@@ -467,15 +493,15 @@ mod tests {
         first.push(UiNode::new(
             id.clone(),
             UiNodeKind::Text,
-            UiRect::new(0, 0, 20, 10),
+            UiRect::new(0.0, 0.0, 20.0, 10.0),
         ));
         assert_eq!(runtime.update(&mut first).laid_out_nodes, 1);
 
         let mut second = HostTree::new();
         second.push(
-            UiNode::new(id, UiNodeKind::Text, UiRect::new(0, 0, 20, 10)).text(
+            UiNode::new(id, UiNodeKind::Text, UiRect::new(0.0, 0.0, 20.0, 10.0)).text(
                 "changed",
-                super::super::TextStyle::new(super::super::Color::WHITE, 12, 400),
+                super::super::TextStyle::new(super::super::Color::WHITE, 12.0, 400),
             ),
         );
         let metrics = runtime.update(&mut second);
@@ -489,17 +515,17 @@ mod tests {
         let left_child = UiId::owned("left-child");
         let right = UiId::owned("right-stack");
         let right_child = UiId::owned("right-child");
-        let build = |left_width| {
+        let build = |left_width: f32| {
             let mut tree = HostTree::new();
             for (id, rect) in [
-                (left.clone(), UiRect::new(0, 0, 100, 100)),
-                (right.clone(), UiRect::new(100, 0, 200, 100)),
+                (left.clone(), UiRect::new(0.0, 0.0, 100.0, 100.0)),
+                (right.clone(), UiRect::new(100.0, 0.0, 200.0, 100.0)),
             ] {
                 tree.push(
                     UiNode::new(id, UiNodeKind::Group, rect).layout(LayoutSpec::Stack {
                         axis: Axis::Vertical,
-                        gap: 0,
-                        padding: EdgeInsets::all(0),
+                        gap: 0.0,
+                        padding: EdgeInsets::all(0.0),
                         align: Align::Start,
                     }),
                 );
@@ -508,26 +534,26 @@ mod tests {
                 UiNode::new(
                     left_child.clone(),
                     UiNodeKind::Panel,
-                    UiRect::new(0, 0, left_width, 20),
+                    UiRect::new(0.0, 0.0, left_width, 20.0),
                 )
                 .parent(left.clone())
-                .layout(LayoutSpec::Fixed(Size::new(left_width, 20))),
+                .layout(LayoutSpec::Fixed(Size::new(left_width, 20.0))),
             );
             tree.push(
                 UiNode::new(
                     right_child.clone(),
                     UiNodeKind::Panel,
-                    UiRect::new(0, 0, 40, 20),
+                    UiRect::new(0.0, 0.0, 40.0, 20.0),
                 )
                 .parent(right.clone())
-                .layout(LayoutSpec::Fixed(Size::new(40, 20))),
+                .layout(LayoutSpec::Fixed(Size::new(40.0, 20.0))),
             );
             tree
         };
         let mut runtime = LayoutRuntime::new();
-        runtime.update(&mut build(30));
+        runtime.update(&mut build(30.0));
 
-        let metrics = runtime.update(&mut build(50));
+        let metrics = runtime.update(&mut build(50.0));
 
         assert_eq!(metrics.laid_out_nodes, 2);
         assert_eq!(metrics.reused_nodes, 2);
@@ -539,23 +565,26 @@ mod tests {
         let first_child = UiId::owned("first");
         let mut first = HostTree::new();
         first.push(
-            UiNode::new(root.clone(), UiNodeKind::Group, UiRect::new(0, 0, 100, 100)).layout(
-                LayoutSpec::Stack {
-                    axis: Axis::Vertical,
-                    gap: 4,
-                    padding: EdgeInsets::all(0),
-                    align: Align::Start,
-                },
-            ),
+            UiNode::new(
+                root.clone(),
+                UiNodeKind::Group,
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
+            )
+            .layout(LayoutSpec::Stack {
+                axis: Axis::Vertical,
+                gap: 4.0,
+                padding: EdgeInsets::all(0.0),
+                align: Align::Start,
+            }),
         );
         first.push(
             UiNode::new(
                 first_child.clone(),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 20, 20),
+                UiRect::new(0.0, 0.0, 20.0, 20.0),
             )
             .parent(root.clone())
-            .layout(LayoutSpec::Fixed(Size::new(20, 20))),
+            .layout(LayoutSpec::Fixed(Size::new(20.0, 20.0))),
         );
         let mut runtime = LayoutRuntime::new();
         runtime.update(&mut first);
@@ -564,10 +593,10 @@ mod tests {
             UiNode::new(
                 UiId::owned("second"),
                 UiNodeKind::Panel,
-                UiRect::new(0, 0, 20, 20),
+                UiRect::new(0.0, 0.0, 20.0, 20.0),
             )
             .parent(root)
-            .layout(LayoutSpec::Fixed(Size::new(20, 20))),
+            .layout(LayoutSpec::Fixed(Size::new(20.0, 20.0))),
         );
 
         let metrics = runtime.update(&mut second);
@@ -575,7 +604,7 @@ mod tests {
         assert_eq!(metrics.laid_out_nodes, 3);
         assert_eq!(
             second.node(&UiId::owned("second")).unwrap().layout_rect.top,
-            24
+            24.0
         );
     }
 }

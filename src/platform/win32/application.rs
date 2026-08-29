@@ -36,9 +36,12 @@ use windows::{
                 Ime::{
                     ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext,
                     ImmSetCompositionWindow, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR,
-                    GCS_RESULTSTR,
+                    GCS_CURSORPOS, GCS_RESULTSTR,
                 },
-                KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
+                KeyboardAndMouse::{
+                    GetKeyState, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE,
+                    TRACKMOUSEEVENT, VK_CONTROL, VK_SHIFT,
+                },
             },
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyCaret, DestroyIcon, DestroyWindow,
@@ -56,8 +59,10 @@ use windows::{
                 WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
                 WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
                 WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_MOVING,
-                WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT, WM_SETICON, WM_SIZE, WM_SIZING, WNDCLASSEXW,
+                WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+                WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_MOVING, WM_NCCALCSIZE,
+                WM_NCHITTEST, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETICON, WM_SIZE,
+                WM_SIZING, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXW,
                 WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX,
                 WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
             },
@@ -80,12 +85,17 @@ use crate::platform::{NotificationError, NotificationHandle};
 use crate::{
     application::{
         application_root_view, AppView, ApplicationBackend, ApplicationContext, ClosePolicy,
-        RenderError, RenderErrorStage, WindowCloseHandler, WindowCommand, WindowDragExclusion,
-        WindowId, WindowMode, WindowOptions, WindowPosition,
+        RenderError, WindowCloseHandler, WindowCommand, WindowDragExclusion, WindowId, WindowMode,
+        WindowOptions, WindowPosition,
     },
     core::{
-        dispatch_runtime_output, InputEvent, KeyCode, KeyModifiers, Point, PointerButton,
-        RuntimeOutput, Size, UiEvent, UiRect,
+        dispatch_runtime_output, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState,
+        KeyboardEvent, LogicalKey, NamedKey, PhysicalKey, PhysicalPoint, PhysicalRect,
+        PhysicalSize, Point, PointerButton, PointerData, RuntimeOutput, Size, UiEvent, UiRect,
+        WheelDelta,
+    },
+    renderer::{
+        FrameInfo, FrameReason, RenderErrorStage, RenderStats, RendererCapabilities, SceneRenderer,
     },
     session::UiSession,
 };
@@ -99,6 +109,8 @@ use crate::{
 };
 
 use super::ico::create_icon_from_ico_bytes;
+
+const WM_MOUSE_LEAVE: u32 = 0x02A3;
 #[cfg(feature = "renderer-gdi")]
 use super::GdiRenderer;
 #[cfg(feature = "tray")]
@@ -160,37 +172,39 @@ impl std::fmt::Display for Win32RenderError {
 
 impl std::error::Error for Win32RenderError {}
 
-pub trait Win32Renderer: 'static {
-    fn draw(
-        &mut self,
-        hwnd: HWND,
-        target: HDC,
-        scene: &crate::core::Scene,
-        viewport: UiRect,
-    ) -> std::result::Result<(), Win32RenderError>;
+#[derive(Clone, Copy, Debug)]
+pub struct Win32RenderTarget {
+    hwnd: HWND,
+    hdc: HDC,
+}
 
-    /// Draws a retained scene using physical-pixel damage rectangles.
-    ///
-    /// Backends that cannot safely preserve previous pixels may keep the default full-draw
-    /// behavior. The platform still avoids invoking them for input that produced no damage.
-    fn draw_damage(
-        &mut self,
-        hwnd: HWND,
-        target: HDC,
-        scene: &crate::core::Scene,
-        viewport: UiRect,
-        _damage: &[UiRect],
-    ) -> std::result::Result<(), Win32RenderError> {
-        self.draw(hwnd, target, scene, viewport)
+impl Win32RenderTarget {
+    fn new(hwnd: HWND, hdc: HDC) -> Self {
+        Self { hwnd, hdc }
+    }
+
+    pub(crate) fn hwnd(self) -> HWND {
+        self.hwnd
+    }
+
+    pub(crate) fn hdc(self) -> HDC {
+        self.hdc
     }
 }
+
+pub type Win32SceneRenderer =
+    dyn SceneRenderer<Target = Win32RenderTarget, Error = Win32RenderError>;
 
 pub trait Win32RendererFactory: Send + Sync + 'static {
     fn name(&self) -> &'static str {
         "custom"
     }
 
-    fn create(&self, hwnd: HWND) -> Result<Box<dyn Win32Renderer>>;
+    fn create(&self, hwnd: HWND) -> Result<Box<Win32SceneRenderer>>;
+
+    fn text_system(&self) -> crate::text::TextSystemHandle {
+        super::portable_text_system_handle()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -202,48 +216,50 @@ impl Win32RendererFactory for GdiRendererFactory {
         "gdi"
     }
 
-    fn create(&self, _hwnd: HWND) -> Result<Box<dyn Win32Renderer>> {
+    fn create(&self, _hwnd: HWND) -> Result<Box<Win32SceneRenderer>> {
         Ok(Box::new(GdiRenderer::default()))
     }
 }
 
 #[cfg(feature = "renderer-gdi")]
-impl Win32Renderer for GdiRenderer {
-    fn draw(
-        &mut self,
-        _hwnd: HWND,
-        target: HDC,
-        scene: &crate::core::Scene,
-        viewport: UiRect,
-    ) -> std::result::Result<(), Win32RenderError> {
-        self.draw_retained(target, scene, viewport, &[viewport])
+impl SceneRenderer for GdiRenderer {
+    type Target = Win32RenderTarget;
+    type Error = Win32RenderError;
+
+    fn capabilities(&self) -> RendererCapabilities {
+        RendererCapabilities {
+            partial_redraw: true,
+            retained_surface: true,
+        }
     }
 
-    fn draw_damage(
+    fn render(
         &mut self,
-        hwnd: HWND,
-        target: HDC,
+        target: &mut Self::Target,
         scene: &crate::core::Scene,
-        viewport: UiRect,
-        damage: &[UiRect],
-    ) -> std::result::Result<(), Win32RenderError> {
+        frame: &FrameInfo<'_>,
+    ) -> std::result::Result<RenderStats, Self::Error> {
+        let damage = frame.damage();
         if damage.is_empty() {
             // Exposure paints reuse the retained surface and let BeginPaint's native clip limit
             // the copy to the region that Windows actually requested.
-            return self.draw_retained(target, scene, viewport, damage);
+            self.draw_retained(target.hdc(), scene, frame.viewport(), damage)?;
+            return Ok(RenderStats::for_frame(frame));
         }
         // BeginPaint clips its HDC to the update region that existed before rendering. Host diff
         // can discover new damage outside that region (for example, the new bounds of a moved
         // node), so present through an unclipped client DC after the retained commit is known.
-        let window_target = unsafe { GetDC(Some(hwnd)) };
+        let window_target = unsafe { GetDC(Some(target.hwnd())) };
         if window_target.is_invalid() {
-            return self.draw_retained(target, scene, viewport, damage);
+            self.draw_retained(target.hdc(), scene, frame.viewport(), damage)?;
+            return Ok(RenderStats::for_frame(frame));
         }
-        let presented = self.draw_retained(window_target, scene, viewport, damage);
+        let presented = self.draw_retained(window_target, scene, frame.viewport(), damage);
         unsafe {
-            let _ = ReleaseDC(Some(hwnd), window_target);
+            let _ = ReleaseDC(Some(target.hwnd()), window_target);
         }
-        presented
+        presented?;
+        Ok(RenderStats::for_frame(frame))
     }
 }
 
@@ -349,7 +365,7 @@ struct WindowState {
     view: AppView,
     context: ApplicationContext,
     session: UiSession,
-    renderer: Option<Box<dyn Win32Renderer>>,
+    renderer: Option<Box<Win32SceneRenderer>>,
     renderer_factory: Arc<dyn Win32RendererFactory>,
     logical_size: Size,
     minimum_size: Option<Size>,
@@ -357,7 +373,7 @@ struct WindowState {
     resizable: bool,
     native_titlebar: bool,
     rounded_corners: bool,
-    titlebar_drag_height: Option<i32>,
+    titlebar_drag_height: Option<f32>,
     drag_exclusion: Option<WindowDragExclusion>,
     windowed_style: WINDOW_STYLE,
     windowed_placement: Option<WINDOWPLACEMENT>,
@@ -380,6 +396,7 @@ struct WindowState {
     frame_index: u64,
     suppressed_ime_char_units: VecDeque<u16>,
     pending_high_surrogate: Option<u16>,
+    pointer_inside: bool,
 }
 
 impl WindowState {
@@ -450,6 +467,40 @@ struct OwnerVisibility {
     hidden_for_owner: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Win32WindowOptions {
+    pub class_name: Option<String>,
+    pub icon_bytes: Option<&'static [u8]>,
+    pub rounded_corners: bool,
+}
+
+impl Win32WindowOptions {
+    pub fn class_name(mut self, class_name: impl Into<String>) -> Self {
+        self.class_name = Some(class_name.into());
+        self
+    }
+
+    pub fn icon_bytes(mut self, bytes: &'static [u8]) -> Self {
+        self.icon_bytes = Some(bytes);
+        self
+    }
+
+    pub fn rounded_corners(mut self, enabled: bool) -> Self {
+        self.rounded_corners = enabled;
+        self
+    }
+}
+
+impl Default for Win32WindowOptions {
+    fn default() -> Self {
+        Self {
+            class_name: None,
+            icon_bytes: None,
+            rounded_corners: true,
+        }
+    }
+}
+
 impl OwnerVisibility {
     #[cfg(test)]
     fn visible() -> Self {
@@ -487,21 +538,28 @@ impl ApplicationBackend for Win32Application {
     type Error = Error;
 
     fn run(self, options: WindowOptions, view: AppView, context: ApplicationContext) -> Result<()> {
+        let win32_options = options
+            .platform_options::<Win32WindowOptions>()
+            .cloned()
+            .unwrap_or_default();
         #[cfg(feature = "images")]
         let _gdiplus = super::gdiplus::GdiPlusRuntime::start()?;
+        #[cfg(feature = "images")]
+        let _image_cache = crate::assets::install_image_cache(super::portable_image_cache_handle());
+        #[cfg(feature = "advanced-rendering")]
+        let _render_cache =
+            crate::renderer::install_render_cache(super::enhanced::portable_render_cache_handle());
         if let Some(fonts) = context.try_resource::<crate::text::FontFamilies>() {
             super::set_ui_font_families(fonts.0);
         }
+        let font_families = context
+            .try_resource::<crate::text::FontFamilies>()
+            .map_or(&["Segoe UI"][..], |families| families.0);
+        let _font_families = crate::text::install_font_families(font_families);
+        let _text_system = crate::text::install_text_system(self.renderer_factory.text_system());
         #[cfg(feature = "svg")]
         if let Some(registration) = context.try_resource::<crate::icons::IconRegistration>() {
-            if let Some(registry) = registration
-                .0
-                .lock()
-                .expect("SVG icon registration poisoned")
-                .take()
-            {
-                let _ = super::install_svg_icon_registry(registry);
-            }
+            let _ = super::install_svg_icon_registry((*registration.0).clone());
         }
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -515,9 +573,9 @@ impl ApplicationBackend for Win32Application {
                 .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
         }
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None) }?.0);
-        let class_name = wide(options.class_name.as_deref().unwrap_or(WINDOW_CLASS));
+        let class_name = wide(win32_options.class_name.as_deref().unwrap_or(WINDOW_CLASS));
         let cursor = unsafe { LoadCursorW(None, IDC_ARROW) }?;
-        let class_icons = WindowClassIcons::from_ico_bytes(options.icon_bytes)?;
+        let class_icons = WindowClassIcons::from_ico_bytes(win32_options.icon_bytes)?;
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             // WM_SIZE drives invalidation explicitly so interactive resize can be throttled.
@@ -547,6 +605,7 @@ impl ApplicationBackend for Win32Application {
             instance,
             &class_name,
             options,
+            win32_options,
             view,
             context.clone(),
             Arc::clone(&factory),
@@ -642,15 +701,23 @@ fn execute_window_command(
         WindowCommand::Show { options, view } => {
             if let Some(hwnd) = hwnd_for_id(&options.id) {
                 show_window(hwnd);
-            } else if let Ok(hwnd) = create_window(
-                HINSTANCE(instance as _),
-                class_name,
-                options,
-                application_root_view(context.clone(), view),
-                context,
-                factory,
-                dispatcher,
-            ) {
+            } else {
+                let win32_options = options
+                    .platform_options::<Win32WindowOptions>()
+                    .cloned()
+                    .unwrap_or_default();
+                let Ok(hwnd) = create_window(
+                    HINSTANCE(instance as _),
+                    class_name,
+                    options,
+                    win32_options,
+                    application_root_view(context.clone(), view),
+                    context,
+                    factory,
+                    dispatcher,
+                ) else {
+                    return;
+                };
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_SHOW);
                 }
@@ -664,10 +731,15 @@ fn execute_window_command(
                     show_window(hwnd);
                 }
             } else {
+                let win32_options = options
+                    .platform_options::<Win32WindowOptions>()
+                    .cloned()
+                    .unwrap_or_default();
                 let _ = create_window(
                     HINSTANCE(instance as _),
                     class_name,
                     options,
+                    win32_options,
                     application_root_view(context.clone(), view),
                     context,
                     factory,
@@ -749,6 +821,7 @@ fn create_window(
     instance: HINSTANCE,
     class_name: &[u16],
     options: WindowOptions,
+    win32_options: Win32WindowOptions,
     view: AppView,
     context: ApplicationContext,
     renderer_factory: Arc<dyn Win32RendererFactory>,
@@ -789,8 +862,8 @@ fn create_window(
             style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            options.size.width,
-            options.size.height,
+            options.size.width.ceil() as i32,
+            options.size.height.ceil() as i32,
             owner,
             None,
             Some(instance),
@@ -803,7 +876,7 @@ fn create_window(
     }
     set_window_corner_preference(
         hwnd,
-        options.rounded_corners && initial_mode == WindowMode::Windowed,
+        win32_options.rounded_corners && initial_mode == WindowMode::Windowed,
     );
     let renderer_name = renderer_factory.name();
     let renderer = renderer_factory.create(hwnd).map_err(|source| {
@@ -838,7 +911,7 @@ fn create_window(
                 maximum_size: options.maximum_size,
                 resizable: options.resizable,
                 native_titlebar: options.native_titlebar,
-                rounded_corners: options.rounded_corners,
+                rounded_corners: win32_options.rounded_corners,
                 titlebar_drag_height: options.titlebar_drag_height,
                 drag_exclusion: options.drag_exclusion,
                 windowed_style: style,
@@ -865,6 +938,7 @@ fn create_window(
                 frame_index: 0,
                 suppressed_ime_char_units: VecDeque::new(),
                 pending_high_surrogate: None,
+                pointer_inside: false,
             },
         );
     });
@@ -1269,33 +1343,33 @@ fn position_window(hwnd: HWND) {
     let mut cursor = POINT::default();
     let _ = unsafe { GetCursorPos(&mut cursor) };
     let origin = match (position, owner) {
-        (WindowPosition::Absolute { x, y }, _) => crate::core::Point::new(x, y),
+        (WindowPosition::Absolute { x, y }, _) => PhysicalPoint::new(x, y),
         (WindowPosition::AdjacentToOwner { gap }, Some(owner)) => {
             let mut rect = RECT::default();
             if unsafe { GetWindowRect(owner, &mut rect) }.is_ok() {
-                crate::core::Point::new(rect.right + gap, rect.top)
+                PhysicalPoint::new(rect.right + gap, rect.top)
             } else {
-                crate::core::Point::new(cursor.x + gap, cursor.y + gap)
+                PhysicalPoint::new(cursor.x + gap, cursor.y + gap)
             }
         }
         (WindowPosition::NearCursor { gap }, _) => {
-            crate::core::Point::new(cursor.x + gap, cursor.y + gap)
+            PhysicalPoint::new(cursor.x + gap, cursor.y + gap)
         }
         (WindowPosition::AdjacentToOwner { gap }, None) => {
-            crate::core::Point::new(cursor.x + gap, cursor.y + gap)
+            PhysicalPoint::new(cursor.x + gap, cursor.y + gap)
         }
         (WindowPosition::Centered, Some(owner)) => {
             let mut rect = RECT::default();
             if unsafe { GetWindowRect(owner, &mut rect) }.is_ok() {
-                crate::core::Point::new(
+                PhysicalPoint::new(
                     rect.left + ((rect.right - rect.left) - size.width) / 2,
                     rect.top + ((rect.bottom - rect.top) - size.height) / 2,
                 )
             } else {
-                crate::core::Point::new(cursor.x - size.width / 2, cursor.y - size.height / 2)
+                PhysicalPoint::new(cursor.x - size.width / 2, cursor.y - size.height / 2)
             }
         }
-        (WindowPosition::Centered, None) => crate::core::Point::new(
+        (WindowPosition::Centered, None) => PhysicalPoint::new(
             dpi.work_area.rect.left + (dpi.work_area.rect.width() - size.width) / 2,
             dpi.work_area.rect.top + (dpi.work_area.rect.height() - size.height) / 2,
         ),
@@ -1374,7 +1448,7 @@ fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
         let dpi = DpiContext::for_window(hwnd, state.logical_size);
         let logical_point = dpi
             .scale
-            .logical_point(Point::new(client_point.x, client_point.y));
+            .logical_point(PhysicalPoint::new(client_point.x, client_point.y));
         if let Some(hit) = state.session.tree().hit_test(logical_point) {
             return Some(LRESULT(
                 if hit.interaction == crate::core::InteractionRole::WindowDragRegion {
@@ -1390,12 +1464,12 @@ fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
             let _ = unsafe { GetClientRect(hwnd, &mut client) };
             let viewport = dpi
                 .scale
-                .logical_size(Size::new(client.right.max(1), client.bottom.max(1)));
+                .logical_size(PhysicalSize::new(client.right.max(1), client.bottom.max(1)));
             let excluded = state
                 .drag_exclusion
                 .map(|exclusion| exclusion(viewport.width, viewport.height))
                 .is_some_and(|rect| rect.contains(logical_point));
-            if logical_point.y >= 0 && logical_point.y < height && !excluded {
+            if logical_point.y >= 0.0 && logical_point.y < height && !excluded {
                 return Some(LRESULT(HTCAPTION as isize));
             }
         }
@@ -1404,7 +1478,7 @@ fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
     })
 }
 
-fn resize_border_hit(rect: RECT, point: Point, horizontal: i32, vertical: i32) -> u32 {
+fn resize_border_hit(rect: RECT, point: PhysicalPoint, horizontal: i32, vertical: i32) -> u32 {
     let left = point.x >= rect.left && point.x < rect.left + horizontal;
     let right = point.x < rect.right && point.x >= rect.right - horizontal;
     let top = point.y >= rect.top && point.y < rect.top + vertical;
@@ -1596,29 +1670,68 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
-            dispatch_input(
-                hwnd,
-                InputEvent::PointerDown {
-                    point: logical_point(hwnd, unpack_point(lparam)),
-                    button: PointerButton::Left,
-                },
-            );
+            dispatch_mouse_button(hwnd, lparam, PointerButton::Left, true);
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            dispatch_input(
-                hwnd,
-                InputEvent::PointerUp {
-                    point: logical_point(hwnd, unpack_point(lparam)),
-                    button: PointerButton::Left,
-                },
-            );
+            dispatch_mouse_button(hwnd, lparam, PointerButton::Left, false);
+            LRESULT(0)
+        }
+        WM_RBUTTONDOWN => {
+            dispatch_mouse_button(hwnd, lparam, PointerButton::Right, true);
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            dispatch_mouse_button(hwnd, lparam, PointerButton::Right, false);
+            LRESULT(0)
+        }
+        WM_MBUTTONDOWN => {
+            dispatch_mouse_button(hwnd, lparam, PointerButton::Middle, true);
+            LRESULT(0)
+        }
+        WM_MBUTTONUP => {
+            dispatch_mouse_button(hwnd, lparam, PointerButton::Middle, false);
+            LRESULT(0)
+        }
+        WM_XBUTTONDOWN | WM_XBUTTONUP => {
+            let button = if (wparam.0 >> 16) as u16 == 1 {
+                PointerButton::Back
+            } else {
+                PointerButton::Forward
+            };
+            dispatch_mouse_button(hwnd, lparam, button, message == WM_XBUTTONDOWN);
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
+            let pointer = PointerData::mouse(logical_point(hwnd, unpack_point(lparam)));
+            let entered = STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                let Some(window) = state.get_mut(&(hwnd.0 as isize)) else {
+                    return false;
+                };
+                if window.pointer_inside {
+                    false
+                } else {
+                    window.pointer_inside = true;
+                    true
+                }
+            });
+            track_mouse_leave(hwnd);
+            if entered {
+                dispatch_input(hwnd, InputEvent::PointerEnter(pointer));
+            }
+            dispatch_input(hwnd, InputEvent::PointerMove(pointer));
+            LRESULT(0)
+        }
+        WM_MOUSE_LEAVE => {
+            STATE.with(|state| {
+                if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+                    window.pointer_inside = false;
+                }
+            });
             dispatch_input(
                 hwnd,
-                InputEvent::PointerMove(logical_point(hwnd, unpack_point(lparam))),
+                InputEvent::PointerLeave(PointerData::mouse(current_logical_cursor(hwnd))),
             );
             LRESULT(0)
         }
@@ -1633,8 +1746,25 @@ extern "system" fn window_proc(
             dispatch_input(
                 hwnd,
                 InputEvent::Wheel {
-                    point: logical_point(hwnd, Point::new(point.x, point.y)),
-                    delta_y: ((wparam.0 >> 16) as i16 as i32) / 120,
+                    point: logical_point(hwnd, PhysicalPoint::new(point.x, point.y)),
+                    delta: WheelDelta::lines(0.0, (wparam.0 >> 16) as i16 as f32 / 120.0),
+                },
+            );
+            LRESULT(0)
+        }
+        WM_MOUSEHWHEEL => {
+            let mut point = POINT {
+                x: lparam.0 as i16 as i32,
+                y: (lparam.0 >> 16) as i16 as i32,
+            };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut point);
+            }
+            dispatch_input(
+                hwnd,
+                InputEvent::Wheel {
+                    point: logical_point(hwnd, PhysicalPoint::new(point.x, point.y)),
+                    delta: WheelDelta::lines((wparam.0 >> 16) as i16 as f32 / 120.0, 0.0),
                 },
             );
             LRESULT(0)
@@ -1649,7 +1779,7 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_IME_STARTCOMPOSITION => {
-            dispatch_input(hwnd, InputEvent::ImeStart);
+            dispatch_input(hwnd, InputEvent::Ime(ImeEvent::Enabled));
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_IME_COMPOSITION => {
@@ -1662,32 +1792,40 @@ extern "system" fn window_proc(
                             window.pending_high_surrogate = None;
                         }
                     });
-                    dispatch_input(hwnd, InputEvent::ImeCommit(text));
+                    dispatch_input(hwnd, InputEvent::Ime(ImeEvent::Commit(text)));
                 }
             } else if flags & GCS_COMPSTR.0 != 0 {
                 let text = read_ime_string(hwnd, GCS_COMPSTR).unwrap_or_default();
-                dispatch_input(hwnd, InputEvent::ImeUpdate(text));
+                let cursor = read_ime_cursor(hwnd).map(|cursor| cursor..cursor);
+                dispatch_input(hwnd, InputEvent::Ime(ImeEvent::Preedit { text, cursor }));
             }
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_IME_ENDCOMPOSITION => {
-            dispatch_input(hwnd, InputEvent::ImeEnd);
+            dispatch_input(hwnd, InputEvent::Ime(ImeEvent::Disabled));
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
-        WM_KEYDOWN => {
-            let key = key_code(wparam.0);
-            match key {
-                Some(KeyCode::Backspace) => dispatch_input(hwnd, InputEvent::Backspace),
-                Some(key) => dispatch_input(
-                    hwnd,
-                    InputEvent::KeyDown {
-                        key,
-                        modifiers: key_modifiers(),
-                    },
-                ),
-                None => {}
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            dispatch_input(
+                hwnd,
+                InputEvent::Keyboard(keyboard_event(wparam.0, lparam, KeyState::Down)),
+            );
+            if message == WM_SYSKEYDOWN {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            } else {
+                LRESULT(0)
             }
-            LRESULT(0)
+        }
+        WM_KEYUP | WM_SYSKEYUP => {
+            dispatch_input(
+                hwnd,
+                InputEvent::Keyboard(keyboard_event(wparam.0, lparam, KeyState::Up)),
+            );
+            if message == WM_SYSKEYUP {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            } else {
+                LRESULT(0)
+            }
         }
         WM_ERASEBKGND => LRESULT(1),
         WM_CLOSE => {
@@ -1882,10 +2020,10 @@ fn render_window(hwnd: HWND, target: HDC) {
             );
             return schedule_render_retry(state);
         }
-        let physical = Size::new(client.right.max(1), client.bottom.max(1));
+        let physical = PhysicalSize::new(client.right.max(1), client.bottom.max(1));
         let dpi = DpiContext::for_window(hwnd, state.logical_size);
         let logical = dpi.scale.logical_size(physical);
-        let viewport = UiRect::new(0, 0, logical.width, logical.height);
+        let viewport = UiRect::new(0.0, 0.0, logical.width, logical.height);
         #[cfg(feature = "diagnostics")]
         let build_started = state.diagnostics.as_ref().map(|_| Instant::now());
         let commit = state.session.render_view(&state.view, viewport, dpi.scale);
@@ -1897,16 +2035,13 @@ fn render_window(hwnd: HWND, target: HDC) {
             .effective_rects()
             .into_iter()
             .filter_map(|rect| {
-                dpi.scale.physical_rect_outward(rect).intersect(UiRect::new(
-                    0,
-                    0,
-                    physical.width,
-                    physical.height,
-                ))
+                dpi.scale
+                    .physical_rect_outward(rect)
+                    .intersect(PhysicalRect::new(0, 0, physical.width, physical.height))
             })
             .collect::<Vec<_>>();
         let scene = commit.scene.project_to_physical(dpi.scale);
-        let physical_viewport = UiRect::new(0, 0, physical.width, physical.height);
+        let physical_viewport = PhysicalRect::new(0, 0, physical.width, physical.height);
         if state.renderer.is_none() {
             match state.renderer_factory.create(hwnd) {
                 Ok(renderer) => state.renderer = Some(renderer),
@@ -1927,6 +2062,21 @@ fn render_window(hwnd: HWND, target: HDC) {
         }
         #[cfg(feature = "diagnostics")]
         let draw_started = state.diagnostics.as_ref().map(|_| Instant::now());
+        let frame_reason = if state.render_retry_used {
+            FrameReason::Recovery
+        } else if physical_damage.is_empty() {
+            FrameReason::PlatformExposure
+        } else {
+            FrameReason::SceneChange
+        };
+        let frame = FrameInfo::new(
+            physical_viewport,
+            &physical_damage,
+            dpi.scale,
+            frame_reason,
+            commit.damage.dirty.is_full(),
+        );
+        let mut render_target = Win32RenderTarget::new(hwnd, target);
         #[cfg(feature = "images")]
         let result = {
             let resources = state
@@ -1934,19 +2084,45 @@ fn render_window(hwnd: HWND, target: HDC) {
                 .try_resource::<crate::assets::RenderResources>()
                 .map(|resources| (*resources).clone())
                 .unwrap_or_default();
+            #[cfg(feature = "svg")]
+            let icons = state
+                .context
+                .try_resource::<crate::icons::IconRegistration>()
+                .map(|registration| Arc::clone(&registration.0));
             let Some(renderer) = state.renderer.as_mut() else {
                 return false;
             };
-            crate::assets::with_render_resources(resources, || {
-                renderer.draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage)
-            })
+            #[cfg(feature = "svg")]
+            let render = || {
+                crate::icons::with_icon_registry(icons, || {
+                    crate::assets::with_render_resources(resources, || {
+                        renderer.prepare(&mut render_target, &frame)?;
+                        renderer.render(&mut render_target, &scene, &frame)
+                    })
+                })
+            };
+            #[cfg(not(feature = "svg"))]
+            let render = || {
+                crate::assets::with_render_resources(resources, || {
+                    renderer.prepare(&mut render_target, &frame)?;
+                    renderer.render(&mut render_target, &scene, &frame)
+                })
+            };
+            render()
         };
         #[cfg(not(feature = "images"))]
         let result = state
             .renderer
             .as_mut()
             .expect("renderer was created before drawing")
-            .draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage);
+            .prepare(&mut render_target, &frame)
+            .and_then(|_| {
+                state
+                    .renderer
+                    .as_mut()
+                    .expect("renderer was created before drawing")
+                    .render(&mut render_target, &scene, &frame)
+            });
         #[cfg(feature = "diagnostics")]
         let draw_present_duration = draw_started.map(|started| started.elapsed());
         #[cfg(feature = "diagnostics")]
@@ -1954,7 +2130,7 @@ fn render_window(hwnd: HWND, target: HDC) {
             take_frame_present_metrics(state.renderer_factory.name(), rect_pixels(&physical_damage))
         });
         match result {
-            Ok(()) => {
+            Ok(_stats) => {
                 state.render_retry_used = false;
                 state.session.runtime().run_effects();
                 #[cfg(feature = "diagnostics")]
@@ -1991,6 +2167,8 @@ fn render_window(hwnd: HWND, target: HDC) {
                             },
                             fallback_reason: commit.damage.dirty.fallback_reason(),
                             primary_reason: commit.damage.reasons.first().map(damage_reason_label),
+                            recovery_state: "healthy",
+                            recovery_attempt: 0,
                             render: FrameRenderMetrics {
                                 #[cfg(feature = "diagnostics-timing")]
                                 build_host_tree_ms: timings.retained_snapshot_ms
@@ -2098,7 +2276,7 @@ fn render_window(hwnd: HWND, target: HDC) {
 }
 
 #[cfg(feature = "diagnostics")]
-fn rect_pixels(rects: &[UiRect]) -> u64 {
+fn rect_pixels(rects: &[PhysicalRect]) -> u64 {
     rects.iter().fold(0_u64, |total, rect| {
         total.saturating_add(
             (rect.width().max(0) as u64).saturating_mul(rect.height().max(0) as u64),
@@ -2258,7 +2436,7 @@ fn ime_composition_point(output: &RuntimeOutput) -> Option<Option<Point>> {
             UiEvent::FocusChanged { current, .. } => Some(
                 current
                     .as_ref()
-                    .map(|hit| Point::new(hit.rect.left + 12, hit.rect.bottom + 4)),
+                    .map(|hit| Point::new(hit.rect.left + 12.0, hit.rect.bottom + 4.0)),
             ),
             _ => None,
         })
@@ -2373,40 +2551,156 @@ fn request_window_repaint(hwnd: HWND, repaint: WindowRepaint) {
     }
 }
 
-fn logical_point(hwnd: HWND, point: Point) -> Point {
+fn logical_point(hwnd: HWND, point: PhysicalPoint) -> Point {
     STATE.with(|state| {
         state
             .borrow()
             .get(&(hwnd.0 as isize))
             .map(|state| DpiContext::for_window(hwnd, state.logical_size).logical_point(point))
-            .unwrap_or(point)
+            .unwrap_or_else(|| Point::new(point.x as f32, point.y as f32))
     })
 }
 
-fn unpack_point(lparam: LPARAM) -> Point {
-    Point::new(lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32)
+fn dispatch_mouse_button(hwnd: HWND, lparam: LPARAM, button: PointerButton, pressed: bool) {
+    let pointer = PointerData::mouse(logical_point(hwnd, unpack_point(lparam)));
+    if pressed {
+        unsafe {
+            let _ = SetCapture(hwnd);
+        }
+        dispatch_input(hwnd, InputEvent::PointerDown { pointer, button });
+    } else {
+        dispatch_input(hwnd, InputEvent::PointerUp { pointer, button });
+        unsafe {
+            let _ = ReleaseCapture();
+        }
+    }
 }
 
-fn key_code(value: usize) -> Option<KeyCode> {
+fn track_mouse_leave(hwnd: HWND) {
+    let mut tracking = TRACKMOUSEEVENT {
+        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+        dwFlags: TME_LEAVE,
+        hwndTrack: hwnd,
+        dwHoverTime: 0,
+    };
+    unsafe {
+        let _ = TrackMouseEvent(&mut tracking);
+    }
+}
+
+fn current_logical_cursor(hwnd: HWND) -> Point {
+    let mut point = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut point);
+        let _ = ScreenToClient(hwnd, &mut point);
+    }
+    logical_point(hwnd, PhysicalPoint::new(point.x, point.y))
+}
+
+fn unpack_point(lparam: LPARAM) -> PhysicalPoint {
+    PhysicalPoint::new(lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32)
+}
+
+fn logical_key(value: usize) -> LogicalKey {
     match value {
-        0x08 => Some(KeyCode::Backspace),
-        0x09 => Some(KeyCode::Tab),
-        0x0D => Some(KeyCode::Enter),
-        0x25 => Some(KeyCode::ArrowLeft),
-        0x26 => Some(KeyCode::ArrowUp),
-        0x27 => Some(KeyCode::ArrowRight),
-        0x28 => Some(KeyCode::ArrowDown),
-        0x41 => Some(KeyCode::A),
-        0x43 => Some(KeyCode::C),
-        0x56 => Some(KeyCode::V),
-        _ => None,
+        0x08 => NamedKey::Backspace.into(),
+        0x09 => NamedKey::Tab.into(),
+        0x0D => NamedKey::Enter.into(),
+        0x10 | 0xA0 | 0xA1 => NamedKey::Shift.into(),
+        0x11 | 0xA2 | 0xA3 => NamedKey::Control.into(),
+        0x12 | 0xA4 | 0xA5 => NamedKey::Alt.into(),
+        0x14 => NamedKey::CapsLock.into(),
+        0x1B => NamedKey::Escape.into(),
+        0x21 => NamedKey::PageUp.into(),
+        0x22 => NamedKey::PageDown.into(),
+        0x23 => NamedKey::End.into(),
+        0x24 => NamedKey::Home.into(),
+        0x25 => NamedKey::ArrowLeft.into(),
+        0x26 => NamedKey::ArrowUp.into(),
+        0x27 => NamedKey::ArrowRight.into(),
+        0x28 => NamedKey::ArrowDown.into(),
+        0x2E => NamedKey::Delete.into(),
+        0x5B | 0x5C => NamedKey::Meta.into(),
+        0x90 => NamedKey::NumLock.into(),
+        0x30..=0x39 | 0x41..=0x5A => {
+            let mut character = char::from_u32(value as u32).unwrap_or_default();
+            if !key_modifiers().shift() {
+                character = character.to_ascii_lowercase();
+            }
+            LogicalKey::Character(character.to_string())
+        }
+        _ => NamedKey::Unidentified.into(),
     }
 }
 
 fn key_modifiers() -> KeyModifiers {
-    KeyModifiers {
-        ctrl: unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0,
-        shift: unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0,
+    let mut modifiers = KeyModifiers::empty();
+    for (virtual_key, modifier) in [
+        (VK_CONTROL.0 as i32, KeyModifiers::CONTROL),
+        (VK_SHIFT.0 as i32, KeyModifiers::SHIFT),
+        (0x12, KeyModifiers::ALT),
+        (0x5B, KeyModifiers::META),
+        (0x5C, KeyModifiers::META),
+    ] {
+        if unsafe { GetKeyState(virtual_key) } < 0 {
+            modifiers.insert(modifier);
+        }
+    }
+    for (virtual_key, modifier) in [
+        (0x14, KeyModifiers::CAPS_LOCK),
+        (0x90, KeyModifiers::NUM_LOCK),
+    ] {
+        if unsafe { GetKeyState(virtual_key) } & 1 != 0 {
+            modifiers.insert(modifier);
+        }
+    }
+    modifiers
+}
+
+fn keyboard_event(value: usize, lparam: LPARAM, state: KeyState) -> KeyboardEvent {
+    let raw = lparam.0 as u32;
+    KeyboardEvent {
+        state,
+        key: logical_key(value),
+        code: physical_key(value),
+        location: key_location(value, raw),
+        modifiers: key_modifiers(),
+        repeat: state == KeyState::Down && (raw & (1 << 30) != 0 || raw & 0xFFFF > 1),
+        is_composing: false,
+    }
+}
+
+fn physical_key(value: usize) -> PhysicalKey {
+    match value {
+        0x08 => PhysicalKey::Backspace,
+        0x09 => PhysicalKey::Tab,
+        0x0D => PhysicalKey::Enter,
+        0x25 => PhysicalKey::ArrowLeft,
+        0x26 => PhysicalKey::ArrowUp,
+        0x27 => PhysicalKey::ArrowRight,
+        0x28 => PhysicalKey::ArrowDown,
+        0x41 => PhysicalKey::KeyA,
+        0x43 => PhysicalKey::KeyC,
+        0x56 => PhysicalKey::KeyV,
+        0xA0 => PhysicalKey::ShiftLeft,
+        0xA1 => PhysicalKey::ShiftRight,
+        0xA2 => PhysicalKey::ControlLeft,
+        0xA3 => PhysicalKey::ControlRight,
+        0xA4 => PhysicalKey::AltLeft,
+        0xA5 => PhysicalKey::AltRight,
+        0x5B => PhysicalKey::MetaLeft,
+        0x5C => PhysicalKey::MetaRight,
+        _ => PhysicalKey::Unidentified,
+    }
+}
+
+fn key_location(value: usize, raw_lparam: u32) -> KeyLocation {
+    match value {
+        0xA0 | 0xA2 | 0xA4 | 0x5B => KeyLocation::Left,
+        0xA1 | 0xA3 | 0xA5 | 0x5C => KeyLocation::Right,
+        0x60..=0x6F => KeyLocation::Numpad,
+        0x0D if raw_lparam & (1 << 24) != 0 => KeyLocation::Numpad,
+        _ => KeyLocation::Standard,
     }
 }
 
@@ -2477,6 +2771,18 @@ fn read_ime_string(
     }
 }
 
+fn read_ime_cursor(hwnd: HWND) -> Option<usize> {
+    unsafe {
+        let context = ImmGetContext(hwnd);
+        if context.is_invalid() {
+            return None;
+        }
+        let cursor = ImmGetCompositionStringW(context, GCS_CURSORPOS, None, 0);
+        let _ = ImmReleaseContext(hwnd, context);
+        (cursor >= 0).then_some(cursor as usize)
+    }
+}
+
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -2490,8 +2796,9 @@ mod tests {
     use super::{
         can_advance_window_animations, decode_utf16_char_unit, resize_border_hit,
         suppress_committed_ime_char, window_corner_preference, window_style, OwnerVisibility,
-        Point, ResizeFrameThrottle, WindowInteractionMode, WindowOptions, DWMWCP_DONOTROUND,
-        DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT, WS_CAPTION, WS_POPUP, WS_THICKFRAME,
+        PhysicalPoint, ResizeFrameThrottle, Win32WindowOptions, WindowInteractionMode,
+        WindowOptions, DWMWCP_DONOTROUND, DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT,
+        WS_CAPTION, WS_POPUP, WS_THICKFRAME,
     };
 
     #[test]
@@ -2517,6 +2824,23 @@ mod tests {
     fn corner_preferences_map_to_explicit_dwm_requests() {
         assert_eq!(window_corner_preference(true), DWMWCP_ROUND);
         assert_eq!(window_corner_preference(false), DWMWCP_DONOTROUND);
+    }
+
+    #[test]
+    fn win32_window_options_own_class_icon_and_corner_policy() {
+        static ICON: &[u8] = b"icon";
+        let defaults = Win32WindowOptions::default();
+        assert_eq!(defaults.class_name, None);
+        assert_eq!(defaults.icon_bytes, None);
+        assert!(defaults.rounded_corners);
+
+        let custom = Win32WindowOptions::default()
+            .class_name("Example.Window")
+            .icon_bytes(ICON)
+            .rounded_corners(false);
+        assert_eq!(custom.class_name.as_deref(), Some("Example.Window"));
+        assert_eq!(custom.icon_bytes, Some(ICON));
+        assert!(!custom.rounded_corners);
     }
 
     #[test]
@@ -2549,15 +2873,15 @@ mod tests {
         };
 
         assert_eq!(
-            resize_border_hit(rect, Point::new(101, 201), 8, 8),
+            resize_border_hit(rect, PhysicalPoint::new(101, 201), 8, 8),
             HTTOPLEFT
         );
         assert_eq!(
-            resize_border_hit(rect, Point::new(899, 699), 8, 8),
+            resize_border_hit(rect, PhysicalPoint::new(899, 699), 8, 8),
             HTBOTTOMRIGHT
         );
         assert_eq!(
-            resize_border_hit(rect, Point::new(500, 400), 8, 8),
+            resize_border_hit(rect, PhysicalPoint::new(500, 400), 8, 8),
             HTCLIENT
         );
     }

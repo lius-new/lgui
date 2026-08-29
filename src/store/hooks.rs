@@ -333,7 +333,7 @@ mod tests {
         executions: Arc<AtomicUsize>,
         action: Arc<Mutex<Option<BoundStoreAction<CounterStore>>>>,
     ) {
-        let viewport = UiRect::new(0, 0, 10, 10);
+        let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
         let interaction = ui.interaction_state();
         let mut builder = HostTreeBuilder::new();
         builder.mount(

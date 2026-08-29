@@ -1,8 +1,8 @@
-use crate::core::{Size, UiRect, UiScale};
+use crate::core::{PhysicalPoint, PhysicalRect, PhysicalSize, Size, UiScale};
 
 pub const BASE_DPI: u32 = 96;
 pub const MIN_READABLE_SCALE: f32 = 0.80;
-const WORK_AREA_MARGIN_LOGICAL: i32 = 12;
+const WORK_AREA_MARGIN_LOGICAL: f32 = 12.0;
 const AUTO_TARGET_WIDTH_RATIO: f32 = 0.72;
 const AUTO_TARGET_HEIGHT_RATIO: f32 = 0.75;
 
@@ -24,12 +24,12 @@ impl ScalePreference {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorkArea {
-    pub rect: UiRect,
+    pub rect: PhysicalRect,
 }
 
 impl WorkArea {
-    pub fn size(self) -> Size {
-        Size::new(self.rect.width().max(1), self.rect.height().max(1))
+    pub fn size(self) -> PhysicalSize {
+        PhysicalSize::new(self.rect.width().max(1), self.rect.height().max(1))
     }
 }
 
@@ -41,7 +41,7 @@ pub struct ScaleContext {
     pub scale: UiScale,
     pub work_area: WorkArea,
     pub preferred_logical_size: Size,
-    pub physical_window_size: Size,
+    pub physical_window_size: PhysicalSize,
     pub compact: bool,
 }
 
@@ -54,23 +54,23 @@ impl ScaleContext {
     ) -> Self {
         let dpi = dpi.max(BASE_DPI);
         let os_scale = dpi as f32 / BASE_DPI as f32;
-        let margin = (WORK_AREA_MARGIN_LOGICAL as f32 * os_scale).round() as i32;
-        let available = Size::new(
+        let margin = (WORK_AREA_MARGIN_LOGICAL * os_scale).round() as i32;
+        let available = PhysicalSize::new(
             (work_area.size().width - margin * 2).max(1),
             (work_area.size().height - margin * 2).max(1),
         );
-        let fit_scale = (available.width as f32 / preferred_logical_size.width.max(1) as f32)
-            .min(available.height as f32 / preferred_logical_size.height.max(1) as f32);
+        let fit_scale = (available.width as f32 / preferred_logical_size.width.max(1.0))
+            .min(available.height as f32 / preferred_logical_size.height.max(1.0));
         let requested_scale = match preference.multiplier() {
             Some(multiplier) => os_scale * multiplier,
             None => {
                 let work_size = work_area.size();
                 let auto_scale = (work_size.width as f32 * AUTO_TARGET_WIDTH_RATIO
-                    / preferred_logical_size.width.max(1) as f32)
-                    .min(
-                        work_size.height as f32 * AUTO_TARGET_HEIGHT_RATIO
-                            / preferred_logical_size.height.max(1) as f32,
-                    );
+                    / preferred_logical_size.width.max(1.0))
+                .min(
+                    work_size.height as f32 * AUTO_TARGET_HEIGHT_RATIO
+                        / preferred_logical_size.height.max(1.0),
+                );
                 auto_scale.clamp(MIN_READABLE_SCALE, os_scale)
             }
         };
@@ -94,10 +94,10 @@ impl ScaleContext {
             && self.preference == other.preference
     }
 
-    pub fn clamp_origin(self, proposed: crate::core::Point, size: Size) -> crate::core::Point {
+    pub fn clamp_origin(self, proposed: PhysicalPoint, size: PhysicalSize) -> PhysicalPoint {
         let max_x = (self.work_area.rect.right - size.width).max(self.work_area.rect.left);
         let max_y = (self.work_area.rect.bottom - size.height).max(self.work_area.rect.top);
-        crate::core::Point::new(
+        PhysicalPoint::new(
             proposed.x.clamp(self.work_area.rect.left, max_x),
             proposed.y.clamp(self.work_area.rect.top, max_y),
         )
@@ -110,7 +110,7 @@ mod tests {
 
     fn work(width: i32, height: i32) -> WorkArea {
         WorkArea {
-            rect: UiRect::new(0, 0, width, height),
+            rect: PhysicalRect::new(0, 0, width, height),
         }
     }
 
@@ -119,7 +119,7 @@ mod tests {
         let context = ScaleContext::resolve(
             144,
             work(1920, 1040),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Auto,
         );
 
@@ -133,7 +133,7 @@ mod tests {
         let context = ScaleContext::resolve(
             144,
             work(2560, 1400),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Multiplier(0.8),
         );
 
@@ -145,7 +145,7 @@ mod tests {
         let context = ScaleContext::resolve(
             120,
             work(1024, 700),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Multiplier(1.0),
         );
 
@@ -159,15 +159,15 @@ mod tests {
         let context = ScaleContext::resolve(
             96,
             WorkArea {
-                rect: UiRect::new(-1920, 0, 0, 1080),
+                rect: PhysicalRect::new(-1920, 0, 0, 1080),
             },
-            Size::new(800, 600),
+            Size::new(800.0, 600.0),
             ScalePreference::Multiplier(1.0),
         );
 
         assert_eq!(
-            context.clamp_origin(crate::core::Point::new(-2200, -100), Size::new(800, 600)),
-            crate::core::Point::new(-1920, 0)
+            context.clamp_origin(PhysicalPoint::new(-2200, -100), PhysicalSize::new(800, 600)),
+            PhysicalPoint::new(-1920, 0)
         );
     }
 
@@ -176,21 +176,21 @@ mod tests {
         let primary = ScaleContext::resolve(
             96,
             work(2560, 1400),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Auto,
         );
         let secondary = ScaleContext::resolve(
             96,
             WorkArea {
-                rect: UiRect::new(-1920, 0, 0, 1040),
+                rect: PhysicalRect::new(-1920, 0, 0, 1040),
             },
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Auto,
         );
         let manual = ScaleContext::resolve(
             96,
             work(2560, 1400),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Multiplier(1.0),
         );
 
@@ -204,12 +204,12 @@ mod tests {
         let context = ScaleContext::resolve(
             96,
             work(1920, 1032),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Auto,
         );
 
         assert!((context.scale.factor() - 0.9).abs() < 0.001);
-        assert_eq!(context.physical_window_size, Size::new(1289, 774));
+        assert_eq!(context.physical_window_size, PhysicalSize::new(1289, 774));
     }
 
     #[test]
@@ -217,11 +217,11 @@ mod tests {
         let context = ScaleContext::resolve(
             96,
             work(1920, 1032),
-            Size::new(1432, 860),
+            Size::new(1432.0, 860.0),
             ScalePreference::Multiplier(0.5),
         );
 
         assert_eq!(context.scale, UiScale::new(0.5));
-        assert_eq!(context.physical_window_size, Size::new(716, 430));
+        assert_eq!(context.physical_window_size, PhysicalSize::new(716, 430));
     }
 }

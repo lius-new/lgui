@@ -49,8 +49,8 @@ fn render_faded_divider(id: UiId, divider: FadedDivider) -> UiElement {
     let mut root = UiElement::group(id.clone(), divider.rect);
     match divider.direction {
         DividerDirection::Vertical => {
-            let height = divider.rect.height().max(1);
-            let x = (divider.rect.left + divider.rect.right) / 2;
+            let height = divider.rect.height().max(1.0).ceil() as i32;
+            let x = (divider.rect.left + divider.rect.right) / 2.0;
             for offset in 0..height {
                 let alpha = faded_alpha(offset, height, divider.max_alpha);
                 if alpha == 0 {
@@ -61,9 +61,9 @@ fn render_faded_divider(id: UiId, divider: FadedDivider) -> UiElement {
                         UiId::owned(format!("{}.{}", id.as_str(), offset)),
                         UiRect::new(
                             x,
-                            divider.rect.top + offset,
-                            x + 1,
-                            divider.rect.top + offset + 1,
+                            divider.rect.top + offset as f32,
+                            x + 1.0,
+                            divider.rect.top + offset as f32 + 1.0,
                         ),
                         VisualStyle::filled(divider.color).alpha(alpha),
                     )
@@ -72,8 +72,8 @@ fn render_faded_divider(id: UiId, divider: FadedDivider) -> UiElement {
             }
         }
         DividerDirection::Horizontal => {
-            let width = divider.rect.width().max(1);
-            let y = (divider.rect.top + divider.rect.bottom) / 2;
+            let width = divider.rect.width().max(1.0).ceil() as i32;
+            let y = (divider.rect.top + divider.rect.bottom) / 2.0;
             for offset in 0..width {
                 let alpha = faded_alpha(offset, width, divider.max_alpha);
                 if alpha == 0 {
@@ -83,10 +83,10 @@ fn render_faded_divider(id: UiId, divider: FadedDivider) -> UiElement {
                     UiElement::panel(
                         UiId::owned(format!("{}.{}", id.as_str(), offset)),
                         UiRect::new(
-                            divider.rect.left + offset,
+                            divider.rect.left + offset as f32,
                             y,
-                            divider.rect.left + offset + 1,
-                            y + 1,
+                            divider.rect.left + offset as f32 + 1.0,
+                            y + 1.0,
                         ),
                         VisualStyle::filled(divider.color).alpha(alpha),
                     )
