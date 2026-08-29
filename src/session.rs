@@ -92,7 +92,7 @@ impl UiSession {
     }
 
     pub fn advance(&mut self, elapsed_ms: f32) -> super::core::RuntimeOutput {
-        self.runtime.advance(&self.tree, elapsed_ms)
+        self.runtime.advance(&mut self.tree, elapsed_ms)
     }
 
     pub fn handle_default_action(

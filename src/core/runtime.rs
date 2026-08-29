@@ -1,8 +1,9 @@
 use super::{
-    apply_events_to_animations, AnimProperty, AnimationRegistry, ComponentStateStore,
-    ComponentTree, ContextRegistry, DirtyTracker, EffectRegistry, HookStateStore, HostTree,
-    InputEvent, KeyCode, UiAction, UiActionEvent, UiEvent, UiEventDispatcher, UiEventPayload,
-    UiHandlerEvent, UiId, UiRect, UiTaskSpawner, UiUpdateQueue, UiWake,
+    apply_events_to_animations, component_state::RetainedNodeUpdate, AnimProperty,
+    AnimationRegistry, ComponentStateStore, ComponentTree, ContextRegistry, DirtyTracker,
+    EffectRegistry, HookStateStore, HostTree, InputEvent, KeyCode, UiAction, UiActionEvent,
+    UiEvent, UiEventDispatcher, UiEventPayload, UiHandlerEvent, UiId, UiRect, UiTaskSpawner,
+    UiUpdateQueue, UiWake,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -350,7 +351,7 @@ impl UiRuntime {
         }
     }
 
-    pub fn advance(&mut self, tree: &HostTree, elapsed_ms: f32) -> RuntimeOutput {
+    pub fn advance(&mut self, tree: &mut HostTree, elapsed_ms: f32) -> RuntimeOutput {
         let animation_changed = self.animations.advance(elapsed_ms);
         let mut frame_interval_ms = animation_changed.then_some(16);
         let animation_ids = self.animations.take_dirty_ids();
@@ -359,27 +360,36 @@ impl UiRuntime {
         let component_invalidations = self.component_states.advance_invalidations(elapsed_ms);
         let component_changed = !component_invalidations.is_empty();
         let mut route_changed = false;
+        let mut retained_dirty_bounds: Option<UiRect> = None;
+        let mut regular_dirty_ids = Vec::new();
         for invalidation in &component_invalidations {
             frame_interval_ms = Some(
                 frame_interval_ms.map_or(invalidation.frame_interval_ms, |current| {
                     current.min(invalidation.frame_interval_ms)
                 }),
             );
-            if let Some(owner) = invalidation.owner {
+            if let Some(RetainedNodeUpdate::CompositingLayer(spec)) = invalidation.retained_update {
+                if let Some(bounds) = tree.update_compositing_layer(&invalidation.target_id, spec) {
+                    retained_dirty_bounds =
+                        Some(retained_dirty_bounds.map_or(bounds, |current| current.union(bounds)));
+                }
+            } else if let Some(owner) = invalidation.owner {
                 self.component_tree.mark_dirty(owner);
+                regular_dirty_ids.push(invalidation.target_id.clone());
             } else {
                 self.mark_component_owners(tree, std::iter::once(&invalidation.target_id));
+                regular_dirty_ids.push(invalidation.target_id.clone());
             }
             route_changed |= self
                 .component_states
                 .take_route_invalidation(&invalidation.state_id);
         }
-        self.dirty.mark_animation_ids(
-            component_invalidations
-                .into_iter()
-                .map(|invalidation| invalidation.target_id),
-        );
-        let dirty_bounds = self.dirty.take().bounds(tree);
+        self.dirty.mark_animation_ids(regular_dirty_ids);
+        let dirty_bounds = match (self.dirty.take().bounds(tree), retained_dirty_bounds) {
+            (Some(regular), Some(retained)) => Some(regular.union(retained)),
+            (Some(bounds), None) | (None, Some(bounds)) => Some(bounds),
+            (None, None) => None,
+        };
         self.frame_interval_ms = frame_interval_ms;
         RuntimeOutput {
             events: Vec::new(),
@@ -620,21 +630,51 @@ mod tests {
     use std::any::Any;
 
     use super::super::{
-        AnimationBinding, ComponentActionOutcome, ComponentState, InputEvent, InteractionRole,
-        Point, PointerButton, UiNode, UiNodeKind, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION,
-        POINTER_UP_ACTION,
+        compile_scene, AnimationBinding, ComponentActionOutcome, ComponentState,
+        CompositingLayerAnimation, CompositingLayerSpec, InputEvent, InteractionRole, Point,
+        PointerButton, ScenePrimitive, UiNode, UiNodeKind, VisualStyle, POINTER_DOWN_ACTION,
+        POINTER_DRAG_ACTION, POINTER_UP_ACTION,
     };
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct RetainedLayerAnimation {
+        translation_x: f32,
+    }
+
+    impl CompositingLayerAnimation for RetainedLayerAnimation {
+        fn advance(&mut self, _elapsed_ms: f32) -> bool {
+            self.translation_x += 10.0;
+            true
+        }
+
+        fn compositing_layer_spec(&self) -> CompositingLayerSpec {
+            CompositingLayerSpec::new().translation(self.translation_x, 0.0)
+        }
+    }
+
+    fn compositing_content_signature(scene: &super::super::Scene) -> u64 {
+        scene
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                ScenePrimitive::CompositingLayer {
+                    content_signature, ..
+                } => Some(*content_signature),
+                _ => None,
+            })
+            .expect("compositing layer command")
+    }
 
     #[test]
     fn tree_sync_drops_hover_for_removed_nodes() {
         let button_id = UiId::new("start");
-        let button_tree = interactive_button_tree(button_id.clone());
+        let mut button_tree = interactive_button_tree(button_id.clone());
         let empty_tree = HostTree::new();
         let mut runtime = UiRuntime::new();
 
         runtime.handle_input(&button_tree, InputEvent::PointerMove(Point::new(10, 10)));
-        runtime.advance(&button_tree, 1000.0);
+        runtime.advance(&mut button_tree, 1000.0);
 
         assert_eq!(runtime.interaction_state().hovered, Some(button_id.clone()));
         assert_eq!(
@@ -759,13 +799,74 @@ mod tests {
             |_state: &mut AlwaysAnimatingState| {},
         );
 
-        let output = runtime.advance(&tree, 16.0);
+        let output = runtime.advance(&mut tree, 16.0);
 
         assert!(output.animation_changed);
         assert_eq!(output.dirty_bounds, Some(target_bounds));
         assert_eq!(runtime.frame_interval_ms(), Some(33));
         assert!(runtime.component_tree().is_dirty(owner));
         assert!(!runtime.component_tree().is_dirty(unrelated_owner));
+    }
+
+    #[test]
+    fn retained_layer_animation_updates_composition_without_dirtying_component() {
+        let mut runtime = UiRuntime::new();
+        let owner = {
+            let components = runtime.component_tree();
+            components.begin_render();
+            let owner = components.root(UiId::owned("retained-owner"), "retained-owner");
+            components.begin_component_execution(owner);
+            components.finish_component(owner);
+            components.end_render();
+            owner
+        };
+        let layer_id = UiId::owned("animated-layer");
+        let child_id = UiId::owned("static-child");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                layer_id.clone(),
+                UiNodeKind::CompositingLayer,
+                UiRect::new(0, 0, 20, 20),
+            )
+            .component_owner(owner)
+            .compositing_layer(CompositingLayerSpec::new()),
+        );
+        tree.push(
+            UiNode::new(child_id, UiNodeKind::Panel, UiRect::new(2, 2, 18, 18))
+                .parent(layer_id.clone())
+                .component_owner(owner)
+                .style(VisualStyle::filled(super::super::Color::WHITE)),
+        );
+        let _ = tree.take_projection_changes();
+        let before_signature = compositing_content_signature(&compile_scene(&tree));
+        runtime.component_states().with_mut_for_compositing_layer(
+            &layer_id,
+            layer_id.clone(),
+            |_state: &mut RetainedLayerAnimation| {},
+        );
+
+        let output = runtime.advance(&mut tree, 16.0);
+
+        assert!(output.animation_changed);
+        assert_eq!(output.dirty_bounds, Some(UiRect::new(0, 0, 30, 20)));
+        assert!(!runtime.component_tree().is_dirty(owner));
+        assert_eq!(
+            tree.node(&layer_id)
+                .and_then(|node| node.compositing_layer)
+                .expect("layer spec")
+                .transform
+                .translation_x(),
+            10.0
+        );
+        let changes = tree.take_projection_changes();
+        assert_eq!(changes.changed.len(), 1);
+        assert!(changes.changed.contains(&layer_id));
+        assert!(!changes.structure_changed);
+        assert_eq!(
+            compositing_content_signature(&compile_scene(&tree)),
+            before_signature
+        );
     }
 
     #[test]
@@ -812,7 +913,7 @@ mod tests {
             |_state: &mut AlwaysAnimatingState| {},
         );
 
-        let output = runtime.advance(&tree, 16.0);
+        let output = runtime.advance(&mut tree, 16.0);
 
         assert!(output.animation_changed);
         assert_eq!(runtime.frame_interval_ms(), Some(16));

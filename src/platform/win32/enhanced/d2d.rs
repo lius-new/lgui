@@ -45,9 +45,9 @@ use super::{
 };
 use lgui::core::{
     compositing_layer_damage, Color, CompositingLayerBackground, CustomPaintStyle, IconStyle,
-    ImageFit, OverlayStyle, PathStyle, Scene, ScenePrimitive, StaticLayerBackground,
-    StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke, TextAlign, UiId,
-    UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
+    ImageFit, LayerTransform, OverlayStyle, PathStyle, Scene, ScenePrimitive,
+    StaticLayerBackground, StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke,
+    TextAlign, UiId, UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
 };
 use lgui::platform::win32::render_trace::{self as trace, TraceCategory};
 use lgui::platform::win32::{apply_dwrite_font_fallback, ui_font_family};
@@ -233,7 +233,7 @@ impl D2dRenderer {
         clip: Option<UiRect>,
     ) -> Result<()> {
         if clip
-            .and_then(|clip| clip.intersect(command.rect()))
+            .and_then(|clip| clip.intersect(command.paint_bounds()))
             .is_none()
             && clip.is_some()
         {
@@ -379,7 +379,7 @@ fn draw_commands_d2d(
 ) -> Result<()> {
     for command in commands {
         if clip
-            .and_then(|clip| clip.intersect(command.rect()))
+            .and_then(|clip| clip.intersect(command.paint_bounds()))
             .is_none()
             && clip.is_some()
         {
@@ -420,7 +420,13 @@ fn draw_command_d2d(resources: &mut D2dRenderer, command: &ScenePrimitive) -> Re
             let Some(layer) = resources.compositing_layers.get(id) else {
                 return Ok(());
             };
-            draw_bitmap_opacity(&resources.context, *rect, &layer.bitmap, spec.opacity_f32());
+            draw_compositing_layer_bitmap(
+                &resources.context,
+                *rect,
+                &layer.bitmap,
+                spec.opacity_f32(),
+                spec.transform,
+            );
             Ok(())
         }
         ScenePrimitive::BackdropBlur { rect, style, .. } => {
@@ -1347,6 +1353,45 @@ fn draw_bitmap_opacity(
     }
 }
 
+fn draw_compositing_layer_bitmap(
+    context: &ID2D1DeviceContext,
+    rect: UiRect,
+    bitmap: &ID2D1Bitmap1,
+    opacity: f32,
+    transform: LayerTransform,
+) {
+    if opacity <= 0.0 {
+        return;
+    }
+    if transform.is_identity() {
+        draw_bitmap_opacity(context, rect, bitmap, opacity);
+        return;
+    }
+
+    let mut previous = windows_numerics::Matrix3x2::identity();
+    let layer_transform = d2d_layer_transform(rect, transform);
+    unsafe {
+        context.GetTransform(&mut previous);
+        let combined = layer_transform * previous;
+        context.SetTransform(&combined);
+        draw_bitmap_opacity(context, rect, bitmap, opacity);
+        context.SetTransform(&previous);
+    }
+}
+
+fn d2d_layer_transform(rect: UiRect, transform: LayerTransform) -> windows_numerics::Matrix3x2 {
+    let center = windows_numerics::Vector2 {
+        X: rect.left as f32 + rect.width() as f32 * transform.origin_x(),
+        Y: rect.top as f32 + rect.height() as f32 * transform.origin_y(),
+    };
+    windows_numerics::Matrix3x2::scale_around(transform.scale_x(), transform.scale_y(), center)
+        * windows_numerics::Matrix3x2::rotation_around(transform.rotation_degrees_f32(), center)
+        * windows_numerics::Matrix3x2::translation(
+            transform.translation_x(),
+            transform.translation_y(),
+        )
+}
+
 fn polygon_points(path: &UiPath) -> Option<Vec<lgui::core::Point>> {
     let mut points = Vec::new();
     let mut has_close = false;
@@ -1766,5 +1811,31 @@ fn trace_custom_duration(label: &str, key: &str, duration: Duration) {
             "[ui-trace] {label}: key={key} {:.2}ms",
             duration.as_secs_f64() * 1000.0
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn d2d_matrix_matches_backend_neutral_layer_transform() {
+        let rect = UiRect::new(10, 20, 30, 60);
+        let transform = LayerTransform::identity()
+            .scale_xy(2.0, 1.0)
+            .rotation_degrees(90.0)
+            .translation(75.0, -25.0)
+            .origin(0.5, 0.5);
+        let matrix = d2d_layer_transform(rect, transform);
+        let apply = |x: f32, y: f32| {
+            (
+                x * matrix.M11 + y * matrix.M21 + matrix.M31,
+                x * matrix.M12 + y * matrix.M22 + matrix.M32,
+            )
+        };
+        let actual = apply(rect.left as f32, rect.top as f32);
+        let expected = transform.transform_point(rect, rect.left as f32, rect.top as f32);
+        assert!((actual.0 - expected.0).abs() < 0.001);
+        assert!((actual.1 - expected.1).abs() < 0.001);
     }
 }

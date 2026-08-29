@@ -2,10 +2,11 @@ use std::{any::type_name, borrow::Cow, cell::Cell, panic::Location, sync::Arc};
 
 use super::reactor::RenderCx;
 use super::{
-    AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerSpec, EventPolicy,
-    InteractionRole, LayoutSpec, RenderPhase, Size, TextStyle, UiElement, UiEventContext,
-    UiEventHandler, UiEventKind, UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler,
-    UiPath, UiRect, UiRenderContext, UiScope, VisualStyle,
+    AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerAnimation,
+    CompositingLayerSpec, EventPolicy, InteractionRole, LayoutSpec, RenderPhase, Size, TextStyle,
+    UiElement, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
+    UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, UiRenderContext, UiScope,
+    VisualStyle,
 };
 
 // Declarative core shell only: this layer owns tree identity and composition,
@@ -546,6 +547,27 @@ pub fn group(rect: UiRect) -> Element {
 
 pub fn compositing_layer(rect: UiRect, spec: CompositingLayerSpec) -> Element {
     Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+        UiElement::compositing_layer(cx.id, rect, spec).children(cx.children)
+    })
+}
+
+/// Creates a retained compositing layer whose application-owned animation state updates only
+/// composition properties. Its static children are reused between frames.
+#[track_caller]
+pub fn animated_compositing_layer<T>(
+    rect: UiRect,
+    configure: impl FnOnce(&mut T) + 'static,
+) -> Element
+where
+    T: CompositingLayerAnimation,
+{
+    Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+        let (_, spec, wants_frame) = cx
+            .context
+            .compositing_layer_animation_mut(&cx.id, configure);
+        if wants_frame {
+            cx.context.hook_updates().request_frame();
+        }
         UiElement::compositing_layer(cx.id, rect, spec).children(cx.children)
     })
 }

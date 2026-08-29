@@ -39,17 +39,20 @@ pub use animation::{
     AnimationTiming,
 };
 pub use builder::{HostProjectionMetrics, HostTreeBuilder, RootComponent};
-pub use component_state::{ComponentActionOutcome, ComponentState, ComponentStateStore};
+pub use component_state::{
+    ComponentActionOutcome, ComponentState, ComponentStateStore, CompositingLayerAnimation,
+};
 pub use component_tree::{
     ComponentId, ComponentRuntimeMetrics, ComponentTree, HookId, HookSlotKind,
 };
-pub use compositing_layer::{CompositingLayerBackground, CompositingLayerSpec};
+pub use compositing_layer::{CompositingLayerBackground, CompositingLayerSpec, LayerTransform};
 pub use context::UiRenderContext;
 pub use context_value::{try_use_context, use_context, ContextProviderGuard, ContextRegistry};
 pub use declarative::{
-    clip, clip_path, component, compositing_layer, content_text, context_provider, ellipse,
-    fragment, glow, group, line, overlay, path, precompiled, text, DeclarativeView, Element,
-    ElementKey, ElementRenderCx, Fragment, IntoClickHandler, IntoElementContent,
+    animated_compositing_layer, clip, clip_path, component, compositing_layer, content_text,
+    context_provider, ellipse, fragment, glow, group, line, overlay, path, precompiled, text,
+    DeclarativeView, Element, ElementKey, ElementRenderCx, Fragment, IntoClickHandler,
+    IntoElementContent,
 };
 pub use dirty::{DirtySet, DirtyTracker};
 pub use dispatch::{dispatch_event_handlers, dispatch_hit_handlers, dispatch_runtime_output};
@@ -74,7 +77,7 @@ pub use layout::{
 pub use node::{EventPolicy, InteractionRole, UiImageSource, UiNode, UiNodeKind};
 pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
-pub(crate) use render::clear_scroll_raster_command_cache;
+pub(crate) use render::{clear_scroll_raster_command_cache, patch_compositing_layer_spec};
 pub use render::{
     commands_for_phase, compile_scene, compile_scene_root, compositing_layer_damage,
     scene_root_ids, scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene,

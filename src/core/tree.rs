@@ -1,7 +1,7 @@
 use super::{
-    compile_scene, ActionId, ComponentId, ComponentTree, EventPolicy, InteractionRole, Point,
-    Scene, UiAction, UiActionHandler, UiEvent, UiEventHandler, UiEventKind, UiEventPayload,
-    UiHandlerEvent, UiId, UiNode, UiRect,
+    compile_scene, ActionId, ComponentId, ComponentTree, CompositingLayerSpec, EventPolicy,
+    InteractionRole, Point, Scene, UiAction, UiActionHandler, UiEvent, UiEventHandler, UiEventKind,
+    UiEventPayload, UiHandlerEvent, UiId, UiNode, UiRect,
 };
 
 #[derive(Clone)]
@@ -248,6 +248,37 @@ impl HostTree {
 
     pub fn node_mut(&mut self, id: &UiId) -> Option<&mut UiNode> {
         self.nodes.iter_mut().find(|node| &node.id == id)
+    }
+
+    pub(crate) fn update_compositing_layer(
+        &mut self,
+        id: &UiId,
+        spec: CompositingLayerSpec,
+    ) -> Option<UiRect> {
+        let index = self.nodes.iter().position(|node| &node.id == id)?;
+        let node = &mut self.nodes[index];
+        let previous = node.compositing_layer?;
+        if previous == spec {
+            return None;
+        }
+
+        let visible_bounds = |spec: CompositingLayerSpec| {
+            (spec.opacity > 0).then(|| {
+                spec.transform
+                    .transformed_bounds(node.layout_rect)
+                    .inflate(node.animation_outset.0, node.animation_outset.1)
+            })
+        };
+        let old_bounds = visible_bounds(previous);
+        let new_bounds = visible_bounds(spec);
+        node.compositing_layer = Some(spec);
+        self.projection_changes.changed.insert(id.clone());
+
+        match (old_bounds, new_bounds) {
+            (Some(old), Some(new)) => Some(old.union(new)),
+            (Some(bounds), None) | (None, Some(bounds)) => Some(bounds),
+            (None, None) => None,
+        }
     }
 
     pub fn action_handler(&self, target: &UiId, id: &ActionId) -> Option<UiActionHandler> {

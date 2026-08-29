@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use super::{ComponentId, UiAction, UiId, UiScope};
+use super::{ComponentId, CompositingLayerSpec, UiAction, UiId, UiScope};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComponentActionOutcome {
@@ -72,10 +72,69 @@ pub trait ComponentState: Any {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ComponentStateBinding {
-    pub owner: ComponentId,
-    pub invalidation_id: UiId,
+/// Application-owned animation state for a retained compositing layer.
+///
+/// The framework advances this state and applies the resulting composition properties directly
+/// to the retained node. Static layer children are not rebuilt when only the spec changes.
+pub trait CompositingLayerAnimation: Clone + Default + 'static {
+    fn advance(&mut self, elapsed_ms: f32) -> bool;
+
+    fn compositing_layer_spec(&self) -> CompositingLayerSpec;
+
+    fn wants_frame(&self) -> bool {
+        true
+    }
+
+    fn frame_interval_ms(&self) -> u64 {
+        16
+    }
+}
+
+#[derive(Clone, Default)]
+struct CompositingLayerAnimationState<T>(T);
+
+impl<T> ComponentState for CompositingLayerAnimationState<T>
+where
+    T: CompositingLayerAnimation,
+{
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn advance(&mut self, elapsed_ms: f32) -> bool {
+        self.0.advance(elapsed_ms)
+    }
+
+    fn wants_frame(&self) -> bool {
+        self.0.wants_frame()
+    }
+
+    fn frame_interval_ms(&self) -> u64 {
+        self.0.frame_interval_ms()
+    }
+}
+
+type CompositingLayerProjection = fn(&dyn ComponentState) -> CompositingLayerSpec;
+
+#[derive(Clone)]
+pub(crate) enum ComponentStateBinding {
+    Component {
+        owner: ComponentId,
+        invalidation_id: UiId,
+    },
+    CompositingLayer {
+        target_id: UiId,
+        project: CompositingLayerProjection,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetainedNodeUpdate {
+    CompositingLayer(CompositingLayerSpec),
 }
 
 pub(crate) struct ComponentStateInvalidation {
@@ -83,6 +142,7 @@ pub(crate) struct ComponentStateInvalidation {
     pub target_id: UiId,
     pub owner: Option<ComponentId>,
     pub frame_interval_ms: u64,
+    pub retained_update: Option<RetainedNodeUpdate>,
 }
 
 struct ComponentStateEntry {
@@ -157,11 +217,49 @@ impl ComponentStateStore {
     {
         self.with_mut_inner(
             id,
-            Some(ComponentStateBinding {
+            Some(ComponentStateBinding::Component {
                 owner,
                 invalidation_id,
             }),
             f,
+        )
+    }
+
+    pub(crate) fn with_mut_for_compositing_layer<T, R>(
+        &self,
+        id: &UiId,
+        target_id: UiId,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> (R, CompositingLayerSpec, bool)
+    where
+        T: CompositingLayerAnimation,
+    {
+        fn project<T>(state: &dyn ComponentState) -> CompositingLayerSpec
+        where
+            T: CompositingLayerAnimation,
+        {
+            state
+                .as_any()
+                .downcast_ref::<CompositingLayerAnimationState<T>>()
+                .expect("compositing layer animation type mismatch for UiId")
+                .0
+                .compositing_layer_spec()
+        }
+
+        self.with_mut_inner(
+            id,
+            Some(ComponentStateBinding::CompositingLayer {
+                target_id,
+                project: project::<T>,
+            }),
+            |state: &mut CompositingLayerAnimationState<T>| {
+                let result = f(&mut state.0);
+                (
+                    result,
+                    state.0.compositing_layer_spec(),
+                    state.0.wants_frame(),
+                )
+            },
         )
     }
 
@@ -236,14 +334,26 @@ impl ComponentStateStore {
         let mut dirty = Vec::new();
         for (id, entry) in self.states.borrow_mut().iter_mut() {
             if entry.state.advance(elapsed_ms) {
+                let (target_id, owner, retained_update) = match entry.binding.as_ref() {
+                    Some(ComponentStateBinding::Component {
+                        owner,
+                        invalidation_id,
+                    }) => (invalidation_id.clone(), Some(*owner), None),
+                    Some(ComponentStateBinding::CompositingLayer { target_id, project }) => (
+                        target_id.clone(),
+                        None,
+                        Some(RetainedNodeUpdate::CompositingLayer(project(
+                            entry.state.as_ref(),
+                        ))),
+                    ),
+                    None => (id.clone(), None, None),
+                };
                 dirty.push(ComponentStateInvalidation {
                     state_id: id.clone(),
-                    target_id: entry
-                        .binding
-                        .as_ref()
-                        .map_or_else(|| id.clone(), |binding| binding.invalidation_id.clone()),
-                    owner: entry.binding.as_ref().map(|binding| binding.owner),
+                    target_id,
+                    owner,
                     frame_interval_ms: entry.state.frame_interval_ms().max(1),
+                    retained_update,
                 });
             }
         }

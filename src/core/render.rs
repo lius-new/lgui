@@ -241,7 +241,12 @@ impl ScenePrimitive {
     }
 
     pub fn paint_bounds(&self) -> UiRect {
-        let rect = self.rect();
+        let rect = match self {
+            ScenePrimitive::CompositingLayer { rect, spec, .. } => {
+                spec.transform.transformed_bounds(*rect)
+            }
+            _ => self.rect(),
+        };
         let stroke_width = match self {
             ScenePrimitive::Rect { style, .. } | ScenePrimitive::Ellipse { style, .. } => {
                 style.stroke.map(|stroke| stroke.width).unwrap_or(0)
@@ -534,6 +539,15 @@ impl Scene {
         self.commands = Arc::new(commands);
     }
 
+    pub(crate) fn patch_compositing_layer_spec(
+        &mut self,
+        id: &UiId,
+        spec: CompositingLayerSpec,
+    ) -> bool {
+        let commands = Arc::make_mut(&mut self.commands);
+        patch_compositing_layer_spec(commands.as_mut_slice(), id, spec)
+    }
+
     pub fn bounds(&self) -> Option<UiRect> {
         self.commands()
             .iter()
@@ -554,6 +568,36 @@ impl Scene {
             ),
         }
     }
+}
+
+pub(crate) fn patch_compositing_layer_spec(
+    commands: &mut [ScenePrimitive],
+    source: &UiId,
+    next_spec: CompositingLayerSpec,
+) -> bool {
+    for command in commands {
+        let nested = match command {
+            ScenePrimitive::CompositingLayer {
+                id, spec, commands, ..
+            } => {
+                if id == source {
+                    *spec = next_spec;
+                    return true;
+                }
+                Some(commands)
+            }
+            ScenePrimitive::StaticLayer { commands, .. }
+            | ScenePrimitive::ScrollRaster { commands, .. }
+            | ScenePrimitive::Clip { commands, .. }
+            | ScenePrimitive::ClipPath { commands, .. } => Some(commands),
+            _ => None,
+        };
+        if nested.is_some_and(|commands| patch_compositing_layer_spec(commands, source, next_spec))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
@@ -714,17 +758,21 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             commands,
             content_signature,
             phase,
-        } => ScenePrimitive::CompositingLayer {
-            id: id.clone(),
-            rect: scale.physical_rect(*rect),
-            spec: *spec,
-            commands: commands
-                .iter()
-                .map(|command| project_command(command, scale))
-                .collect(),
-            content_signature: content_signature ^ signature_scale,
-            phase: *phase,
-        },
+        } => {
+            let mut spec = *spec;
+            spec.transform = spec.transform.project_to_physical(scale);
+            ScenePrimitive::CompositingLayer {
+                id: id.clone(),
+                rect: scale.physical_rect(*rect),
+                spec,
+                commands: commands
+                    .iter()
+                    .map(|command| project_command(command, scale))
+                    .collect(),
+                content_signature: content_signature ^ signature_scale,
+                phase: *phase,
+            }
+        }
         ScenePrimitive::StaticLayer {
             id,
             rect,
@@ -2262,11 +2310,19 @@ mod tests {
     }
 
     fn compositing_layer_tree(layer_rect: UiRect, child_rect: UiRect) -> HostTree {
+        compositing_layer_tree_with_spec(layer_rect, child_rect, CompositingLayerSpec::new())
+    }
+
+    fn compositing_layer_tree_with_spec(
+        layer_rect: UiRect,
+        child_rect: UiRect,
+        spec: CompositingLayerSpec,
+    ) -> HostTree {
         let layer_id = id("layer");
         let mut tree = HostTree::new();
         tree.push(
             UiNode::new(layer_id.clone(), UiNodeKind::CompositingLayer, layer_rect)
-                .compositing_layer(CompositingLayerSpec::new()),
+                .compositing_layer(spec),
         );
         tree.push(
             UiNode::new(id("layer-child"), UiNodeKind::Panel, child_rect)
@@ -2315,6 +2371,104 @@ mod tests {
             panic!("expected second compositing layer");
         };
         assert_eq!(first_signature, second_signature);
+    }
+
+    #[test]
+    fn transforming_a_compositing_layer_preserves_its_content_signature() {
+        let rect = UiRect::new(100, 200, 300, 400);
+        let child = UiRect::new(120, 230, 180, 290);
+        let first = compile_scene(&compositing_layer_tree_with_spec(
+            rect,
+            child,
+            CompositingLayerSpec::new(),
+        ));
+        let second = compile_scene(&compositing_layer_tree_with_spec(
+            rect,
+            child,
+            CompositingLayerSpec::new()
+                .rotation_degrees(37.0)
+                .scale_xy(1.2, 0.8)
+                .translation(50.0, -30.0)
+                .transform_origin(0.25, 0.75),
+        ));
+        let ScenePrimitive::CompositingLayer {
+            content_signature: first_signature,
+            ..
+        } = &first.commands()[0]
+        else {
+            panic!("expected first compositing layer");
+        };
+        let ScenePrimitive::CompositingLayer {
+            content_signature: second_signature,
+            ..
+        } = &second.commands()[0]
+        else {
+            panic!("expected second compositing layer");
+        };
+        assert_eq!(first_signature, second_signature);
+        assert_ne!(
+            first.commands()[0].signature(),
+            second.commands()[0].signature()
+        );
+    }
+
+    #[test]
+    fn physical_projection_preserves_normalized_transform_and_scales_translation() {
+        let transform_spec = CompositingLayerSpec::new()
+            .rotation_degrees(42.5)
+            .scale_xy(1.25, 0.75)
+            .translation(100.0, -20.0)
+            .transform_origin(0.2, 0.8);
+        let scene = compile_scene(&compositing_layer_tree_with_spec(
+            UiRect::new(10, 20, 110, 220),
+            UiRect::new(20, 30, 50, 60),
+            transform_spec,
+        ));
+        let projected = scene.project_to_physical(UiScale::new(1.5));
+        let ScenePrimitive::CompositingLayer { rect, spec, .. } = &projected.commands()[0] else {
+            panic!("expected compositing layer");
+        };
+        assert_eq!(*rect, UiRect::new(15, 30, 165, 330));
+        assert_eq!(spec.transform.rotation_degrees_f32(), 42.5);
+        assert_eq!(
+            (spec.transform.scale_x(), spec.transform.scale_y()),
+            (1.25, 0.75)
+        );
+        assert_eq!(
+            (spec.transform.origin_x(), spec.transform.origin_y()),
+            (0.2, 0.8)
+        );
+        assert_eq!(
+            (
+                spec.transform.translation_x(),
+                spec.transform.translation_y()
+            ),
+            (150.0, -30.0)
+        );
+    }
+
+    #[test]
+    fn transformed_layer_damage_stays_inside_the_parent_layer() {
+        let command = |spec| ScenePrimitive::CompositingLayer {
+            id: id("animated-layer"),
+            rect: UiRect::new(40, 40, 120, 120),
+            spec,
+            commands: Vec::new(),
+            content_signature: 7,
+            phase: RenderPhase::Content,
+        };
+        let previous = [command(CompositingLayerSpec::new())];
+        let next = [command(
+            CompositingLayerSpec::new()
+                .rotation_degrees(30.0)
+                .scale(1.2),
+        )];
+        let parent = UiRect::new(0, 0, 160, 160);
+        let damage = compositing_layer_damage(&previous, &next, parent);
+        assert!(!damage.is_empty());
+        assert!(damage
+            .iter()
+            .all(|rect| rect.intersect(parent) == Some(*rect)));
     }
 
     #[test]

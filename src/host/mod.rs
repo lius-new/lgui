@@ -3,8 +3,9 @@ use std::fmt;
 
 use crate::{
     core::{
-        compile_scene_root, scene_root_ids, HostTree, InteractionFlags, Scene, ScenePrimitive,
-        UiId, UiInteractionState, UiNode, UiNodeKind, UiRect,
+        compile_scene_root, patch_compositing_layer_spec, scene_root_ids, CompositingLayerSpec,
+        HostTree, InteractionFlags, Scene, ScenePrimitive, UiId, UiInteractionState, UiNode,
+        UiNodeKind, UiRect,
     },
     frame::{DirtyRegionSet, InvalidationRequest, InvalidationSet},
 };
@@ -187,14 +188,34 @@ impl HostRuntime {
     ) -> HostCommit {
         let mut mutations = Vec::new();
         let mut dirty_scene_sources = HashSet::new();
+        let mut compositing_updates = HashMap::new();
 
+        let kind_changed_sources = changes
+            .changed
+            .iter()
+            .filter_map(|source| {
+                let id = self.sources.get(source)?;
+                tree.node(source)
+                    .is_some_and(|next| self.node(*id).kind != next.kind)
+                    .then(|| source.clone())
+            })
+            .collect::<Vec<_>>();
+        let scene_topology_changed = changes.changed.iter().any(|source| {
+            let Some(id) = self.sources.get(source) else {
+                return false;
+            };
+            let Some(next) = tree.node(source) else {
+                return false;
+            };
+            let previous = &self.node(*id).node;
+            previous.parent != next.parent
+                || previous.kind != next.kind
+                || previous.render_phase != next.render_phase
+        });
+        let scene_structure_changed =
+            changes.structure_changed || !changes.removed.is_empty() || scene_topology_changed;
         let mut removed_sources = changes.removed.clone();
-        removed_sources.extend(changes.changed.iter().filter_map(|source| {
-            let id = self.sources.get(source)?;
-            tree.node(source)
-                .is_some_and(|next| self.node(*id).kind != next.kind)
-                .then(|| source.clone())
-        }));
+        removed_sources.extend(kind_changed_sources);
         let removed = removed_sources
             .into_iter()
             .filter_map(|source| self.sources.get(&source).copied().map(|id| (source, id)))
@@ -265,23 +286,28 @@ impl HostRuntime {
             let old_parent = existing.parent;
             let old_children = existing.children.clone();
             let old_interaction = existing.interaction;
+            let next_paint = effective_node_paint_bounds(node);
+            let compositing_only =
+                was_mounted && compositing_spec_only_changed(&existing.node, node);
 
             if !was_mounted {
                 mutations.push(HostMutation::InsertNode {
                     id,
                     source: node.id.clone(),
-                    bounds: node.paint_bounds,
+                    bounds: next_paint,
                 });
             } else {
-                if old_layout != node.layout_rect || old_paint != node.paint_bounds {
+                if old_layout != node.layout_rect || old_paint != next_paint {
                     mutations.push(HostMutation::UpdateProps {
                         id,
                         source: node.id.clone(),
                         kind: HostUpdateKind::Layout,
                         old_bounds: old_paint,
-                        new_bounds: node.paint_bounds,
+                        new_bounds: next_paint,
                     });
-                    dirty_scene_sources.insert(node.id.clone());
+                    if !compositing_only {
+                        dirty_scene_sources.insert(node.id.clone());
+                    }
                 }
                 if paint_props_changed(&existing.node, node) {
                     mutations.push(HostMutation::UpdateProps {
@@ -289,9 +315,16 @@ impl HostRuntime {
                         source: node.id.clone(),
                         kind: HostUpdateKind::Paint,
                         old_bounds: old_paint,
-                        new_bounds: node.paint_bounds,
+                        new_bounds: next_paint,
                     });
-                    dirty_scene_sources.insert(node.id.clone());
+                    if compositing_only {
+                        compositing_updates.insert(
+                            node.id.clone(),
+                            node.compositing_layer.expect("compositing layer spec"),
+                        );
+                    } else {
+                        dirty_scene_sources.insert(node.id.clone());
+                    }
                 }
                 if old_interaction != flags {
                     mutations.push(HostMutation::UpdateProps {
@@ -299,7 +332,7 @@ impl HostRuntime {
                         source: node.id.clone(),
                         kind: HostUpdateKind::Interaction,
                         old_bounds: old_paint,
-                        new_bounds: node.paint_bounds,
+                        new_bounds: next_paint,
                     });
                 }
                 if old_parent != parent || old_children != children {
@@ -308,7 +341,7 @@ impl HostRuntime {
                         tree,
                         &old_children,
                         &children,
-                        old_paint.union(node.paint_bounds),
+                        old_paint.union(next_paint),
                     );
                     mutations.push(HostMutation::ReorderChildren {
                         id,
@@ -329,16 +362,19 @@ impl HostRuntime {
             current.children = children;
             current.kind = node.kind;
             current.layout_bounds = node.layout_rect;
-            current.paint_bounds = node
-                .paint_bounds
-                .inflate(node.animation_outset.0, node.animation_outset.1);
+            current.paint_bounds = next_paint;
             current.interaction = flags;
             current.node = node.clone();
         }
         self.paint_order = next_order;
 
-        let (scene_mutations, scene, reused_scene_nodes) =
-            self.reconcile_scene(tree, dirty_scene_sources, order_changed);
+        let (scene_mutations, scene, reused_scene_nodes) = self.reconcile_scene(
+            tree,
+            dirty_scene_sources,
+            compositing_updates,
+            order_changed,
+            scene_structure_changed,
+        );
         let damage = self.calculate_damage(viewport, &mutations, invalidations);
         self.initialized = true;
         let metrics = HostCommitMetrics {
@@ -384,9 +420,19 @@ impl HostRuntime {
         &mut self,
         tree: &HostTree,
         dirty_sources: HashSet<UiId>,
+        compositing_updates: HashMap<UiId, CompositingLayerSpec>,
         host_order_changed: bool,
+        scene_structure_changed: bool,
     ) -> (Vec<SceneMutation>, Scene, usize) {
-        let root_sources = scene_root_ids(tree);
+        let retained_root_sources = (!scene_structure_changed && self.initialized).then(|| {
+            self.scene_order
+                .iter()
+                .map(|id| self.try_node(*id).map(|node| node.source.clone()))
+                .collect::<Option<Vec<_>>>()
+        });
+        let root_sources = retained_root_sources
+            .flatten()
+            .unwrap_or_else(|| scene_root_ids(tree));
         let live = root_sources
             .iter()
             .filter_map(|source| self.sources.get(source))
@@ -414,11 +460,37 @@ impl HostRuntime {
             }
         }
 
+        let mut fast_updated = HashSet::new();
+        let mut fast_specs = Vec::new();
+        for (source, spec) in compositing_updates {
+            let Some(owner_source) = scene_owner_source_for_tree(tree, &source) else {
+                continue;
+            };
+            if dirty_roots.contains(&owner_source) {
+                continue;
+            }
+            let Some(owner_id) = self.sources.get(&owner_source).copied() else {
+                continue;
+            };
+            let Some(scene) = self.scene.get_mut(&owner_id) else {
+                continue;
+            };
+            if patch_compositing_layer_spec(&mut scene.commands, &source, spec) {
+                scene.signature = command_signature(&scene.commands);
+                if fast_updated.insert(owner_id) {
+                    mutations.push(SceneMutation::Update(owner_id));
+                }
+                fast_specs.push((source, spec));
+            }
+        }
+
         let mut reused = 0;
         for source in &root_sources {
             let id = self.sources[source];
             if self.scene.contains_key(&id) && !dirty_roots.contains(source) {
-                reused += 1;
+                if !fast_updated.contains(&id) {
+                    reused += 1;
+                }
                 continue;
             }
             let compiled = compile_scene_root(tree, source);
@@ -485,7 +557,7 @@ impl HostRuntime {
                 let (old_start, old_end) = previous_ranges[id];
                 let start = (old_start as isize + offset) as usize;
                 let end = (old_end as isize + offset) as usize;
-                if updated.contains(id) {
+                if updated.contains(id) && !fast_updated.contains(id) {
                     let commands = self
                         .scene
                         .get(id)
@@ -500,6 +572,12 @@ impl HostRuntime {
                 }
             }
             self.scene_ranges = next_ranges;
+        }
+        for (source, spec) in fast_specs {
+            let patched = self
+                .composed_scene
+                .patch_compositing_layer_spec(&source, spec);
+            debug_assert!(patched, "retained compositing command must exist");
         }
         (mutations, self.composed_scene.clone(), reused)
     }
@@ -674,6 +752,26 @@ impl HostRuntime {
     }
 }
 
+fn effective_node_paint_bounds(node: &UiNode) -> UiRect {
+    let bounds = node
+        .compositing_layer
+        .map(|spec| spec.transform.transformed_bounds(node.layout_rect))
+        .unwrap_or(node.paint_bounds);
+    bounds.inflate(node.animation_outset.0, node.animation_outset.1)
+}
+
+fn compositing_spec_only_changed(previous: &UiNode, next: &UiNode) -> bool {
+    if previous.compositing_layer == next.compositing_layer
+        || previous.compositing_layer.is_none()
+        || next.compositing_layer.is_none()
+    {
+        return false;
+    }
+    let mut normalized = previous.clone();
+    normalized.compositing_layer = next.compositing_layer;
+    normalized.projection_eq(next)
+}
+
 fn command_signature(commands: &[ScenePrimitive]) -> u64 {
     commands.iter().fold(0, |signature, command| {
         signature.rotate_left(7) ^ command.signature()
@@ -787,6 +885,36 @@ mod tests {
     use super::*;
     use crate::core::{CompositingLayerSpec, Point, UiNode, VisualStyle};
 
+    fn compositing_content_signature(scene: &Scene, id: &UiId) -> u64 {
+        scene
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                ScenePrimitive::CompositingLayer {
+                    id: command_id,
+                    content_signature,
+                    ..
+                } if command_id == id => Some(*content_signature),
+                _ => None,
+            })
+            .expect("compositing layer command")
+    }
+
+    fn compositing_child_storage(scene: &Scene, id: &UiId) -> usize {
+        scene
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                ScenePrimitive::CompositingLayer {
+                    id: command_id,
+                    commands,
+                    ..
+                } if command_id == id => Some(commands.as_ptr() as usize),
+                _ => None,
+            })
+            .expect("compositing layer command")
+    }
+
     #[test]
     fn moving_a_node_damages_old_and_new_bounds_without_a_frame_snapshot() {
         let mut host = HostRuntime::new();
@@ -874,6 +1002,133 @@ mod tests {
                 .filter(|mutation| matches!(mutation, SceneMutation::Update(_)))
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn shrinking_a_transformed_layer_damages_pixels_outside_its_layout_rect() {
+        let mut host = HostRuntime::new();
+        let interaction = UiInteractionState::default();
+        let viewport = UiRect::new(0, 0, 200, 200);
+        let make_tree = |scale| {
+            let mut tree = HostTree::new();
+            tree.push(
+                UiNode::new(
+                    UiId::owned("transformed-layer"),
+                    UiNodeKind::CompositingLayer,
+                    UiRect::new(40, 40, 120, 120),
+                )
+                .compositing_layer(CompositingLayerSpec::new().scale(scale)),
+            );
+            tree.push(
+                UiNode::new(
+                    UiId::owned("transformed-child"),
+                    UiNodeKind::Panel,
+                    UiRect::new(50, 50, 110, 110),
+                )
+                .parent(UiId::owned("transformed-layer"))
+                .style(VisualStyle::filled(crate::core::Color::WHITE)),
+            );
+            tree
+        };
+
+        host.commit(
+            &make_tree(1.2),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+        let commit = host.commit(
+            &make_tree(1.0),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+
+        let dirty = commit.damage.dirty.effective_rects();
+        assert!(dirty.iter().any(|rect| rect.contains(Point::new(33, 80))));
+        assert!(dirty.iter().any(|rect| rect.contains(Point::new(80, 80))));
+    }
+
+    #[test]
+    fn composition_only_update_patches_the_retained_scene_without_compiling_children() {
+        let mut host = HostRuntime::new();
+        let interaction = UiInteractionState::default();
+        let viewport = UiRect::new(0, 0, 200, 200);
+        let layer_id = UiId::owned("retained-transform-layer");
+        let child_id = UiId::owned("retained-transform-child");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                layer_id.clone(),
+                UiNodeKind::CompositingLayer,
+                UiRect::new(0, 0, 40, 40),
+            )
+            .compositing_layer(CompositingLayerSpec::new()),
+        );
+        tree.push(
+            UiNode::new(
+                child_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(5, 5, 35, 35),
+            )
+            .parent(layer_id.clone())
+            .style(VisualStyle::filled(crate::core::Color::WHITE)),
+        );
+        let changes = tree.take_projection_changes();
+        let first = host.commit_projection(
+            &tree,
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+            changes,
+        );
+        let first_signature = compositing_content_signature(&first.scene, &layer_id);
+        let first_child_storage = compositing_child_storage(&first.scene, &layer_id);
+        drop(first);
+
+        tree.node_mut(&child_id).expect("child").style =
+            VisualStyle::filled(crate::core::Color(0xFF0000));
+        assert!(tree
+            .update_compositing_layer(
+                &layer_id,
+                CompositingLayerSpec::new().translation(50.0, 25.0),
+            )
+            .is_some());
+        let changes = tree.take_projection_changes();
+        assert_eq!(changes.changed.len(), 1);
+        let second = host.commit_projection(
+            &tree,
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+            changes,
+        );
+
+        assert_eq!(
+            compositing_content_signature(&second.scene, &layer_id),
+            first_signature
+        );
+        assert_eq!(
+            compositing_child_storage(&second.scene, &layer_id),
+            first_child_storage,
+            "composition-only updates must retain static child command storage"
+        );
+        let ScenePrimitive::CompositingLayer { spec, .. } = second
+            .scene
+            .commands()
+            .iter()
+            .find(|command| command.id() == &layer_id)
+            .expect("compositing command")
+        else {
+            panic!("expected compositing command");
+        };
+        assert_eq!(
+            (
+                spec.transform.translation_x(),
+                spec.transform.translation_y()
+            ),
+            (50.0, 25.0)
         );
     }
 
@@ -1151,6 +1406,53 @@ mod tests {
         assert_eq!(
             commit.scene.commands().last().map(ScenePrimitive::id),
             Some(&UiId::owned("popup"))
+        );
+    }
+
+    #[test]
+    fn render_phase_change_rebuilds_retained_scene_root_order() {
+        let first_id = UiId::owned("first");
+        let popup_id = UiId::owned("becomes-popup");
+        let last_id = UiId::owned("last");
+        let mut tree = HostTree::new();
+        for id in [&first_id, &popup_id, &last_id] {
+            tree.push(
+                UiNode::new(id.clone(), UiNodeKind::Panel, UiRect::new(0, 0, 20, 20))
+                    .style(VisualStyle::filled(crate::core::Color::WHITE)),
+            );
+        }
+        let mut host = HostRuntime::new();
+        let interaction = UiInteractionState::default();
+        let viewport = UiRect::new(0, 0, 20, 20);
+        let changes = tree.take_projection_changes();
+        host.commit_projection(
+            &tree,
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+            changes,
+        );
+
+        let next = tree
+            .node(&popup_id)
+            .expect("phase-changing node")
+            .clone()
+            .render_phase(crate::core::RenderPhase::Popup);
+        tree.upsert(next);
+        let changes = tree.take_projection_changes();
+        assert!(!changes.structure_changed);
+        let commit = host.commit_projection(
+            &tree,
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+            changes,
+        );
+
+        assert!(commit.scene_mutations.contains(&SceneMutation::Reorder));
+        assert_eq!(
+            commit.scene.commands().last().map(ScenePrimitive::id),
+            Some(&popup_id)
         );
     }
 }

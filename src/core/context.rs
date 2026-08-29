@@ -1,8 +1,8 @@
 use super::{
     AnimProperty, AnimationRegistry, ComponentId, ComponentState, ComponentStateStore,
-    ComponentTree, ContextRegistry, EffectRegistry, HookId, HookSlotKind, HookStateStore,
-    InteractionFlags, UiId, UiInteractionState, UiRect, UiScale, UiScope, UiTaskSpawner,
-    UiUpdateQueue,
+    ComponentTree, CompositingLayerAnimation, CompositingLayerSpec, ContextRegistry,
+    EffectRegistry, HookId, HookSlotKind, HookStateStore, InteractionFlags, UiId,
+    UiInteractionState, UiRect, UiScale, UiScope, UiTaskSpawner, UiUpdateQueue,
 };
 use std::sync::Arc;
 
@@ -85,6 +85,18 @@ impl<'a> UiRenderContext<'a> {
     {
         self.component_states
             .with_mut_for_component(id, owner, invalidation_id, f)
+    }
+
+    pub(crate) fn compositing_layer_animation_mut<T, R>(
+        &self,
+        id: &UiId,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> (R, CompositingLayerSpec, bool)
+    where
+        T: CompositingLayerAnimation,
+    {
+        self.component_states
+            .with_mut_for_compositing_layer(id, id.clone(), f)
     }
 
     pub fn preserve_component_state_scope(&self, scope: &UiScope) {

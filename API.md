@@ -83,8 +83,16 @@ its paint independently from siblings. Child coordinates remain declarative wind
 scene compilation converts them to layer-local coordinates. `.opaque()` gives the surface an
 opaque black base and enables copy composition, while `.transparent()` preserves alpha and is the
 default. `.opacity(value)` controls composition opacity without invalidating retained content.
-Layers may be nested, and popup-phase descendants automatically escape a regular layer. This is a
-general rendering boundary for static or changing content, not an animation-specific component.
+`.rotation_degrees(value)`, `.rotation_radians(value)`, `.scale(value)`, `.scale_xy(x, y)`,
+`.translation(x, y)`, and `.transform_origin(x, y)` apply a transform while the retained surface
+is composited. Changing only these values reuses the existing surface pixels. Translation is in
+logical pixels and is projected through the current DPI scale.
+
+Use `animated_compositing_layer::<T>(rect, configure)` with an application-owned
+`CompositingLayerAnimation` state when a layer changes every frame. `lgui` advances the state,
+requests frames at its declared interval, and applies its `CompositingLayerSpec` directly to the
+retained node without reexecuting the component or rebuilding static children. Layers may be
+nested, and popup-phase descendants automatically escape a regular layer.
 
 ## Async Work
 

@@ -21,12 +21,17 @@ use windows::{
                 OUT_TT_ONLY_PRECIS, PS_SOLID, RGN_AND, SRCCOPY, TRANSPARENT, WINDING,
             },
             GdiPlus::{
-                FillModeAlternate, GdipAddPathArcI, GdipAddPathBezierI, GdipAddPathLineI,
-                GdipClosePathFigure, GdipCreateFromHDC, GdipCreatePath, GdipCreatePen1,
-                GdipCreateSolidFill, GdipDeleteBrush, GdipDeleteGraphics, GdipDeletePath,
-                GdipDeletePen, GdipDrawEllipseI, GdipDrawPath, GdipFillEllipseI, GdipFillPath,
-                GdipSetPixelOffsetMode, GdipSetSmoothingMode, GpBrush, GpGraphics, GpPath, GpPen,
-                Ok as GpOk, PixelOffsetModeHalf, SmoothingModeAntiAlias, UnitPixel,
+                ColorAdjustTypeBitmap, ColorMatrix, ColorMatrixFlagsDefault, FillModeAlternate,
+                GdipAddPathArcI, GdipAddPathBezierI, GdipAddPathLineI, GdipClosePathFigure,
+                GdipCreateBitmapFromScan0, GdipCreateFromHDC, GdipCreateImageAttributes,
+                GdipCreatePath, GdipCreatePen1, GdipCreateSolidFill, GdipDeleteBrush,
+                GdipDeleteGraphics, GdipDeletePath, GdipDeletePen, GdipDisposeImage,
+                GdipDisposeImageAttributes, GdipDrawEllipseI, GdipDrawImagePointsRect,
+                GdipDrawPath, GdipFillEllipseI, GdipFillPath, GdipSetImageAttributesColorMatrix,
+                GdipSetInterpolationMode, GdipSetPixelOffsetMode, GdipSetSmoothingMode, GpBitmap,
+                GpBrush, GpGraphics, GpImageAttributes, GpPath, GpPen,
+                InterpolationModeHighQualityBicubic, Ok as GpOk, PixelOffsetModeHalf, PointF,
+                SmoothingModeAntiAlias, UnitPixel,
             },
         },
     },
@@ -50,9 +55,9 @@ use super::{
 };
 use lgui::core::{
     compositing_layer_damage, Color, CompositingLayerBackground, CompositingLayerSpec,
-    CustomPaintStyle, OverlayStyle, PathStyle, Point, RadialGradientLayer, Scene, ScenePrimitive,
-    Stroke, TextAlign, TextStyle, UiId, UiPath, UiPathCommand, UiRect, VerticalGradientLayer,
-    VisualStyle,
+    CustomPaintStyle, LayerTransform, OverlayStyle, PathStyle, Point, RadialGradientLayer, Scene,
+    ScenePrimitive, Stroke, TextAlign, TextStyle, UiId, UiPath, UiPathCommand, UiRect,
+    VerticalGradientLayer, VisualStyle,
 };
 use lgui::platform::win32::{draw_svg_icon, ui_font_family_at, ui_font_family_count};
 use lgui::renderer::ClipRegion;
@@ -775,6 +780,33 @@ fn draw_gdi_compositing_layer(
         layer.commands = commands.to_vec();
     }
 
+    if spec.opacity == 0 {
+        GDI_COMPOSITING_LAYERS.with(|layers| {
+            layers.borrow_mut().insert(key, layer);
+        });
+        return;
+    }
+
+    if !spec.transform.is_identity() {
+        let bounds = spec.transform.transformed_bounds(rect);
+        if clip.and_then(|clip| clip.intersect(bounds)).is_none() && clip.is_some() {
+            GDI_COMPOSITING_LAYERS.with(|layers| {
+                layers.borrow_mut().insert(key, layer);
+            });
+            return;
+        }
+        record_gdi_frame_blit(
+            GdiFrameBlitSource::StaticLayer,
+            GdiFrameBlitKind::AlphaBlend,
+            bounds,
+        );
+        draw_gdi_transformed_bitmap(hdc, rect, clip, &layer.output, spec.opacity, spec.transform);
+        GDI_COMPOSITING_LAYERS.with(|layers| {
+            layers.borrow_mut().insert(key, layer);
+        });
+        return;
+    }
+
     let dest = match clip {
         Some(clip) => {
             let Some(dest) = rect.intersect(clip) else {
@@ -841,6 +873,103 @@ fn draw_gdi_compositing_layer(
     GDI_COMPOSITING_LAYERS.with(|layers| {
         layers.borrow_mut().insert(key, layer);
     });
+}
+
+const PIXEL_FORMAT_32BPP_PARGB: i32 = 0x000E_200B;
+
+fn draw_gdi_transformed_bitmap(
+    hdc: HDC,
+    rect: UiRect,
+    clip: Option<UiRect>,
+    bitmap: &GdiBitmapEntry,
+    opacity: u8,
+    transform: LayerTransform,
+) {
+    let _clip = ClipGuard::new(hdc, clip);
+    let points = gdi_layer_destination_points(rect, transform);
+    unsafe {
+        let mut image: *mut GpBitmap = std::ptr::null_mut();
+        if GdipCreateBitmapFromScan0(
+            bitmap.width,
+            bitmap.height,
+            bitmap.width * 4,
+            PIXEL_FORMAT_32BPP_PARGB,
+            Some(bitmap.bits.cast_const()),
+            &mut image,
+        ) != GpOk
+            || image.is_null()
+        {
+            return;
+        }
+
+        let mut graphics: *mut GpGraphics = std::ptr::null_mut();
+        if GdipCreateFromHDC(hdc, &mut graphics) != GpOk || graphics.is_null() {
+            let _ = GdipDisposeImage(image.cast());
+            return;
+        }
+        let _ = GdipSetInterpolationMode(graphics, InterpolationModeHighQualityBicubic);
+        let _ = GdipSetPixelOffsetMode(graphics, PixelOffsetModeHalf);
+
+        let mut attributes: *mut GpImageAttributes = std::ptr::null_mut();
+        let attributes_ptr = if opacity == 255 {
+            std::ptr::null()
+        } else if GdipCreateImageAttributes(&mut attributes) == GpOk && !attributes.is_null() {
+            let alpha = opacity as f32 / 255.0;
+            let matrix = ColorMatrix {
+                m: [
+                    1.0, 0.0, 0.0, 0.0, 0.0, // red
+                    0.0, 1.0, 0.0, 0.0, 0.0, // green
+                    0.0, 0.0, 1.0, 0.0, 0.0, // blue
+                    0.0, 0.0, 0.0, alpha, 0.0, // alpha
+                    0.0, 0.0, 0.0, 0.0, 1.0,
+                ],
+            };
+            let _ = GdipSetImageAttributesColorMatrix(
+                attributes,
+                ColorAdjustTypeBitmap,
+                true,
+                &matrix,
+                std::ptr::null(),
+                ColorMatrixFlagsDefault,
+            );
+            attributes.cast_const()
+        } else {
+            std::ptr::null()
+        };
+
+        let _ = GdipDrawImagePointsRect(
+            graphics,
+            image.cast(),
+            points.as_ptr(),
+            points.len() as i32,
+            0.0,
+            0.0,
+            bitmap.width as f32,
+            bitmap.height as f32,
+            UnitPixel,
+            attributes_ptr,
+            0,
+            std::ptr::null_mut(),
+        );
+
+        if !attributes.is_null() {
+            let _ = GdipDisposeImageAttributes(attributes);
+        }
+        let _ = GdipDeleteGraphics(graphics);
+        let _ = GdipDisposeImage(image.cast());
+    }
+}
+
+fn gdi_layer_destination_points(rect: UiRect, transform: LayerTransform) -> [PointF; 3] {
+    let transform_point = |x, y| {
+        let (x, y) = transform.transform_point(rect, x, y);
+        PointF { X: x, Y: y }
+    };
+    [
+        transform_point(rect.left as f32, rect.top as f32),
+        transform_point(rect.right as f32, rect.top as f32),
+        transform_point(rect.left as f32, rect.bottom as f32),
+    ]
 }
 
 fn draw_gdi_compositing_layer_fallback(
@@ -1944,6 +2073,26 @@ mod tests {
             synthesize_transparent_pixel(&[10, 20, 30, 255], &[10, 20, 30, 255]),
             [10, 20, 30, 255]
         );
+    }
+
+    #[test]
+    fn transformed_destination_points_follow_layer_origin() {
+        let rect = UiRect::new(10, 20, 30, 60);
+        let transform = LayerTransform::identity()
+            .scale_xy(2.0, 1.0)
+            .rotation_degrees(90.0)
+            .translation(75.0, -25.0)
+            .origin(0.5, 0.5);
+        let points = gdi_layer_destination_points(rect, transform);
+        let expected = [
+            transform.transform_point(rect, 10.0, 20.0),
+            transform.transform_point(rect, 30.0, 20.0),
+            transform.transform_point(rect, 10.0, 60.0),
+        ];
+        for (point, expected) in points.iter().zip(expected) {
+            assert!((point.X - expected.0).abs() < 0.001);
+            assert!((point.Y - expected.1).abs() < 0.001);
+        }
     }
 
     #[test]

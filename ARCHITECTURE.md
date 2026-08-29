@@ -51,7 +51,20 @@ Transparent GDI layers use black/white coverage reconstruction so black content,
 text, and antialiased edges preserve premultiplied alpha. Direct2D stores each layer in an
 `ID2D1Bitmap1`; both backends clear and redraw only layer-local damage and composite only the
 intersection with window damage. Size or background-mode changes recreate a surface, opacity-only
-changes reuse its pixels, and removed layers are pruned before drawing.
+changes reuse its pixels, and removed layers are pruned before drawing. Translation, rotation,
+scale, and normalized transform origin are composition properties rather than content properties.
+Direct2D applies them through its device-context matrix; GDI maps the same retained DIB to a
+transformed destination parallelogram.
+
+`CompositingLayerAnimation` keeps animation semantics and state in application code. Its
+declarative adapter binds that state to one retained layer node. On a frame tick, the runtime
+updates only the node's generic `CompositingLayerSpec`, records old and new transformed damage,
+and queues a projection change without dirtying the component owner. The Host patches that spec
+into both the retained scene root and the uniquely owned composed scene instead of compiling or
+cloning the layer descendants again. This keeps static vector or image children out of per-frame
+declarative and scene compilation while sharing the same path across GDI and Direct2D. The Host
+also retains the ordered scene-root set while projection structure is unchanged, so a
+composition-only frame does not rediscover container ownership by walking the complete UI tree.
 
 ## Features
 
