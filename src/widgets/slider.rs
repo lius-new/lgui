@@ -456,7 +456,9 @@ impl ComponentState for SliderState {
             "semantic.set_value" => action
                 .payload_value()
                 .and_then(|value| value.parse::<f64>().ok())
-                .map_or_else(ComponentActionOutcome::ignored, |value| self.semantic_value(value)),
+                .map_or_else(ComponentActionOutcome::ignored, |value| {
+                    self.semantic_value(value)
+                }),
             "semantic.increment" => self.semantic_value(
                 self.display_value() + self.step.unwrap_or((self.max - self.min) / 100.0),
             ),

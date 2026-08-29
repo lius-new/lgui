@@ -1116,6 +1116,12 @@ impl<B> Application<B> {
         self
     }
 
+    pub fn font_assets(self, assets: Vec<crate::text::FontAsset>) -> Self {
+        self.resources
+            .provide(crate::text::FontAssets(std::sync::Arc::new(assets)));
+        self
+    }
+
     #[cfg(feature = "svg")]
     pub fn svg_icons(self, registry: crate::icons::SvgIconRegistry) -> Self {
         self.resources

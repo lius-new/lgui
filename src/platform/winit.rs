@@ -169,6 +169,10 @@ impl ApplicationBackend for WinitApplication {
             .try_resource::<crate::text::FontFamilies>()
             .map_or(&["Segoe UI"][..], |families| families.0);
         let _font_families = crate::text::install_font_families(font_families);
+        let font_assets = context
+            .try_resource::<crate::text::FontAssets>()
+            .map_or_else(Default::default, |assets| Arc::clone(&assets.0));
+        let _font_assets = crate::text::install_font_assets(font_assets);
         let _text_system = crate::text::install_text_system(super::skia::skia_text_system_handle());
 
         let display = event_loop.owned_display_handle();
@@ -262,6 +266,13 @@ enum WinitSkiaRenderer {
     },
     #[cfg(feature = "renderer-skia-gl")]
     OpenGl(super::winit_skia_gl::WinitOpenGlRenderer),
+    #[cfg(all(
+        feature = "renderer-skia-vulkan",
+        any(target_os = "windows", target_os = "linux")
+    ))]
+    Vulkan(super::winit_skia_vulkan::WinitVulkanRenderer),
+    #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+    Metal(super::winit_skia_metal::WinitMetalRenderer),
     Unavailable,
 }
 
@@ -297,6 +308,14 @@ struct WinitRenderError {
     stage: crate::renderer::RenderErrorStage,
     operation: &'static str,
     message: String,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct WinitFrameTimings {
+    pub acquire_ms: f32,
+    pub draw_ms: f32,
+    pub flush_ms: f32,
+    pub present_ms: f32,
 }
 
 impl WinitRenderError {
@@ -1019,7 +1038,7 @@ impl WinitWindow {
                         | crate::core::SemanticRole::PasswordInput
                         | crate::core::SemanticRole::SearchInput
                 )
-                .then_some((node.layout_rect, role))
+                .then_some((node.ime_cursor_rect.unwrap_or(node.layout_rect), role))
             });
         let allowed = focused.is_some();
         if allowed != self.ime_allowed {
@@ -1036,8 +1055,8 @@ impl WinitWindow {
         );
         let point = self
             .scale
-            .physical_point(Point::new(rect.left + 12.0, rect.bottom + 4.0));
-        let height = self.scale.physical_length((rect.height() - 8.0).max(1.0));
+            .physical_point(Point::new(rect.left, rect.bottom + 2.0));
+        let height = self.scale.physical_length(rect.height().max(1.0));
         self.window.set_ime_cursor_area(
             PhysicalPosition::new(point.x, point.y),
             WinitPhysicalSize::new(1_u32, height.max(1) as u32),
@@ -1162,22 +1181,25 @@ impl WinitWindow {
         });
         #[cfg(feature = "diagnostics")]
         let draw_present_ms = draw_started.elapsed().as_secs_f32() * 1_000.0;
-        if let Err(error) = result {
-            let failed_stage = error.stage;
-            let failed_operation = error.operation;
-            let failed_message = error.message.clone();
-            self.context
-                .report_render_error(crate::application::RenderError::new(
-                    self.id.clone(),
-                    self.renderer.name(),
-                    error.stage,
-                    error.operation,
-                    -1,
-                    error.message,
-                ));
-            self.recover_renderer(failed_stage, failed_operation, &failed_message);
-            return;
-        }
+        let frame_timings = match result {
+            Ok(timings) => timings,
+            Err(error) => {
+                let failed_stage = error.stage;
+                let failed_operation = error.operation;
+                let failed_message = error.message.clone();
+                self.context
+                    .report_render_error(crate::application::RenderError::new(
+                        self.id.clone(),
+                        self.renderer.name(),
+                        error.stage,
+                        error.operation,
+                        -1,
+                        error.message,
+                    ));
+                self.recover_renderer(failed_stage, failed_operation, &failed_message);
+                return;
+            }
+        };
         self.recovery = match self.recovery {
             RendererRecoveryState::Fallback { reason, .. } => RendererRecoveryState::Fallback {
                 reason,
@@ -1197,6 +1219,7 @@ impl WinitWindow {
                     frame_index: self.frame_index,
                     recorded_at: Instant::now(),
                     backend: self.renderer.name(),
+                    renderer: self.renderer.device_info(),
                     mode: if frame.is_full_redraw() {
                         DiagnosticPresentMode::Full
                     } else {
@@ -1229,17 +1252,31 @@ impl WinitWindow {
                         reused_scene_nodes: commit.metrics.reused_scene_nodes,
                         ..FrameRenderMetrics::default()
                     },
-                    present: FramePresentMetrics {
-                        draw_commands_ms: draw_present_ms,
-                        submitted_pixels: dirty_pixels,
-                        fallback_count: usize::from(self.renderer.fallback_reason().is_some()),
-                        cache_budget_bytes: self.renderer.cache_stats().budget_bytes,
-                        cache_resident_bytes: self.renderer.cache_stats().resident_bytes,
-                        cache_entries: self.renderer.cache_stats().entries,
-                        cache_hits: self.renderer.cache_stats().hits,
-                        cache_misses: self.renderer.cache_stats().misses,
-                        cache_evictions: self.renderer.cache_stats().evictions,
-                        ..FramePresentMetrics::default()
+                    present: {
+                        let cache = self.renderer.cache_stats();
+                        FramePresentMetrics {
+                            acquire_ms: frame_timings.acquire_ms,
+                            draw_commands_ms: frame_timings.draw_ms,
+                            flush_ms: frame_timings.flush_ms,
+                            submit_ms: frame_timings.flush_ms,
+                            present_ms: frame_timings.present_ms,
+                            submitted_pixels: dirty_pixels,
+                            fallback_count: usize::from(self.renderer.fallback_reason().is_some()),
+                            cache_budget_bytes: cache.budget_bytes,
+                            cache_resident_bytes: cache.resident_bytes,
+                            cache_entries: cache.entries,
+                            cache_hits: cache.hits,
+                            cache_misses: cache.misses,
+                            cache_evictions: cache.evictions,
+                            text_cache_resident_bytes: cache.text_resident_bytes,
+                            text_cache_entries: cache.text_entries,
+                            text_cache_hits: cache.text_hits,
+                            text_cache_misses: cache.text_misses,
+                            text_cache_evictions: cache.text_evictions,
+                            largest_cache_entry_bytes: cache.largest_entry_bytes,
+                            largest_text_cache_entry_bytes: cache.largest_text_entry_bytes,
+                            ..FramePresentMetrics::default()
+                        }
                     },
                 },
                 self.session.tree(),
@@ -1293,7 +1330,7 @@ impl WinitWindow {
         ) {
             Ok(mut renderer) => {
                 if fallback_to_software {
-                    renderer.set_fallback_reason("opengl-runtime-failed");
+                    renderer.set_fallback_reason("gpu-runtime-failed");
                 }
                 let fallback_reason = renderer.fallback_reason();
                 self.renderer = renderer;
@@ -1334,6 +1371,13 @@ impl WinitSkiaRenderer {
             Self::Software { .. } => "skia-software",
             #[cfg(feature = "renderer-skia-gl")]
             Self::OpenGl(_) => "skia-opengl",
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(_) => "skia-vulkan",
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(_) => "skia-metal",
             Self::Unavailable => "skia-unavailable",
         }
     }
@@ -1345,6 +1389,13 @@ impl WinitSkiaRenderer {
             } => *fallback_reason,
             #[cfg(feature = "renderer-skia-gl")]
             Self::OpenGl(_) => None,
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(_) => None,
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(_) => None,
             Self::Unavailable => None,
         }
     }
@@ -1363,6 +1414,13 @@ impl WinitSkiaRenderer {
             Self::Software { .. } | Self::Unavailable => false,
             #[cfg(feature = "renderer-skia-gl")]
             Self::OpenGl(_) => true,
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(_) => true,
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(_) => true,
         }
     }
 
@@ -1371,11 +1429,12 @@ impl WinitSkiaRenderer {
         scene: &crate::core::Scene,
         frame: &FrameInfo<'_>,
         damage: &[PhysicalRect],
-    ) -> Result<(), WinitRenderError> {
+    ) -> Result<WinitFrameTimings, WinitRenderError> {
         match self {
             Self::Software {
                 surface, renderer, ..
             } => {
+                let draw_started = Instant::now();
                 renderer.draw(scene, frame).map_err(|error| {
                     WinitRenderError::new(
                         crate::renderer::RenderErrorStage::Draw,
@@ -1383,6 +1442,8 @@ impl WinitSkiaRenderer {
                         error,
                     )
                 })?;
+                let draw_ms = draw_started.elapsed().as_secs_f32() * 1_000.0;
+                let acquire_started = Instant::now();
                 let (width, height) = renderer.size();
                 let width_nz = NonZeroU32::new(width.max(1) as u32).unwrap();
                 let height_nz = NonZeroU32::new(height.max(1) as u32).unwrap();
@@ -1400,6 +1461,7 @@ impl WinitSkiaRenderer {
                         error.to_string(),
                     )
                 })?;
+                let acquire_ms = acquire_started.elapsed().as_secs_f32() * 1_000.0;
                 for (destination, source) in
                     buffer.iter_mut().zip(renderer.pixels().chunks_exact(4))
                 {
@@ -1417,12 +1479,19 @@ impl WinitSkiaRenderer {
                         })
                     })
                     .collect::<Vec<_>>();
+                let present_started = Instant::now();
                 buffer.present_with_damage(&damage).map_err(|error| {
                     WinitRenderError::new(
                         crate::renderer::RenderErrorStage::Present,
                         "softbuffer_present",
                         error.to_string(),
                     )
+                })?;
+                Ok(WinitFrameTimings {
+                    acquire_ms,
+                    draw_ms,
+                    flush_ms: 0.0,
+                    present_ms: present_started.elapsed().as_secs_f32() * 1_000.0,
                 })
             }
             #[cfg(feature = "renderer-skia-gl")]
@@ -1430,6 +1499,25 @@ impl WinitSkiaRenderer {
                 WinitRenderError::new(
                     crate::renderer::RenderErrorStage::Present,
                     "skia_opengl_frame",
+                    error,
+                )
+            }),
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(renderer) => renderer.draw_scene(scene, frame).map_err(|error| {
+                WinitRenderError::new(
+                    crate::renderer::RenderErrorStage::Present,
+                    "skia_vulkan_frame",
+                    error,
+                )
+            }),
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(renderer) => renderer.draw_scene(scene, frame).map_err(|error| {
+                WinitRenderError::new(
+                    crate::renderer::RenderErrorStage::Present,
+                    "skia_metal_frame",
                     error,
                 )
             }),
@@ -1441,11 +1529,40 @@ impl WinitSkiaRenderer {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
+    fn device_info(&self) -> crate::diagnostics::RendererDeviceInfo {
+        match self {
+            Self::Software { .. } => crate::diagnostics::RendererDeviceInfo {
+                api: "software".to_owned(),
+                color_format: "BGRA8 premultiplied".to_owned(),
+                present_mode: "softbuffer damage".to_owned(),
+                ..crate::diagnostics::RendererDeviceInfo::default()
+            },
+            #[cfg(feature = "renderer-skia-gl")]
+            Self::OpenGl(renderer) => renderer.device_info(),
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(renderer) => renderer.device_info(),
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(renderer) => renderer.device_info(),
+            Self::Unavailable => crate::diagnostics::RendererDeviceInfo::default(),
+        }
+    }
+
     fn trim(&mut self, pressure: MemoryPressure) {
         match self {
             Self::Software { renderer, .. } => renderer.trim(pressure),
             #[cfg(feature = "renderer-skia-gl")]
             Self::OpenGl(renderer) => renderer.trim(pressure),
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(renderer) => renderer.trim(pressure),
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(renderer) => renderer.trim(pressure),
             Self::Unavailable => {}
         }
     }
@@ -1455,6 +1572,13 @@ impl WinitSkiaRenderer {
             Self::Software { renderer, .. } => renderer.cache_stats(),
             #[cfg(feature = "renderer-skia-gl")]
             Self::OpenGl(renderer) => renderer.cache_stats(),
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(renderer) => renderer.cache_stats(),
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(renderer) => renderer.cache_stats(),
             Self::Unavailable => super::skia::SkiaCacheStats::default(),
         }
     }
@@ -1490,8 +1614,27 @@ fn graphics_preference_supported(preference: GraphicsPreference) -> bool {
     match preference {
         GraphicsPreference::Auto | GraphicsPreference::Software => true,
         GraphicsPreference::OpenGl => cfg!(feature = "renderer-skia-gl"),
-        GraphicsPreference::Vulkan | GraphicsPreference::Metal => false,
+        GraphicsPreference::Vulkan => cfg!(all(
+            feature = "renderer-skia-vulkan",
+            any(target_os = "windows", target_os = "linux")
+        )),
+        GraphicsPreference::Metal => {
+            cfg!(all(feature = "renderer-skia-metal", target_os = "macos"))
+        }
     }
+}
+
+#[cfg(test)]
+fn auto_driver_order() -> Vec<GraphicsPreference> {
+    let mut drivers = Vec::with_capacity(3);
+    #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+    drivers.push(GraphicsPreference::Metal);
+    #[cfg(all(feature = "renderer-skia-vulkan", target_os = "linux"))]
+    drivers.push(GraphicsPreference::Vulkan);
+    #[cfg(feature = "renderer-skia-gl")]
+    drivers.push(GraphicsPreference::OpenGl);
+    drivers.push(GraphicsPreference::Software);
+    drivers
 }
 
 fn create_renderer(
@@ -1500,12 +1643,52 @@ fn create_renderer(
     window: Arc<Window>,
     transparent: bool,
 ) -> Result<WinitSkiaRenderer, WinitApplicationError> {
-    #[cfg(feature = "renderer-skia-gl")]
     let mut fallback_reason = None;
-    #[cfg(not(feature = "renderer-skia-gl"))]
-    let fallback_reason = None;
-    #[cfg(not(feature = "renderer-skia-gl"))]
-    let _ = transparent;
+
+    #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+    if matches!(
+        preference,
+        GraphicsPreference::Auto | GraphicsPreference::Metal
+    ) {
+        match super::winit_skia_metal::WinitMetalRenderer::new(
+            Arc::clone(&window),
+            DEFAULT_CACHE_BUDGET,
+            transparent,
+        ) {
+            Ok(renderer) => return Ok(WinitSkiaRenderer::Metal(renderer)),
+            Err(error) if preference == GraphicsPreference::Metal => {
+                return Err(WinitApplicationError(error));
+            }
+            Err(error) => {
+                eprintln!("lgui: Skia Metal initialization failed: {error}");
+                fallback_reason = Some("metal-init-failed");
+            }
+        }
+    }
+
+    #[cfg(all(
+        feature = "renderer-skia-vulkan",
+        any(target_os = "windows", target_os = "linux")
+    ))]
+    if preference == GraphicsPreference::Vulkan
+        || (preference == GraphicsPreference::Auto && cfg!(target_os = "linux"))
+    {
+        match super::winit_skia_vulkan::WinitVulkanRenderer::new(
+            Arc::clone(&window),
+            DEFAULT_CACHE_BUDGET,
+            transparent,
+        ) {
+            Ok(renderer) => return Ok(WinitSkiaRenderer::Vulkan(renderer)),
+            Err(error) if preference == GraphicsPreference::Vulkan => {
+                return Err(WinitApplicationError(error));
+            }
+            Err(error) => {
+                eprintln!("lgui: Skia Vulkan initialization failed: {error}");
+                fallback_reason = Some("vulkan-init-failed");
+            }
+        }
+    }
+
     #[cfg(feature = "renderer-skia-gl")]
     if matches!(
         preference,
@@ -1521,7 +1704,7 @@ fn create_renderer(
                 return Err(WinitApplicationError(error));
             }
             Err(error) => {
-                eprintln!("lgui: Skia OpenGL initialization failed; using software: {error}");
+                eprintln!("lgui: Skia OpenGL initialization failed: {error}");
                 fallback_reason = Some("opengl-init-failed");
             }
         }
@@ -1787,7 +1970,53 @@ mod tests {
             graphics_preference_supported(GraphicsPreference::OpenGl),
             cfg!(feature = "renderer-skia-gl")
         );
-        assert!(!graphics_preference_supported(GraphicsPreference::Vulkan));
-        assert!(!graphics_preference_supported(GraphicsPreference::Metal));
+        assert_eq!(
+            graphics_preference_supported(GraphicsPreference::Vulkan),
+            cfg!(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))
+        );
+        assert_eq!(
+            graphics_preference_supported(GraphicsPreference::Metal),
+            cfg!(all(feature = "renderer-skia-metal", target_os = "macos"))
+        );
+    }
+
+    #[test]
+    fn auto_driver_order_matches_each_platform_policy() {
+        let order = auto_driver_order();
+        assert_eq!(order.last(), Some(&GraphicsPreference::Software));
+        #[cfg(target_os = "windows")]
+        assert_eq!(
+            order.first(),
+            if cfg!(feature = "renderer-skia-gl") {
+                Some(&GraphicsPreference::OpenGl)
+            } else {
+                Some(&GraphicsPreference::Software)
+            }
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            order.first(),
+            if cfg!(feature = "renderer-skia-vulkan") {
+                Some(&GraphicsPreference::Vulkan)
+            } else if cfg!(feature = "renderer-skia-gl") {
+                Some(&GraphicsPreference::OpenGl)
+            } else {
+                Some(&GraphicsPreference::Software)
+            }
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            order.first(),
+            if cfg!(feature = "renderer-skia-metal") {
+                Some(&GraphicsPreference::Metal)
+            } else if cfg!(feature = "renderer-skia-gl") {
+                Some(&GraphicsPreference::OpenGl)
+            } else {
+                Some(&GraphicsPreference::Software)
+            }
+        );
     }
 }

@@ -245,15 +245,13 @@ pub(crate) fn async_image_cache(
     let request_wake = Arc::clone(&wake);
     let request = move |source: &ImageSource| match source {
         ImageSource::Static(_) | ImageSource::Bytes { .. } => ImageStatus::Ready,
-        ImageSource::File(_) | ImageSource::Url(_) => {
-            request_async_image(
-                Arc::clone(&request_state),
-                request_loader.clone(),
-                Arc::clone(&request_wake),
-                source.clone(),
-                budget_bytes,
-            )
-        }
+        ImageSource::File(_) | ImageSource::Url(_) => request_async_image(
+            Arc::clone(&request_state),
+            request_loader.clone(),
+            Arc::clone(&request_wake),
+            source.clone(),
+            budget_bytes,
+        ),
     };
     let bytes_state = Arc::clone(&state);
     let bytes = move |source: &ImageSource| {
@@ -520,12 +518,11 @@ mod tests {
         let source = ImageSource::url("https://example.invalid/image.png");
         assert_eq!(request_image(&source), ImageStatus::Failed);
         {
-            let _guard =
-                install_image_cache(ImageCacheHandle::new(
-                    |_| ImageStatus::Loading,
-                    |_| None,
-                    || {},
-                ));
+            let _guard = install_image_cache(ImageCacheHandle::new(
+                |_| ImageStatus::Loading,
+                |_| None,
+                || {},
+            ));
             assert_eq!(request_image(&source), ImageStatus::Loading);
         }
         assert_eq!(request_image(&source), ImageStatus::Failed);

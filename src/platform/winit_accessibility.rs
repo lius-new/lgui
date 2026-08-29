@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use accesskit::{
-    Action, ActionData, Node, NodeId, Rect, Role, Toggled, Tree, TreeId, TreeUpdate,
-};
+use accesskit::{Action, ActionData, Node, NodeId, Rect, Role, Toggled, Tree, TreeId, TreeUpdate};
 use accesskit_winit::Adapter;
-use winit::{event_loop::{ActiveEventLoop, EventLoopProxy}, window::Window};
+use winit::{
+    event_loop::{ActiveEventLoop, EventLoopProxy},
+    window::Window,
+};
 
 use crate::core::{
     SemanticAction, SemanticInput, SemanticNode, SemanticRole, SemanticUpdate, UiId, UiScale,
@@ -136,14 +137,30 @@ impl SemanticIds {
         if let Some(step) = value.numeric_step {
             node.set_numeric_value_step(step);
         }
-        if value.state.disabled { node.set_disabled(); }
-        if value.state.selected { node.set_selected(true); }
-        if value.state.read_only { node.set_read_only(); }
-        if value.state.required { node.set_required(); }
-        if value.state.busy { node.set_busy(); }
-        if value.state.hidden { node.set_hidden(); }
+        if value.state.disabled {
+            node.set_disabled();
+        }
+        if value.state.selected {
+            node.set_selected(true);
+        }
+        if value.state.read_only {
+            node.set_read_only();
+        }
+        if value.state.required {
+            node.set_required();
+        }
+        if value.state.busy {
+            node.set_busy();
+        }
+        if value.state.hidden {
+            node.set_hidden();
+        }
         if let Some(checked) = value.state.checked {
-            node.set_toggled(if checked { Toggled::True } else { Toggled::False });
+            node.set_toggled(if checked {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
         }
         if let Some(expanded) = value.state.expanded {
             node.set_expanded(expanded);
@@ -151,18 +168,52 @@ impl SemanticIds {
         for action in &value.actions {
             node.add_action(access_action(*action));
         }
-        node.set_children(semantic.children.iter().map(|id| self.id_for(id)).collect::<Vec<_>>());
+        node.set_children(
+            semantic
+                .children
+                .iter()
+                .map(|id| self.id_for(id))
+                .collect::<Vec<_>>(),
+        );
         if !value.relationships.labelled_by.is_empty() {
-            node.set_labelled_by(value.relationships.labelled_by.iter().map(|id| self.id_for(id)).collect::<Vec<_>>());
+            node.set_labelled_by(
+                value
+                    .relationships
+                    .labelled_by
+                    .iter()
+                    .map(|id| self.id_for(id))
+                    .collect::<Vec<_>>(),
+            );
         }
         if !value.relationships.described_by.is_empty() {
-            node.set_described_by(value.relationships.described_by.iter().map(|id| self.id_for(id)).collect::<Vec<_>>());
+            node.set_described_by(
+                value
+                    .relationships
+                    .described_by
+                    .iter()
+                    .map(|id| self.id_for(id))
+                    .collect::<Vec<_>>(),
+            );
         }
         if !value.relationships.controls.is_empty() {
-            node.set_controls(value.relationships.controls.iter().map(|id| self.id_for(id)).collect::<Vec<_>>());
+            node.set_controls(
+                value
+                    .relationships
+                    .controls
+                    .iter()
+                    .map(|id| self.id_for(id))
+                    .collect::<Vec<_>>(),
+            );
         }
         if !value.relationships.owns.is_empty() {
-            node.set_owns(value.relationships.owns.iter().map(|id| self.id_for(id)).collect::<Vec<_>>());
+            node.set_owns(
+                value
+                    .relationships
+                    .owns
+                    .iter()
+                    .map(|id| self.id_for(id))
+                    .collect::<Vec<_>>(),
+            );
         }
         let bounds = scale.physical_rect_outward(semantic.bounds);
         node.set_bounds(Rect {
@@ -194,14 +245,38 @@ pub(super) fn semantic_input(
             }),
             _ => None,
         },
-        Action::Increment => Some(SemanticInput::Action { target, action: SemanticAction::Increment }),
-        Action::Decrement => Some(SemanticInput::Action { target, action: SemanticAction::Decrement }),
-        Action::ScrollIntoView => Some(SemanticInput::Action { target, action: SemanticAction::ScrollIntoView }),
-        Action::ScrollUp => Some(SemanticInput::Action { target, action: SemanticAction::ScrollUp }),
-        Action::ScrollDown => Some(SemanticInput::Action { target, action: SemanticAction::ScrollDown }),
-        Action::ScrollLeft => Some(SemanticInput::Action { target, action: SemanticAction::ScrollLeft }),
-        Action::ScrollRight => Some(SemanticInput::Action { target, action: SemanticAction::ScrollRight }),
-        Action::SetTextSelection => Some(SemanticInput::Action { target, action: SemanticAction::SetTextSelection }),
+        Action::Increment => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::Increment,
+        }),
+        Action::Decrement => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::Decrement,
+        }),
+        Action::ScrollIntoView => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::ScrollIntoView,
+        }),
+        Action::ScrollUp => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::ScrollUp,
+        }),
+        Action::ScrollDown => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::ScrollDown,
+        }),
+        Action::ScrollLeft => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::ScrollLeft,
+        }),
+        Action::ScrollRight => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::ScrollRight,
+        }),
+        Action::SetTextSelection => Some(SemanticInput::Action {
+            target,
+            action: SemanticAction::SetTextSelection,
+        }),
         _ => None,
     }
 }

@@ -17,13 +17,22 @@ pub mod win32;
 
 #[cfg(feature = "backend-winit")]
 mod winit;
+#[cfg(feature = "accessibility")]
+mod winit_accessibility;
 #[cfg(feature = "renderer-skia-gl")]
 #[allow(unsafe_code)]
 mod winit_skia_gl;
+#[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+#[allow(unsafe_code)]
+mod winit_skia_metal;
+#[cfg(all(
+    feature = "renderer-skia-vulkan",
+    any(target_os = "windows", target_os = "linux")
+))]
+#[allow(unsafe_code)]
+mod winit_skia_vulkan;
 #[cfg(all(feature = "backend-winit", target_os = "windows"))]
 mod winit_windows;
-#[cfg(feature = "accessibility")]
-mod winit_accessibility;
 
 #[cfg(feature = "backend-winit")]
 pub use winit::{WinitApplication, WinitApplicationError};

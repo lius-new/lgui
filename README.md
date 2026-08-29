@@ -44,11 +44,23 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md),
 cargo test -p lgui --no-default-features
 ```
 
-The Skia desktop backend uses winit with portable OpenGL or software presentation. Liuguang keeps
-Skia behind an explicit feature and runtime renderer choice during migration:
+Run the same example source through the portable winit + Skia backend on Windows, Linux, or
+macOS:
+
+```powershell
+cargo run --manifest-path native\lgui\Cargo.toml --example counter --no-default-features --features renderer-skia-gl,widgets
+```
+
+The Skia desktop backend uses winit with Vulkan, OpenGL, Metal, or software presentation.
+Liuguang keeps Skia behind an explicit feature and runtime renderer choice during migration:
 
 ```powershell
 cargo run --bin liugc --features renderer-skia -- --renderer skia
 cargo run --bin liugc --features renderer-skia -- --renderer skia-opengl
+cargo run --bin liugc --features renderer-skia -- --renderer skia-vulkan
 cargo run --bin liugc --features renderer-skia -- --renderer skia-software
 ```
+
+`skia` selects the documented platform `Auto` order. Framework applications on macOS may select
+`skia-metal` when built with `lgui/renderer-skia-metal`. Explicit GPU choices return an error when
+the requested driver is unavailable; only `Auto` follows the bounded fallback chain.

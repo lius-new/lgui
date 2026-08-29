@@ -2146,6 +2146,12 @@ fn render_window(hwnd: HWND, target: HDC) {
                             frame_index: state.frame_index,
                             recorded_at: Instant::now(),
                             backend: state.renderer_factory.name(),
+                            renderer: crate::diagnostics::RendererDeviceInfo {
+                                api: state.renderer_factory.name().to_owned(),
+                                color_format: "BGRA8 premultiplied".to_owned(),
+                                present_mode: "Win32 immediate".to_owned(),
+                                ..crate::diagnostics::RendererDeviceInfo::default()
+                            },
                             mode: if physical_damage.is_empty() {
                                 DiagnosticPresentMode::Skipped
                             } else if commit.damage.dirty.is_full() {

@@ -1,8 +1,16 @@
-#[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d", feature = "renderer-skia"))]
+#[cfg(any(
+    feature = "renderer-gdi",
+    feature = "renderer-d2d",
+    feature = "renderer-skia"
+))]
 mod application;
 #[cfg(any(feature = "multi-window", feature = "renderer-gdi"))]
 mod backbuffer;
-#[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d", feature = "renderer-skia"))]
+#[cfg(any(
+    feature = "renderer-gdi",
+    feature = "renderer-d2d",
+    feature = "renderer-skia"
+))]
 mod background;
 #[cfg(feature = "renderer-d2d")]
 mod d2d;
@@ -34,13 +42,17 @@ mod tray;
 #[cfg(feature = "backend-winit")]
 mod winit_adapter;
 
-#[cfg(any(feature = "renderer-gdi", feature = "renderer-d2d", feature = "renderer-skia"))]
+#[cfg(feature = "renderer-skia")]
+pub use crate::platform::skia::probe_skia_support;
+#[cfg(any(
+    feature = "renderer-gdi",
+    feature = "renderer-d2d",
+    feature = "renderer-skia"
+))]
 pub use application::{
     GdiRendererFactory, Win32Application, Win32RenderError, Win32RenderTarget,
     Win32RendererFactory, Win32SceneRenderer, Win32WindowOptions,
 };
-#[cfg(feature = "renderer-skia")]
-pub use crate::platform::skia::probe_skia_support;
 #[cfg(feature = "multi-window")]
 pub use backbuffer::{rect_size, AlphaPolicy, LayeredBackbuffer};
 #[cfg(feature = "renderer-d2d")]
@@ -73,9 +85,9 @@ pub use image_cache::{
 #[cfg(feature = "images")]
 pub use image_cache::{ImageFit, ImageSource};
 #[cfg(feature = "notifications")]
-pub use notifications::Win32NotificationService;
-#[cfg(feature = "notifications")]
 pub(crate) use notifications::initialize_process_identity as initialize_notification_identity;
+#[cfg(feature = "notifications")]
+pub use notifications::Win32NotificationService;
 #[cfg(feature = "svg")]
 pub use svg::{
     draw_svg_icon, install_svg_font_registry, install_svg_icon_registry, rasterize_svg_icon_bgra,

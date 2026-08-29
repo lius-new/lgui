@@ -24,21 +24,21 @@ pub use crate::core::{
     RenderCx, RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiRect,
     VisualStyle,
 };
+#[cfg(feature = "open-url")]
+pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};
 #[cfg(feature = "diagnostics")]
 pub use crate::diagnostics::{
     DiagnosticPresentMode, DiagnosticsProvider, DiagnosticsSink, FrameCollector,
     FrameDiagnosticsSnapshot, FramePresentMetrics, FrameRenderMetrics, FrameSample,
 };
+#[cfg(feature = "dialogs")]
+pub use crate::dialogs::{
+    FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
+};
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
     Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationError,
     NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService, WakeHandle,
-};
-#[cfg(feature = "open-url")]
-pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};
-#[cfg(feature = "dialogs")]
-pub use crate::dialogs::{
-    FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
 };
 pub use crate::renderer::{
     ClipRegion, FrameInfo, FrameReason, MemoryPressure, RenderStats, RendererCapabilities,
@@ -57,6 +57,10 @@ pub use crate::session::UiSession;
 pub use crate::store::{
     create, BoundStoreAction, BoundStoreActionWith, StoreAction, StoreActionWith, StoreContext,
     StoreDefinition, StoreHooks, StoreRuntime,
+};
+pub use crate::text::{
+    FontAsset, TextAffinity, TextCluster, TextDirection, TextFeature, TextFontSlant, TextFontWidth,
+    TextHit, TextLayout, TextLayoutRequest, TextLineMetrics, TextSpan, TextVerticalAlign,
 };
 #[cfg(feature = "theme")]
 pub use crate::theme::{ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens};

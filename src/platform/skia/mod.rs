@@ -1,27 +1,56 @@
 use std::{
+    cell::RefCell,
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use skia_safe::{
-    surfaces, AlphaType, BlendMode, Canvas, Color as SkColor, Color4f, ColorType, Data,
-    Font, FontMgr, FontStyle, Image, ImageInfo, Paint, PaintStyle, Path, PathBuilder, RRect, Rect,
-    SamplingOptions, Surface, TileMode,
-};
 use crate::{
     application::GraphicsPreference,
     assets::render_resources,
     core::{
-        BackdropBlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform,
-        PathStyle, PhysicalRect, Scene, ScenePrimitive, StaticLayerBackground,
-        StaticLayerCachePolicy, StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource,
-        UiPath, UiPathCommand, UiRect, VisualStyle,
+        BackdropBlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
+        PhysicalRect, Scene, ScenePrimitive, StaticLayerBackground, StaticLayerCachePolicy,
+        StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource, UiPath, UiPathCommand,
+        UiRect, VisualStyle,
     },
     renderer::{FrameInfo, MemoryPressure},
 };
+use skia_safe::textlayout::{
+    FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, RectHeightStyle, RectWidthStyle,
+    TextAlign as SkTextAlign, TextDirection as SkTextDirection, TextStyle as SkTextStyle,
+    TypefaceFontProvider,
+};
+use skia_safe::{
+    surfaces, AlphaType, BlendMode, Canvas, Color as SkColor, Color4f, ColorType, Data, FontMgr,
+    FontStyle, Image, ImageInfo, Paint, PaintStyle, Path, PathBuilder, RRect, Rect,
+    SamplingOptions, Surface, TileMode,
+};
+use unicode_bidi::BidiInfo;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const DEFAULT_CACHE_BUDGET: usize = 96 * 1024 * 1024;
+
+pub(crate) const fn gpu_cache_budget(total: usize) -> usize {
+    total.saturating_mul(2) / 3
+}
+
+pub(crate) const fn cpu_cache_budget(total: usize) -> usize {
+    total.saturating_sub(gpu_cache_budget(total))
+}
+
+pub(crate) fn with_gpu_cache_usage(
+    mut stats: SkiaCacheStats,
+    context: &skia_safe::gpu::DirectContext,
+) -> SkiaCacheStats {
+    let usage = context.resource_cache_usage();
+    stats.budget_bytes = stats
+        .budget_bytes
+        .saturating_add(context.resource_cache_limit());
+    stats.resident_bytes = stats.resident_bytes.saturating_add(usage.resource_bytes);
+    stats.entries = stats.entries.saturating_add(usage.resource_count);
+    stats
+}
 
 pub fn probe_skia_support(preference: GraphicsPreference) -> Result<(), String> {
     match preference {
@@ -36,26 +65,455 @@ pub fn probe_skia_support(preference: GraphicsPreference) -> Result<(), String> 
             .ok_or_else(|| "Skia could not create a raster surface".to_owned()),
         #[cfg(not(feature = "renderer-skia-gl"))]
         GraphicsPreference::OpenGl => Err("OpenGL is not enabled on this target".to_owned()),
+        #[cfg(all(
+            feature = "renderer-skia-vulkan",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        GraphicsPreference::Vulkan => unsafe { ash::Entry::load() }
+            .map(|_| ())
+            .map_err(|error| format!("load Vulkan runtime: {error}")),
+        #[cfg(not(all(
+            feature = "renderer-skia-vulkan",
+            any(target_os = "windows", target_os = "linux")
+        )))]
         GraphicsPreference::Vulkan => Err("Vulkan is not enabled on this build".to_owned()),
-        GraphicsPreference::Metal => Err("Metal is only available on macOS".to_owned()),
+        #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+        GraphicsPreference::Metal => surfaces::raster_n32_premul((1, 1))
+            .map(|_| ())
+            .ok_or_else(|| "Skia could not initialize Metal support".to_owned()),
+        #[cfg(not(all(feature = "renderer-skia-metal", target_os = "macos")))]
+        GraphicsPreference::Metal => Err("Metal is not enabled on this target".to_owned()),
     }
 }
 
 struct SkiaTextSystem;
+
+thread_local! {
+    static SKIA_TEXT_FONTS: RefCell<FontCollection> = RefCell::new(skia_font_collection());
+}
 
 impl crate::text::TextSystem for SkiaTextSystem {
     fn measure(
         &self,
         request: &crate::text::TextMeasureRequest<'_>,
     ) -> Option<crate::text::TextMetrics> {
-        let font = skia_font(request.font_height.abs().max(1.0), request.font_weight);
-        let (width, _) = font.measure_str(request.text, None);
-        Some(crate::text::TextMetrics { width })
+        let layout_request = crate::text::TextLayoutRequest::single_line(
+            request.text,
+            request.bounds,
+            request.font_height,
+            request.font_weight,
+        );
+        self.layout(&layout_request)
+            .map(|layout| crate::text::TextMetrics {
+                width: layout.width,
+            })
+    }
+
+    fn layout(
+        &self,
+        request: &crate::text::TextLayoutRequest<'_>,
+    ) -> Option<crate::text::TextLayout> {
+        SKIA_TEXT_FONTS.with(|fonts| {
+            let mut paragraph = build_skia_paragraph(request, fonts.borrow().clone(), None);
+            paragraph.layout(request.bounds.width().max(1.0));
+            Some(portable_text_layout(&paragraph, request))
+        })
     }
 }
 
 pub(crate) fn skia_text_system_handle() -> crate::text::TextSystemHandle {
     crate::text::TextSystemHandle::new(SkiaTextSystem)
+}
+
+fn skia_font_collection() -> FontCollection {
+    let mut collection = FontCollection::new();
+    collection.set_default_font_manager(FontMgr::default(), None);
+    let assets = crate::text::font_assets();
+    if !assets.is_empty() {
+        let system = FontMgr::default();
+        let mut provider = TypefaceFontProvider::new();
+        for asset in assets.iter() {
+            if let Some(typeface) =
+                system.new_from_data(&Data::new_copy(asset.bytes.as_slice()), None)
+            {
+                provider.register_typeface(typeface, asset.family_alias.as_deref());
+            }
+        }
+        let manager: FontMgr = provider.into();
+        collection.set_dynamic_font_manager(manager);
+    }
+    collection.paragraph_cache_mut().turn_on(false);
+    collection
+}
+
+fn build_skia_paragraph(
+    request: &crate::text::TextLayoutRequest<'_>,
+    fonts: FontCollection,
+    color: Option<SkColor>,
+) -> Paragraph {
+    let direction = resolved_text_direction(request.text, request.direction);
+    let mut paragraph_style = ParagraphStyle::new();
+    paragraph_style
+        .set_text_align(match request.align {
+            TextAlign::Left => SkTextAlign::Left,
+            TextAlign::Center => SkTextAlign::Center,
+            TextAlign::Right => SkTextAlign::Right,
+        })
+        .set_text_direction(match direction {
+            crate::text::TextDirection::RightToLeft => SkTextDirection::RTL,
+            _ => SkTextDirection::LTR,
+        })
+        .set_max_lines(request.max_lines);
+
+    let base_style = skia_paragraph_text_style(
+        request.font_height,
+        request.font_weight,
+        request.font_width,
+        request.font_slant,
+        request.font_families,
+        request.locale,
+        request.tracking,
+        request.line_height,
+        request.features,
+        color,
+    );
+    paragraph_style.set_text_style(&base_style);
+    let mut builder = ParagraphBuilder::new(&paragraph_style, fonts);
+    if request.spans.is_empty() {
+        builder.push_style(&base_style).add_text(request.text).pop();
+    } else {
+        let char_boundaries = char_byte_boundaries(request.text);
+        let mut cursor = 0;
+        for span in request.spans {
+            let start = span
+                .range
+                .start
+                .max(cursor)
+                .min(char_boundaries.len().saturating_sub(1));
+            let end = span
+                .range
+                .end
+                .max(start)
+                .min(char_boundaries.len().saturating_sub(1));
+            if start > cursor {
+                builder
+                    .push_style(&base_style)
+                    .add_text(&request.text[char_boundaries[cursor]..char_boundaries[start]])
+                    .pop();
+            }
+            if end > start {
+                let style = skia_paragraph_text_style(
+                    span.font_height.unwrap_or(request.font_height),
+                    span.font_weight.unwrap_or(request.font_weight),
+                    span.font_width.unwrap_or(request.font_width),
+                    span.font_slant.unwrap_or(request.font_slant),
+                    if span.font_families.is_empty() {
+                        request.font_families
+                    } else {
+                        span.font_families
+                    },
+                    span.locale.unwrap_or(request.locale),
+                    span.tracking.unwrap_or(request.tracking),
+                    request.line_height,
+                    if span.features.is_empty() {
+                        request.features
+                    } else {
+                        span.features
+                    },
+                    color,
+                );
+                builder
+                    .push_style(&style)
+                    .add_text(&request.text[char_boundaries[start]..char_boundaries[end]])
+                    .pop();
+                cursor = cursor.max(end);
+            }
+        }
+        if cursor < char_boundaries.len().saturating_sub(1) {
+            builder
+                .push_style(&base_style)
+                .add_text(&request.text[char_boundaries[cursor]..])
+                .pop();
+        }
+    }
+    builder.build()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn skia_paragraph_text_style(
+    font_height: f32,
+    font_weight: i32,
+    font_width: crate::text::TextFontWidth,
+    font_slant: crate::text::TextFontSlant,
+    requested_families: &[&str],
+    locale: &str,
+    tracking: f32,
+    line_height: Option<f32>,
+    features: &[crate::text::TextFeature<'_>],
+    color: Option<SkColor>,
+) -> SkTextStyle {
+    let size = font_height.abs().max(1.0);
+    let mut style = SkTextStyle::new();
+    let families = if requested_families.is_empty() {
+        crate::text::font_families()
+    } else {
+        requested_families
+    };
+    style
+        .set_font_families(families)
+        .set_font_size(size)
+        .set_font_style(FontStyle::new(
+            skia_safe::font_style::Weight::from(font_weight.clamp(1, 1000)),
+            skia_safe::font_style::Width::from(font_width.0.clamp(1, 9)),
+            match font_slant {
+                crate::text::TextFontSlant::Upright => skia_safe::font_style::Slant::Upright,
+                crate::text::TextFontSlant::Italic => skia_safe::font_style::Slant::Italic,
+                crate::text::TextFontSlant::Oblique => skia_safe::font_style::Slant::Oblique,
+            },
+        ))
+        .set_letter_spacing(tracking);
+    if !locale.is_empty() {
+        style.set_locale(locale);
+    }
+    if let Some(line_height) = line_height.filter(|height| *height > 0.0) {
+        style
+            .set_height(line_height / size)
+            .set_height_override(true);
+    }
+    if let Some(color) = color {
+        style.set_color(color);
+    }
+    for feature in features {
+        style.add_font_feature(feature.name, feature.value);
+    }
+    style
+}
+
+fn resolved_text_direction(
+    text: &str,
+    requested: crate::text::TextDirection,
+) -> crate::text::TextDirection {
+    if requested != crate::text::TextDirection::Auto {
+        return requested;
+    }
+    BidiInfo::new(text, None)
+        .paragraphs
+        .first()
+        .map(|paragraph| {
+            if paragraph.level.is_rtl() {
+                crate::text::TextDirection::RightToLeft
+            } else {
+                crate::text::TextDirection::LeftToRight
+            }
+        })
+        .unwrap_or(crate::text::TextDirection::LeftToRight)
+}
+
+fn portable_text_layout(
+    paragraph: &Paragraph,
+    request: &crate::text::TextLayoutRequest<'_>,
+) -> crate::text::TextLayout {
+    let utf16_boundaries = char_utf16_boundaries(request.text);
+    let byte_boundaries = char_byte_boundaries(request.text);
+    let content_height = paragraph.height();
+    let offset_y = request.bounds.top
+        + match request.vertical_align {
+            crate::text::TextVerticalAlign::Top => 0.0,
+            crate::text::TextVerticalAlign::Center => {
+                ((request.bounds.height() - content_height) * 0.5).max(0.0)
+            }
+            crate::text::TextVerticalAlign::Bottom => {
+                (request.bounds.height() - content_height).max(0.0)
+            }
+        };
+    let offset_x = request.bounds.left;
+    let lines = paragraph
+        .get_line_metrics()
+        .into_iter()
+        .map(|line| crate::text::TextLineMetrics {
+            range: utf16_range_to_char_range(&utf16_boundaries, line.start_index..line.end_index),
+            bounds: UiRect::new(
+                offset_x + line.left as f32,
+                offset_y + (line.baseline - line.ascent) as f32,
+                offset_x + (line.left + line.width) as f32,
+                offset_y + (line.baseline + line.descent) as f32,
+            ),
+            baseline: offset_y + line.baseline as f32,
+            hard_break: line.hard_break,
+        })
+        .collect::<Vec<_>>();
+    let mut clusters = Vec::new();
+    for (start_byte, grapheme) in request.text.grapheme_indices(true) {
+        let end_byte = start_byte + grapheme.len();
+        let range = byte_range_to_char_range(&byte_boundaries, start_byte..end_byte);
+        let utf16_range = utf16_boundaries[range.start]..utf16_boundaries[range.end];
+        for text_box in
+            paragraph.get_rects_for_range(utf16_range, RectHeightStyle::Max, RectWidthStyle::Tight)
+        {
+            clusters.push(crate::text::TextCluster {
+                range: range.clone(),
+                bounds: offset_skia_rect(text_box.rect, offset_x, offset_y),
+                direction: if text_box.direct == SkTextDirection::RTL {
+                    crate::text::TextDirection::RightToLeft
+                } else {
+                    crate::text::TextDirection::LeftToRight
+                },
+            });
+        }
+    }
+    let mut carets = Vec::with_capacity(utf16_boundaries.len() * 2);
+    for char_index in 0..utf16_boundaries.len() {
+        let utf16_index = utf16_boundaries[char_index];
+        if char_index > 0 {
+            if let Some(rect) = paragraph_caret_rect(
+                paragraph,
+                utf16_boundaries[char_index - 1]..utf16_index,
+                false,
+                offset_x,
+                offset_y,
+            ) {
+                carets.push((char_index, crate::text::TextAffinity::Upstream, rect));
+            }
+        }
+        if char_index + 1 < utf16_boundaries.len() {
+            if let Some(rect) = paragraph_caret_rect(
+                paragraph,
+                utf16_index..utf16_boundaries[char_index + 1],
+                true,
+                offset_x,
+                offset_y,
+            ) {
+                carets.push((char_index, crate::text::TextAffinity::Downstream, rect));
+            }
+        }
+    }
+    for char_index in 0..utf16_boundaries.len() {
+        if carets.iter().any(|(index, _, _)| *index == char_index) {
+            continue;
+        }
+        if let Some(cluster) = clusters
+            .iter()
+            .find(|cluster| cluster.range.start == char_index || cluster.range.end == char_index)
+        {
+            let at_start = cluster.range.start == char_index;
+            let x = match (cluster.direction, at_start) {
+                (crate::text::TextDirection::RightToLeft, true) => cluster.bounds.right,
+                (crate::text::TextDirection::RightToLeft, false) => cluster.bounds.left,
+                (_, true) => cluster.bounds.left,
+                (_, false) => cluster.bounds.right,
+            };
+            carets.push((
+                char_index,
+                if at_start {
+                    crate::text::TextAffinity::Downstream
+                } else {
+                    crate::text::TextAffinity::Upstream
+                },
+                UiRect::new(x, cluster.bounds.top, x, cluster.bounds.bottom),
+            ));
+        } else if let Some(line) = lines
+            .iter()
+            .find(|line| char_index >= line.range.start && char_index <= line.range.end)
+        {
+            let x = if char_index == line.range.end {
+                line.bounds.right
+            } else {
+                line.bounds.left
+            };
+            carets.push((
+                char_index,
+                crate::text::TextAffinity::Downstream,
+                UiRect::new(x, line.bounds.top, x, line.bounds.bottom),
+            ));
+        }
+    }
+    crate::text::TextLayout::new(
+        paragraph.longest_line(),
+        content_height,
+        paragraph.did_exceed_max_lines(),
+        lines,
+        clusters,
+        carets,
+    )
+}
+
+fn paragraph_caret_rect(
+    paragraph: &Paragraph,
+    byte_range: std::ops::Range<usize>,
+    at_start: bool,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<UiRect> {
+    let text_box = paragraph
+        .get_rects_for_range(byte_range, RectHeightStyle::Max, RectWidthStyle::Tight)
+        .into_iter()
+        .next()?;
+    let leading = if text_box.direct == SkTextDirection::RTL {
+        text_box.rect.right
+    } else {
+        text_box.rect.left
+    };
+    let trailing = if text_box.direct == SkTextDirection::RTL {
+        text_box.rect.left
+    } else {
+        text_box.rect.right
+    };
+    let x = if at_start { leading } else { trailing } + offset_x;
+    Some(UiRect::new(
+        x,
+        text_box.rect.top + offset_y,
+        x,
+        text_box.rect.bottom + offset_y,
+    ))
+}
+
+fn offset_skia_rect(rect: Rect, offset_x: f32, offset_y: f32) -> UiRect {
+    UiRect::new(
+        rect.left + offset_x,
+        rect.top + offset_y,
+        rect.right + offset_x,
+        rect.bottom + offset_y,
+    )
+}
+
+fn char_byte_boundaries(text: &str) -> Vec<usize> {
+    text.char_indices()
+        .map(|(index, _)| index)
+        .chain(std::iter::once(text.len()))
+        .collect()
+}
+
+fn char_utf16_boundaries(text: &str) -> Vec<usize> {
+    let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
+    let mut offset = 0;
+    boundaries.push(offset);
+    for ch in text.chars() {
+        offset += ch.len_utf16();
+        boundaries.push(offset);
+    }
+    boundaries
+}
+
+fn byte_range_to_char_range(
+    boundaries: &[usize],
+    range: std::ops::Range<usize>,
+) -> std::ops::Range<usize> {
+    byte_to_char_index(boundaries, range.start)..byte_to_char_index(boundaries, range.end)
+}
+
+fn byte_to_char_index(boundaries: &[usize], byte: usize) -> usize {
+    boundaries.partition_point(|boundary| *boundary < byte)
+}
+
+fn utf16_range_to_char_range(
+    boundaries: &[usize],
+    range: std::ops::Range<usize>,
+) -> std::ops::Range<usize> {
+    utf16_to_char_index(boundaries, range.start)..utf16_to_char_index(boundaries, range.end)
+}
+
+fn utf16_to_char_index(boundaries: &[usize], offset: usize) -> usize {
+    boundaries.partition_point(|boundary| *boundary < offset)
 }
 
 struct CachedImage {
@@ -64,15 +522,34 @@ struct CachedImage {
     used: u64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct ParagraphCacheKey {
+    text: String,
+    width: u32,
+    height: u32,
+    style: TextStyle,
+    families: Vec<&'static str>,
+}
+
+struct CachedParagraph {
+    paragraph: Paragraph,
+    bytes: usize,
+    used: u64,
+}
+
 pub(crate) struct SkiaCache {
     entries: HashMap<String, CachedImage>,
+    paragraphs: HashMap<ParagraphCacheKey, CachedParagraph>,
+    fonts: FontCollection,
     resident_bytes: usize,
     budget_bytes: usize,
     generation: u64,
     hits: u64,
     misses: u64,
     evictions: u64,
+    text_hits: u64,
+    text_misses: u64,
+    text_evictions: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -83,14 +560,67 @@ pub(crate) struct SkiaCacheStats {
     pub hits: u64,
     pub misses: u64,
     pub evictions: u64,
+    pub text_resident_bytes: usize,
+    pub text_entries: usize,
+    pub text_hits: u64,
+    pub text_misses: u64,
+    pub text_evictions: u64,
+    pub largest_entry_bytes: usize,
+    pub largest_text_entry_bytes: usize,
 }
 
 impl SkiaCache {
     pub(crate) fn new(budget_bytes: usize) -> Self {
         Self {
+            entries: HashMap::new(),
+            paragraphs: HashMap::new(),
+            fonts: skia_font_collection(),
+            resident_bytes: 0,
             budget_bytes,
-            ..Self::default()
+            generation: 0,
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+            text_hits: 0,
+            text_misses: 0,
+            text_evictions: 0,
         }
+    }
+
+    fn draw_text(&mut self, canvas: &Canvas, rect: UiRect, text: &str, style: TextStyle) {
+        let key = ParagraphCacheKey {
+            text: text.to_owned(),
+            width: rect.width().to_bits(),
+            height: rect.height().to_bits(),
+            style,
+            families: crate::text::font_families().to_vec(),
+        };
+        if let Some(entry) = self.paragraphs.get_mut(&key) {
+            self.text_hits = self.text_hits.saturating_add(1);
+            entry.used = self.generation;
+            paint_cached_paragraph(canvas, rect, &entry.paragraph);
+            return;
+        }
+        self.text_misses = self.text_misses.saturating_add(1);
+        let request = scene_text_layout_request(text, rect, style);
+        let mut paragraph = build_skia_paragraph(
+            &request,
+            self.fonts.clone(),
+            Some(sk_color(style.color, style.alpha)),
+        );
+        paragraph.layout(rect.width().max(1.0));
+        paint_cached_paragraph(canvas, rect, &paragraph);
+        let bytes = paragraph_cache_entry_bytes(text, &paragraph);
+        self.resident_bytes = self.resident_bytes.saturating_add(bytes);
+        self.paragraphs.insert(
+            key,
+            CachedParagraph {
+                paragraph,
+                bytes,
+                used: self.generation,
+            },
+        );
+        self.evict_to_budget();
     }
 
     fn get(&mut self, key: &str) -> Option<Image> {
@@ -127,17 +657,35 @@ impl SkiaCache {
 
     fn evict_to_budget(&mut self) {
         while self.resident_bytes > self.budget_bytes {
-            let Some(key) = self
+            let image = self
                 .entries
                 .iter()
                 .min_by_key(|(_, entry)| entry.used)
-                .map(|(key, _)| key.clone())
-            else {
+                .map(|(key, entry)| (key.clone(), entry.used));
+            let paragraph = self
+                .paragraphs
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, entry)| (key.clone(), entry.used));
+            if image.is_none() && paragraph.is_none() {
                 break;
-            };
-            if let Some(entry) = self.entries.remove(&key) {
-                self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
-                self.evictions = self.evictions.saturating_add(1);
+            }
+            if paragraph.as_ref().is_some_and(|(_, paragraph_used)| {
+                image
+                    .as_ref()
+                    .is_none_or(|(_, image_used)| paragraph_used <= image_used)
+            }) {
+                if let Some((key, _)) = paragraph {
+                    if let Some(entry) = self.paragraphs.remove(&key) {
+                        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+                        self.text_evictions = self.text_evictions.saturating_add(1);
+                    }
+                }
+            } else if let Some((key, _)) = image {
+                if let Some(entry) = self.entries.remove(&key) {
+                    self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+                    self.evictions = self.evictions.saturating_add(1);
+                }
             }
         }
     }
@@ -157,16 +705,34 @@ impl SkiaCache {
                 self.evictions = self
                     .evictions
                     .saturating_add(before.saturating_sub(self.entries.len()) as u64);
+                let before = self.paragraphs.len();
+                self.paragraphs.retain(|_, entry| {
+                    let keep = current.wrapping_sub(entry.used) <= 2;
+                    if !keep {
+                        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+                    }
+                    keep
+                });
+                self.text_evictions = self
+                    .text_evictions
+                    .saturating_add(before.saturating_sub(self.paragraphs.len()) as u64);
+                self.fonts.clear_caches();
             }
             MemoryPressure::Critical => {
                 self.evictions = self.evictions.saturating_add(self.entries.len() as u64);
+                self.text_evictions = self
+                    .text_evictions
+                    .saturating_add(self.paragraphs.len() as u64);
                 self.entries.clear();
+                self.paragraphs.clear();
+                self.fonts.clear_caches();
                 self.resident_bytes = 0;
             }
         }
     }
 
     pub(crate) fn stats(&self) -> SkiaCacheStats {
+        let text_resident_bytes = self.paragraphs.values().map(|entry| entry.bytes).sum();
         SkiaCacheStats {
             budget_bytes: self.budget_bytes,
             resident_bytes: self.resident_bytes,
@@ -174,8 +740,51 @@ impl SkiaCache {
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
+            text_resident_bytes,
+            text_entries: self.paragraphs.len(),
+            text_hits: self.text_hits,
+            text_misses: self.text_misses,
+            text_evictions: self.text_evictions,
+            largest_entry_bytes: self
+                .entries
+                .values()
+                .map(|entry| entry.bytes)
+                .max()
+                .unwrap_or(0),
+            largest_text_entry_bytes: self
+                .paragraphs
+                .values()
+                .map(|entry| entry.bytes)
+                .max()
+                .unwrap_or(0),
         }
     }
+}
+
+fn scene_text_layout_request<'a>(
+    text: &'a str,
+    rect: UiRect,
+    style: TextStyle,
+) -> crate::text::TextLayoutRequest<'a> {
+    let mut request =
+        crate::text::TextLayoutRequest::single_line(text, rect, style.height, style.weight);
+    request.tracking = style.tracking;
+    request.align = style.align;
+    request
+}
+
+fn paint_cached_paragraph(canvas: &Canvas, rect: UiRect, paragraph: &Paragraph) {
+    let y = rect.top + ((rect.height() - paragraph.height()) * 0.5).max(0.0);
+    canvas.save();
+    canvas.clip_rect(sk_rect(rect), None, true);
+    paragraph.paint(canvas, (rect.left, y));
+    canvas.restore();
+}
+
+fn paragraph_cache_entry_bytes(text: &str, paragraph: &Paragraph) -> usize {
+    2048usize
+        .saturating_add(text.len())
+        .saturating_add(paragraph.line_number().saturating_mul(256))
 }
 
 pub(crate) struct SkiaSoftwareSurface {
@@ -205,12 +814,7 @@ impl SkiaSoftwareSurface {
     pub(crate) fn draw(&mut self, scene: &Scene, frame: &FrameInfo<'_>) -> Result<(), String> {
         let viewport = frame.viewport();
         self.ensure_surface(viewport.width(), viewport.height());
-        let info = ImageInfo::new(
-            self.size,
-            ColorType::BGRA8888,
-            AlphaType::Premul,
-            None,
-        );
+        let info = ImageInfo::new(self.size, ColorType::BGRA8888, AlphaType::Premul, None);
         let mut surface = surfaces::wrap_pixels(
             &info,
             self.pixels.as_mut_slice(),
@@ -289,35 +893,43 @@ impl SkiaPainter<'_> {
         match command {
             ScenePrimitive::Rect { rect, style, .. } => draw_rect(canvas, *rect, *style),
             ScenePrimitive::Ellipse { rect, style, .. } => draw_ellipse(canvas, *rect, *style),
-            ScenePrimitive::Text { rect, text, style, .. } => {
-                draw_text(canvas, *rect, text, *style)
-            }
-            ScenePrimitive::Line { start, end, stroke, .. } => {
+            ScenePrimitive::Text {
+                rect, text, style, ..
+            } => self.cache.draw_text(canvas, *rect, text, *style),
+            ScenePrimitive::Line {
+                start, end, stroke, ..
+            } => {
                 canvas.draw_line((start.x, start.y), (end.x, end.y), &stroke_paint(*stroke));
             }
             ScenePrimitive::Path { path, style, .. } => draw_path(canvas, path, *style),
-            ScenePrimitive::Image { rect, source, fit, .. } => {
+            ScenePrimitive::Image {
+                rect, source, fit, ..
+            } => {
                 if let Some(image) = self.image(source)? {
                     draw_image(canvas, &image, *rect, *fit, None);
                 }
             }
-            ScenePrimitive::Icon { rect, key, style, .. } => {
+            ScenePrimitive::Icon {
+                rect, key, style, ..
+            } => {
                 if let Some(image) = self.icon(key, *rect, *style)? {
                     let destination = sk_rect(*rect);
                     canvas.draw_image_rect(image, None, &destination, &Paint::default());
                 }
             }
-            ScenePrimitive::Glow { rect, color, alpha, .. } => {
-                draw_glow(canvas, *rect, *color, *alpha)
-            }
+            ScenePrimitive::Glow {
+                rect, color, alpha, ..
+            } => draw_glow(canvas, *rect, *color, *alpha),
             ScenePrimitive::BackdropBlur { rect, style, .. } => {
                 self.draw_backdrop(canvas, *rect, None, *style)?
             }
-            ScenePrimitive::BackdropBlurPath { rect, path, style, .. } => {
-                self.draw_backdrop(canvas, *rect, Some(path), *style)?
-            }
+            ScenePrimitive::BackdropBlurPath {
+                rect, path, style, ..
+            } => self.draw_backdrop(canvas, *rect, Some(path), *style)?,
             ScenePrimitive::Overlay { rect, style, .. } => draw_overlay(canvas, *rect, style),
-            ScenePrimitive::Custom { rect, key, style, .. } => {
+            ScenePrimitive::Custom {
+                rect, key, style, ..
+            } => {
                 if let Some(style) = style {
                     if let Some(fragment) = custom_scene(key, *rect, *style)? {
                         self.draw_commands(canvas, fragment.commands(), Some(*rect))?;
@@ -420,21 +1032,21 @@ impl SkiaPainter<'_> {
                 commands,
                 child_signature,
                 ..
-            } => self.draw_scroll_raster(
-                canvas,
-                id,
-                *viewport,
-                spec,
-                commands,
-                *child_signature,
-            )?,
+            } => {
+                self.draw_scroll_raster(canvas, id, *viewport, spec, commands, *child_signature)?
+            }
             ScenePrimitive::Clip { rect, commands, .. } => {
                 canvas.save();
                 canvas.clip_rect(sk_rect(*rect), None, true);
                 self.draw_commands(canvas, commands, Some(*rect))?;
                 canvas.restore();
             }
-            ScenePrimitive::ClipPath { rect, path, commands, .. } => {
+            ScenePrimitive::ClipPath {
+                rect,
+                path,
+                commands,
+                ..
+            } => {
                 canvas.save();
                 canvas.clip_path(&sk_path(path), None, true);
                 self.draw_commands(canvas, commands, Some(*rect))?;
@@ -454,7 +1066,11 @@ impl SkiaPainter<'_> {
     ) -> Result<Image, String> {
         let mut surface = layer_surface(size.0, size.1)?;
         let canvas = surface.canvas();
-        canvas.clear(if opaque { SkColor::BLACK } else { SkColor::TRANSPARENT });
+        canvas.clear(if opaque {
+            SkColor::BLACK
+        } else {
+            SkColor::TRANSPARENT
+        });
         canvas.translate((-offset_x, -offset_y));
         self.draw_commands(canvas, commands, None)?;
         Ok(surface.image_snapshot())
@@ -492,7 +1108,10 @@ impl SkiaPainter<'_> {
     ) -> Result<Option<Image>, String> {
         let width = rect.width().ceil().max(1.0) as i32;
         let height = rect.height().ceil().max(1.0) as i32;
-        let cache_key = format!("icon:{key}:{width}x{height}:{}:{}", style.color.0, style.alpha);
+        let cache_key = format!(
+            "icon:{key}:{width}x{height}:{}:{}",
+            style.color.0, style.alpha
+        );
         if let Some(image) = self.cache.get(&cache_key) {
             return Ok(Some(image));
         }
@@ -506,9 +1125,10 @@ impl SkiaPainter<'_> {
         surface.canvas().clear(SkColor::TRANSPARENT);
         let intrinsic = dom.root().intrinsic_size();
         if intrinsic.width > 0.0 && intrinsic.height > 0.0 {
-            surface
-                .canvas()
-                .scale((width as f32 / intrinsic.width, height as f32 / intrinsic.height));
+            surface.canvas().scale((
+                width as f32 / intrinsic.width,
+                height as f32 / intrinsic.height,
+            ));
         }
         dom.render(surface.canvas());
         Ok(Some(self.cache.insert(cache_key, surface.image_snapshot())))
@@ -593,7 +1213,12 @@ impl SkiaPainter<'_> {
 
         let prefetch_started = Instant::now();
         let prefetch_budget = Duration::from_millis(spec.max_prefetch_ms_per_frame as u64);
-        for tile in spec.prefetch_tiles.iter().copied().take(spec.max_prefetch_tiles_per_frame) {
+        for tile in spec
+            .prefetch_tiles
+            .iter()
+            .copied()
+            .take(spec.max_prefetch_tiles_per_frame)
+        {
             if prefetch_budget.is_zero() || prefetch_started.elapsed() >= prefetch_budget {
                 break;
             }
@@ -620,11 +1245,8 @@ impl SkiaPainter<'_> {
 }
 
 fn layer_surface(width: f32, height: f32) -> Result<Surface, String> {
-    surfaces::raster_n32_premul((
-        width.ceil().max(1.0) as i32,
-        height.ceil().max(1.0) as i32,
-    ))
-    .ok_or_else(|| "Skia could not create an offscreen layer".to_owned())
+    surfaces::raster_n32_premul((width.ceil().max(1.0) as i32, height.ceil().max(1.0) as i32))
+        .ok_or_else(|| "Skia could not create an offscreen layer".to_owned())
 }
 
 fn draw_rect(canvas: &Canvas, rect: UiRect, style: VisualStyle) {
@@ -654,42 +1276,6 @@ fn draw_ellipse(canvas: &Canvas, rect: UiRect, style: VisualStyle) {
     if let Some(stroke) = style.stroke {
         canvas.draw_oval(sk_rect(rect), &stroke_paint(stroke));
     }
-}
-
-fn draw_text(canvas: &Canvas, rect: UiRect, text: &str, style: TextStyle) {
-    let size = style.height.abs().max(1.0);
-    let font = skia_font(size, style.weight);
-    let mut paint = color_paint(style.color, style.alpha);
-    paint.set_anti_alias(true);
-    let (width, bounds) = font.measure_str(text, Some(&paint));
-    let x = match style.align {
-        TextAlign::Left => rect.left,
-        TextAlign::Center => rect.left + (rect.width() - width) / 2.0,
-        TextAlign::Right => rect.right - width,
-    };
-    let y = rect.top + (rect.height() - bounds.height()) / 2.0 - bounds.top;
-    canvas.draw_str(text, (x, y), &font, &paint);
-}
-
-fn skia_font(size: f32, weight: i32) -> Font {
-    let family = crate::text::font_families()
-        .first()
-        .copied()
-        .unwrap_or("Segoe UI");
-    let style = FontStyle::new(
-        skia_safe::font_style::Weight::from(weight.clamp(1, 1000)),
-        skia_safe::font_style::Width::NORMAL,
-        skia_safe::font_style::Slant::Upright,
-    );
-    let mut font = if let Some(typeface) = FontMgr::default().match_family_style(family, style) {
-        Font::from_typeface(typeface, size)
-    } else {
-        let mut font = Font::default();
-        font.set_size(size);
-        font
-    };
-    font.set_subpixel(true);
-    font
 }
 
 fn draw_path(canvas: &Canvas, path: &UiPath, style: PathStyle) {
@@ -723,8 +1309,14 @@ fn draw_image(canvas: &Canvas, image: &Image, rect: UiRect, fit: ImageFit, paint
 }
 
 fn draw_glow(canvas: &Canvas, rect: UiRect, color: Color, alpha: u8) {
-    let center = (rect.left + rect.width() / 2.0, rect.top + rect.height() / 2.0);
-    let colors = [sk_color_f(color, alpha as f32 / 255.0), sk_color_f(color, 0.0)];
+    let center = (
+        rect.left + rect.width() / 2.0,
+        rect.top + rect.height() / 2.0,
+    );
+    let colors = [
+        sk_color_f(color, alpha as f32 / 255.0),
+        sk_color_f(color, 0.0),
+    ];
     let positions = [0.0, 1.0];
     let gradient = skia_safe::gradient::Gradient::new(
         skia_safe::gradient::Colors::new(
@@ -788,11 +1380,9 @@ fn draw_overlay(canvas: &Canvas, rect: UiRect, style: &crate::core::OverlayStyle
             ),
             skia_safe::gradient::Interpolation::default(),
         );
-        if let Some(shader) = skia_safe::gradient::shaders::radial_gradient(
-            (center, radius),
-            &gradient,
-            None,
-        ) {
+        if let Some(shader) =
+            skia_safe::gradient::shaders::radial_gradient((center, radius), &gradient, None)
+        {
             let mut paint = Paint::default();
             paint.set_shader(shader);
             canvas.draw_rect(sk_rect(rect), &paint);
@@ -812,7 +1402,10 @@ fn draw_composited(
         rect.left + rect.width() * transform.origin_x(),
         rect.top + rect.height() * transform.origin_y(),
     );
-    canvas.translate((origin.0 + transform.translation_x(), origin.1 + transform.translation_y()));
+    canvas.translate((
+        origin.0 + transform.translation_x(),
+        origin.1 + transform.translation_y(),
+    ));
     canvas.rotate(transform.rotation_degrees_f32(), None);
     canvas.scale((transform.scale_x(), transform.scale_y()));
     canvas.translate((-origin.0, -origin.1));
@@ -868,7 +1461,11 @@ fn sk_path(path: &UiPath) -> Path {
             UiPathCommand::QuadraticTo { control, to } => {
                 result.quad_to((control.x, control.y), (to.x, to.y));
             }
-            UiPathCommand::CubicTo { control1, control2, to } => {
+            UiPathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
                 result.cubic_to(
                     (control1.x, control1.y),
                     (control2.x, control2.y),
@@ -920,11 +1517,21 @@ fn sk_rect(rect: UiRect) -> Rect {
 }
 
 fn physical_rect(rect: PhysicalRect) -> Rect {
-    Rect::new(rect.left as f32, rect.top as f32, rect.right as f32, rect.bottom as f32)
+    Rect::new(
+        rect.left as f32,
+        rect.top as f32,
+        rect.right as f32,
+        rect.bottom as f32,
+    )
 }
 
 fn ui_rect_from_physical(rect: PhysicalRect) -> UiRect {
-    UiRect::new(rect.left as f32, rect.top as f32, rect.right as f32, rect.bottom as f32)
+    UiRect::new(
+        rect.left as f32,
+        rect.top as f32,
+        rect.right as f32,
+        rect.bottom as f32,
+    )
 }
 
 fn image_key(source: &UiImageSource) -> String {
@@ -946,22 +1553,24 @@ fn tint_svg(svg: &str, color: Color, alpha: u8) -> String {
 mod tests {
     use super::*;
     use crate::{
-        assets::{AssetBytes, AssetError, AssetResolver, CustomPaintProvider, RenderResources, SceneFragment},
+        assets::{
+            AssetBytes, AssetError, AssetResolver, CustomPaintProvider, RenderResources,
+            SceneFragment,
+        },
         core::{
             CompositingLayerSpec, CustomPaintStyle, IconStyle, OverlayStyle, Point,
             RadialGradientLayer, RenderPhase, ScenePrimitiveKind, ScrollRasterSpec,
-            StaticLayerSpec, StaticLayerSource, UiId, UiPathCommand, UiScale,
+            StaticLayerSource, StaticLayerSpec, UiId, UiPathCommand, UiScale,
             VerticalGradientLayer,
         },
         renderer::FrameReason,
     };
 
     const PIXEL_PNG: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x04, 0x00, 0x00, 0x00, 0xB5, 0x1C, 0x0C, 0x02, 0x00, 0x00, 0x00,
-        0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0xFC, 0xFF, 0x1F, 0x00,
-        0x02, 0xEB, 0x01, 0xF5, 0x8F, 0x59, 0x97, 0xDB, 0x00, 0x00, 0x00, 0x00,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xB5,
+        0x1C, 0x0C, 0x02, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0xFC,
+        0xFF, 0x1F, 0x00, 0x02, 0xEB, 0x01, 0xF5, 0x8F, 0x59, 0x97, 0xDB, 0x00, 0x00, 0x00, 0x00,
         0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
@@ -1017,7 +1626,12 @@ mod tests {
         ])
     }
 
-    fn draw_scene(surface: &mut SkiaSoftwareSurface, scene: &Scene, full: bool, damage: &[PhysicalRect]) {
+    fn draw_scene(
+        surface: &mut SkiaSoftwareSurface,
+        scene: &Scene,
+        full: bool,
+        damage: &[PhysicalRect],
+    ) {
         let frame = FrameInfo::new(
             PhysicalRect::new(0, 0, 32, 32),
             damage,
@@ -1117,7 +1731,13 @@ mod tests {
                 rect,
                 style: OverlayStyle::new()
                     .vertical(VerticalGradientLayer::new(Color::WHITE, 0.8, 0.1))
-                    .radial(RadialGradientLayer::new(Color(0x44AAFF), 0.7, 0.5, 0.5, 0.5)),
+                    .radial(RadialGradientLayer::new(
+                        Color(0x44AAFF),
+                        0.7,
+                        0.5,
+                        0.5,
+                        0.5,
+                    )),
                 phase: RenderPhase::Content,
             },
             ScenePrimitive::CompositingLayer {
@@ -1184,8 +1804,23 @@ mod tests {
             probe_skia_support(GraphicsPreference::OpenGl).is_ok(),
             cfg!(feature = "renderer-skia-gl")
         );
+        #[cfg(all(
+            feature = "renderer-skia-vulkan",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        assert_eq!(
+            probe_skia_support(GraphicsPreference::Vulkan).is_ok(),
+            unsafe { ash::Entry::load() }.is_ok()
+        );
+        #[cfg(not(all(
+            feature = "renderer-skia-vulkan",
+            any(target_os = "windows", target_os = "linux")
+        )))]
         assert!(probe_skia_support(GraphicsPreference::Vulkan).is_err());
-        assert!(probe_skia_support(GraphicsPreference::Metal).is_err());
+        assert_eq!(
+            probe_skia_support(GraphicsPreference::Metal).is_ok(),
+            cfg!(all(feature = "renderer-skia-metal", target_os = "macos"))
+        );
     }
 
     #[test]
@@ -1204,7 +1839,11 @@ mod tests {
     #[test]
     fn image_fit_preserves_aspect_ratio() {
         assert_eq!(
-            fitted_rect(UiRect::new(0.0, 0.0, 100.0, 100.0), (200.0, 100.0), ImageFit::Contain),
+            fitted_rect(
+                UiRect::new(0.0, 0.0, 100.0, 100.0),
+                (200.0, 100.0),
+                ImageFit::Contain
+            ),
             UiRect::new(0.0, 25.0, 100.0, 75.0)
         );
     }
@@ -1212,7 +1851,10 @@ mod tests {
     #[test]
     fn every_scene_primitive_has_a_real_skia_paint_path() {
         let commands = primitive_inventory();
-        let kinds = commands.iter().map(ScenePrimitive::kind).collect::<Vec<_>>();
+        let kinds = commands
+            .iter()
+            .map(ScenePrimitive::kind)
+            .collect::<Vec<_>>();
         assert_eq!(kinds, ScenePrimitiveKind::ALL);
         for command in commands {
             let mut scene = Scene::new();
@@ -1309,6 +1951,72 @@ mod tests {
         assert!(cache.entries.contains_key("recent"));
         cache.trim(MemoryPressure::Critical);
         assert!(cache.entries.is_empty());
+        assert_eq!(cache.resident_bytes, 0);
+    }
+
+    #[test]
+    fn paragraph_layout_exposes_bidi_carets_selection_and_hit_testing() {
+        let request = crate::text::TextLayoutRequest::single_line(
+            "abc \u{05d0}\u{05d1}\u{05d2}",
+            UiRect::new(0.0, 0.0, 240.0, 32.0),
+            -16.0,
+            400,
+        );
+        let layout = crate::text::TextSystem::layout(&SkiaTextSystem, &request).unwrap();
+        assert!(layout.width > 0.0);
+        assert!(layout.caret_rect(0).is_some());
+        assert!(layout.caret_rect(request.text.chars().count()).is_some());
+        assert!(layout
+            .clusters()
+            .iter()
+            .any(|cluster| cluster.direction == crate::text::TextDirection::LeftToRight));
+        assert!(layout
+            .clusters()
+            .iter()
+            .any(|cluster| cluster.direction == crate::text::TextDirection::RightToLeft));
+        assert!(!layout.selection_rects(1..6).is_empty());
+        let cluster = layout.clusters().last().unwrap();
+        let hit = layout.hit_test(
+            (cluster.bounds.left + cluster.bounds.right) * 0.5,
+            (cluster.bounds.top + cluster.bounds.bottom) * 0.5,
+        );
+        assert!(hit.index <= request.text.chars().count());
+        assert!(hit.inside);
+    }
+
+    #[test]
+    fn paragraph_clusters_keep_combining_sequences_together() {
+        let request = crate::text::TextLayoutRequest::single_line(
+            "a\u{0301}b",
+            UiRect::new(0.0, 0.0, 120.0, 32.0),
+            -16.0,
+            400,
+        );
+        let layout = crate::text::TextSystem::layout(&SkiaTextSystem, &request).unwrap();
+        assert!(layout
+            .clusters()
+            .iter()
+            .any(|cluster| cluster.range == (0..2)));
+    }
+
+    #[test]
+    fn paragraph_cache_is_reused_reported_and_trimmed() {
+        let mut cache = SkiaCache::new(1024 * 1024);
+        let mut surface = layer_surface(200.0, 40.0).unwrap();
+        let rect = UiRect::new(0.0, 0.0, 200.0, 40.0);
+        let style = TextStyle::new(Color::WHITE, -16.0, 400);
+        cache.begin_frame();
+        cache.draw_text(surface.canvas(), rect, "cached paragraph", style);
+        cache.begin_frame();
+        cache.draw_text(surface.canvas(), rect, "cached paragraph", style);
+        let stats = cache.stats();
+        assert_eq!(stats.text_entries, 1);
+        assert_eq!(stats.text_misses, 1);
+        assert_eq!(stats.text_hits, 1);
+        assert!(stats.text_resident_bytes > 0);
+        assert!(stats.largest_text_entry_bytes > 0);
+        cache.trim(MemoryPressure::Critical);
+        assert!(cache.paragraphs.is_empty());
         assert_eq!(cache.resident_bytes, 0);
     }
 

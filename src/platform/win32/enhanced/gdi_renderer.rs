@@ -54,9 +54,9 @@ use super::{
 };
 use lgui::core::{
     compositing_layer_damage, Color, CompositingLayerBackground, CompositingLayerSpec,
-    LayerTransform, OverlayStyle, PathStyle, PhysicalRect, Point,
-    RadialGradientLayer, Scene, ScenePrimitive, Stroke, TextAlign, TextStyle, UiId, UiPath,
-    UiPathCommand, UiRect, VerticalGradientLayer, VisualStyle,
+    LayerTransform, OverlayStyle, PathStyle, PhysicalRect, Point, RadialGradientLayer, Scene,
+    ScenePrimitive, Stroke, TextAlign, TextStyle, UiId, UiPath, UiPathCommand, UiRect,
+    VerticalGradientLayer, VisualStyle,
 };
 use lgui::platform::win32::{draw_svg_icon, ui_font_family_at, ui_font_family_count};
 use lgui::renderer::ClipRegion;
@@ -637,9 +637,10 @@ impl GdiRenderer {
             ScenePrimitive::Custom {
                 rect, key, style, ..
             } => {
-                if let (Some(style), Some(provider)) =
-                    (style, crate::assets::render_resources().custom_paint().cloned())
-                {
+                if let (Some(style), Some(provider)) = (
+                    style,
+                    crate::assets::render_resources().custom_paint().cloned(),
+                ) {
                     if let Ok(Some(fragment)) = provider.record(key, *rect, *style) {
                         for command in fragment.commands() {
                             Self::draw_command_clipped(hdc, command, clip);

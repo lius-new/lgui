@@ -1,7 +1,8 @@
 # LGUI Cross-Platform Skia Design
 
-Status: implemented for the portable Scene, software renderer, winit desktop backend, and
-portable OpenGL driver. Vulkan, Metal, and the final GDI/D2D removal remain open acceptance work.
+Status: implementation complete for the portable Scene, unified text system, software renderer,
+winit desktop backend, and OpenGL, Vulkan, and Metal drivers. Native Linux/macOS workflow
+validation and the final GDI/D2D default switch/removal remain acceptance work.
 
 This document is both the implementation contract and the current status record for making
 `lgui` a desktop-first, cross-platform Rust GUI framework with Skia as its primary renderer.
@@ -61,8 +62,11 @@ The implementation currently provides:
 - real Skia paint paths for all 17 `ScenePrimitive` variants, including nested clips, custom
   `SceneFragment` content, static/compositing layers, scroll raster content, images, SVG, blur,
   overlays, opacity, and DPI projection;
+- one SkParagraph text path for measurement and painting with bidi layout, grapheme clusters,
+  caret affinity, selection rectangles, hit testing, wrapping, spans, locale and runtime fonts;
 - renderer-scoped, byte-bounded decoded/layer caches with hit, miss, eviction, resident-byte, and
-  budget diagnostics plus moderate and critical memory-pressure handling;
+  budget diagnostics plus moderate and critical memory-pressure handling; GPU renderers split one
+  configured budget between native GPU resources and renderer-owned CPU resources;
 - a software Skia renderer presented through `softbuffer` and a portable OpenGL renderer using
   `glutin`, `raw-window-handle`, and the same Scene painter;
 - a winit application backend with multi-window ownership, visibility/close policy, resize,
@@ -80,13 +84,10 @@ The implementation currently provides:
 
 The remaining acceptance gaps are explicit:
 
-- Vulkan and Metal surface drivers are not implemented. OpenGL is the portable GPU path on
-  Windows, Linux, and macOS, with software fallback.
+- Vulkan and Metal surface drivers are implemented behind explicit features. Native Vulkan
+  workflow validation on Windows/Linux and Metal compile/runtime validation on macOS remain open.
 - Linux runtime validation and macOS compile/runtime validation require their native CI or
   hardware. Windows compilation and headless Scene conformance are covered locally.
-- text measurement and painting both use Skia, but the richer paragraph contract for bidi,
-  cluster-level caret geometry, selection ranges, and locale-aware fallback is not yet exposed by
-  the public `TextSystem` API;
 - GDI/D2D remain the default migration backends and are removed only after Skia workflow and
   performance acceptance on all three desktop platforms.
 
@@ -94,14 +95,15 @@ The remaining acceptance gaps are explicit:
 
 | Platform | Window backend | Current Skia GPU driver | Fallback | Validation status |
 | --- | --- | --- | --- | --- |
-| Windows | winit | OpenGL through WGL/glutin | software | Compiles locally; runtime validation pending |
-| Linux | winit (Wayland/X11) | OpenGL through EGL | software | Source path implemented; native runtime pending |
-| macOS | winit | OpenGL through CGL | software | Source path implemented; native compile/runtime pending |
+| Windows | winit | OpenGL or Vulkan | software | OpenGL compiles locally; Vulkan runtime validation pending |
+| Linux | winit (Wayland/X11) | Vulkan, then OpenGL | software | Source paths implemented; native runtime pending |
+| macOS | winit | Metal, then OpenGL | software | Source paths implemented; native compile/runtime pending |
 | Android | not in the desktop backend | none | none | Deferred |
 
-`Auto` attempts OpenGL first and falls back to software when initialization fails or after a
-bounded recovery sequence. An explicit unavailable driver returns an error and never silently
-falls back. Driver policy is framework configuration, not compile-time business logic.
+`Auto` follows the platform order in the table and falls back to software when GPU initialization
+fails or after a bounded recovery sequence. An explicit unavailable driver returns an error and
+never silently falls back. Driver policy is framework configuration, not compile-time business
+logic.
 
 ## Dependency Policy
 
@@ -310,9 +312,16 @@ The result exposes portable metrics, lines, cluster boundaries, caret locations,
 rectangles, and hit testing. The backend retains its native paragraph/layout object behind an
 opaque renderer-owned ID.
 
-The Skia implementation uses SkParagraph and one renderer-owned `FontCollection`. Applications may
-load font bytes at runtime. Tests use bundled deterministic fonts; system fallback is tested
-separately because installed fonts differ by platform.
+The Skia implementation uses SkParagraph and one renderer-owned `FontCollection`. Measurement and
+painting share the same paragraph builder configuration. Applications load font bytes through the
+portable `FontAsset` resource, without exposing Skia types to application code.
+
+Public text positions are Rust character indices. SkParagraph range APIs use UTF-16 code-unit
+offsets, so the backend converts character, UTF-8 byte, and UTF-16 boundaries explicitly before
+line, cluster, caret, selection, or hit-test geometry crosses the renderer boundary. Grapheme
+clusters prevent controls from placing a caret inside a combining sequence. Tests cover bidi,
+combining marks, caret affinity, selection, and hit testing; installed-system fallback remains a
+platform-dependent runtime check.
 
 IME cursor placement is calculated from the same text layout result used for painting.
 
@@ -451,6 +460,12 @@ and the largest entries. Cache budgets scale with window surface area and may be
 Application configuration. Background memory optimization releases offscreen layers and GPU
 resources while preserving portable Scene and state.
 
+The default renderer budget is 96 MiB total. GPU drivers assign two thirds to Skia's native
+`DirectContext` resource cache and one third to decoded images, retained layers, and paragraphs;
+diagnostics merge both portions so the reported budget and residency describe the complete
+renderer rather than two independent 96 MiB caches. The software driver uses the configured
+budget entirely for renderer-owned CPU resources.
+
 `MemoryPressure::Moderate` removes cold resources. `Critical` removes every recreatable resource
 and forces a full draw on the next visible frame.
 
@@ -468,8 +483,8 @@ pub enum GraphicsPreference {
 
 An unsupported explicit choice returns a creation error. `Auto` follows the target matrix and
 records failed initialization and recovery through the active renderer name, fallback reason,
-recovery state, and recovery attempt diagnostics. GPU adapter name, API version, color format,
-and present mode remain diagnostics extensions for the future Vulkan/Metal drivers.
+recovery state, and recovery attempt diagnostics. Each implemented driver reports its available
+GPU adapter name, API/version, color format, and present mode.
 
 On recoverable surface loss, the driver recreates only the surface and forces a full draw. On
 device loss:
@@ -495,6 +510,10 @@ desktop = [backend-winit, clipboard, open-url, dialogs, accessibility]
 backend-winit
 renderer-skia
 renderer-skia-gl = [renderer-skia, backend-winit, glutin]
+renderer-skia-vulkan = [renderer-skia, backend-winit, ash]
+renderer-skia-vulkan-windows = [renderer-skia-vulkan, skia-safe/d3d]
+renderer-skia-vulkan-linux = [renderer-skia-vulkan, skia-safe/all-linux]
+renderer-skia-metal = [renderer-skia, backend-winit, objc2]
 renderer-gdi
 renderer-d2d
 ```
@@ -513,26 +532,36 @@ Liuguang launch examples from `native/windows` are:
 $env:LIUGC_DIAGNOSTICS_RUNTIME='1'
 cargo run --bin liugc --features diagnostics-runtime,renderer-skia -- --renderer skia
 cargo run --bin liugc --features diagnostics-runtime,renderer-skia -- --renderer skia-opengl
+cargo run --bin liugc --features diagnostics-runtime,renderer-skia -- --renderer skia-vulkan
 cargo run --bin liugc --features diagnostics-runtime,renderer-skia -- --renderer skia-software
 ```
 
-`skia` and `skia-auto` select `GraphicsPreference::Auto`. `skia-opengl` is explicit and fails if
-OpenGL cannot be created; `skia-software` never creates a GPU context.
+`skia` and `skia-auto` select `GraphicsPreference::Auto`. Explicit `skia-opengl`, `skia-vulkan`,
+and `skia-metal` selections fail if that driver cannot be created; `skia-software` never creates a
+GPU context. Auto uses OpenGL on Windows, Vulkan then OpenGL on Linux, and Metal then OpenGL on
+macOS before the software fallback.
+
+The `counter` example is application-independent and uses the same winit + Skia source on every
+desktop platform:
+
+```powershell
+cargo run --manifest-path native\lgui\Cargo.toml --example counter --no-default-features --features renderer-skia-gl,widgets
+```
 
 ## Diagnostics
 
-Existing runtime diagnostics currently include:
+Existing runtime diagnostics include:
 
-- active renderer (`skia-opengl` or `skia-software`) and fallback reason;
+- active renderer (`skia-opengl`, `skia-vulkan`, `skia-metal`, or `skia-software`) and fallback
+  reason;
 - frame reason and full/dirty/skipped classification;
 - Host visited nodes, Scene compiled nodes, command count, and layer count;
 - logical and physical damage area and rectangle count;
-- frame build and combined draw/present timings;
-- per-cache resident bytes, entries, hits, misses, and evictions;
+- frame build, acquire, draw, flush/submit, present, and combined draw/present timings;
+- adapter, graphics API/version, color format, and present mode metadata;
+- image/layer and paragraph cache budgets, resident bytes, entries, hits, misses, evictions, and
+  largest-entry sizes, including native GPU cache usage;
 - device/surface recovery attempts and fallback reason.
-
-Separate acquire/flush/present timing, GPU adapter/API/format metadata, largest cache entries, and
-text/glyph cache activity are still required before the final diagnostics acceptance gate.
 
 Diagnostics must remain optional and must not add per-command allocations when disabled.
 
@@ -590,7 +619,7 @@ winit path.
 
 ### Phase 4: GPU Drivers
 
-Status: partial. Portable OpenGL is implemented; Vulkan and Metal are not.
+Status: implementation complete; native driver conformance and product acceptance remain open.
 
 - Add OpenGL, Vulkan, and Metal surface drivers according to the target matrix.
 - Implement resize, transparency, vsync/present mode, cache limits, device loss, and fallback.

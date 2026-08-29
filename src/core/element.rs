@@ -378,6 +378,11 @@ impl UiElement {
         self
     }
 
+    pub fn ime_cursor_rect(mut self, rect: UiRect) -> Self {
+        self.node = self.node.ime_cursor_rect(rect);
+        self
+    }
+
     pub fn render_phase(mut self, phase: RenderPhase) -> Self {
         self.node = self.node.render_phase(phase);
         self

@@ -10,12 +10,12 @@ pub mod assets;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 pub mod core;
-#[cfg(feature = "dialogs")]
-pub mod dialogs;
 #[cfg(feature = "open-url")]
 pub mod desktop;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;
+#[cfg(feature = "dialogs")]
+pub mod dialogs;
 pub mod frame;
 pub mod host;
 #[cfg(feature = "svg")]

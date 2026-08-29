@@ -144,10 +144,13 @@ pub struct FrameBlitSourceMetrics {
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FramePresentMetrics {
+    pub acquire_ms: f32,
     pub get_dc_ms: f32,
     pub clear_ms: f32,
     pub draw_commands_ms: f32,
+    pub flush_ms: f32,
     pub submit_ms: f32,
+    pub present_ms: f32,
     pub release_dc_ms: f32,
     pub submitted_pixels: u64,
     pub blit_count: usize,
@@ -160,6 +163,13 @@ pub struct FramePresentMetrics {
     pub cache_hits: u64,
     pub cache_misses: u64,
     pub cache_evictions: u64,
+    pub text_cache_resident_bytes: usize,
+    pub text_cache_entries: usize,
+    pub text_cache_hits: u64,
+    pub text_cache_misses: u64,
+    pub text_cache_evictions: u64,
+    pub largest_cache_entry_bytes: usize,
+    pub largest_text_cache_entry_bytes: usize,
     pub blit_pixels: u64,
     pub static_layer_blits: FrameBlitSourceMetrics,
     pub overlay_blits: FrameBlitSourceMetrics,
@@ -168,11 +178,22 @@ pub struct FramePresentMetrics {
     pub other_blits: FrameBlitSourceMetrics,
 }
 
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RendererDeviceInfo {
+    pub adapter_name: Option<String>,
+    pub api: String,
+    pub api_version: Option<String>,
+    pub color_format: String,
+    pub present_mode: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct FrameSample {
     pub frame_index: u64,
     pub recorded_at: Instant,
     pub backend: &'static str,
+    pub renderer: RendererDeviceInfo,
     pub mode: DiagnosticPresentMode,
     pub frame_build_ms: f32,
     pub diff_ms: f32,
@@ -325,6 +346,7 @@ mod tests {
             frame_index: index,
             recorded_at: Instant::now(),
             backend: "test",
+            renderer: RendererDeviceInfo::default(),
             mode,
             frame_build_ms: 0.0,
             diff_ms: 0.0,

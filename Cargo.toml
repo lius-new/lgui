@@ -26,6 +26,30 @@ renderer-skia-gl = [
   "backend-winit",
   "dep:glutin",
 ]
+renderer-skia-vulkan = [
+  "renderer-skia",
+  "backend-winit",
+  "dep:ash",
+  "dep:ash-window",
+]
+renderer-skia-vulkan-windows = [
+  "renderer-skia-vulkan",
+  "dep:lgui-skia-vulkan-windows-features",
+]
+renderer-skia-vulkan-linux = [
+  "renderer-skia-vulkan",
+  "dep:lgui-skia-vulkan-linux-features",
+]
+renderer-skia-metal = [
+  "renderer-skia",
+  "backend-winit",
+  "dep:objc2",
+  "dep:objc2-app-kit",
+  "dep:objc2-core-foundation",
+  "dep:objc2-metal",
+  "dep:objc2-quartz-core",
+  "dep:lgui-skia-metal-features",
+]
 backend-win32 = [
   "dep:windows",
   "windows/Win32_System_ProcessStatus",
@@ -87,6 +111,8 @@ widgets = ["theme"]
 accesskit = { version = "0.24", optional = true }
 accesskit_winit = { version = "0.33", optional = true, default-features = false, features = ["accesskit_unix", "async-io", "rwh_06"] }
 arboard = { version = "3.6", optional = true }
+ash = { version = "0.38", optional = true, default-features = false, features = ["loaded", "std"] }
+ash-window = { version = "0.13", optional = true }
 glutin = { version = "0.32", optional = true }
 icondata = { version = "0.7.0", optional = true, default-features = false, features = ["lucide"] }
 keyboard-types = "0.8"
@@ -100,12 +126,15 @@ tiny-skia = { version = "0.11", optional = true }
 tokio = { version = "1", optional = true, features = ["rt"] }
 usvg = { version = "0.45", optional = true }
 ureq = { version = "2.12", optional = true, default-features = true }
+unicode-segmentation = "1.12"
+unicode-bidi = "0.3"
 winit = { version = "0.30.12", optional = true }
 # 0.99.0's official Windows binary matrix publishes this exact feature set. Keeping it exact
 # avoids a local LLVM/Ninja source build while still using the upstream rust-skia artifacts.
 skia-safe = { version = "=0.99.0", optional = true, default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout"] }
 
 [target.'cfg(windows)'.dependencies]
+lgui-skia-vulkan-windows-features = { path = "crates/skia-vulkan-windows-features", optional = true }
 windows-numerics = { version = "0.3.1", optional = true }
 windows = { version = "0.62.2", optional = true, features = [
   "Win32_Foundation",
@@ -122,6 +151,17 @@ windows = { version = "0.62.2", optional = true, features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.3", optional = true, default-features = false }
+objc2-app-kit = { version = "0.3.2", optional = true, default-features = false, features = ["objc2-quartz-core", "NSView", "NSResponder"] }
+objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false }
+objc2-metal = { version = "0.3.2", optional = true, default-features = false, features = ["MTLCommandBuffer", "MTLCommandQueue", "MTLDevice", "MTLDrawable", "MTLPixelFormat"] }
+objc2-quartz-core = { version = "0.3.2", optional = true, default-features = false, features = ["objc2-core-foundation", "objc2-metal", "CAMetalLayer"] }
+lgui-skia-metal-features = { path = "crates/skia-metal-features", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+lgui-skia-vulkan-linux-features = { path = "crates/skia-vulkan-linux-features", optional = true }
+
 [[example]]
 name = "counter"
-required-features = ["renderer-gdi", "widgets"]
+required-features = ["renderer-skia-gl", "widgets"]

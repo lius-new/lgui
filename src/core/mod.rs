@@ -25,8 +25,8 @@ mod observable;
 mod reactor;
 mod render;
 mod runtime;
-mod semantics;
 mod scope;
+mod semantics;
 mod static_layer;
 mod style;
 mod task;
@@ -88,12 +88,12 @@ pub use render::{
     scene_root_ids, scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene,
     ScenePrimitive, ScenePrimitiveKind, ScrollRasterSpec,
 };
-pub use semantics::{
-    SemanticAction, SemanticNode, SemanticRelationships, SemanticRole, SemanticState,
-    SemanticText, SemanticUpdate, Semantics,
-};
 pub use runtime::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 pub use scope::UiScope;
+pub use semantics::{
+    SemanticAction, SemanticNode, SemanticRelationships, SemanticRole, SemanticState, SemanticText,
+    SemanticUpdate, Semantics,
+};
 pub use static_layer::{
     StaticLayerBackground, StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec,
 };

@@ -3,9 +3,9 @@ use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use super::{
     ActionId, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
     CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, RenderPhase,
-    ScrollRasterSpec, StaticLayerSpec, TextStyle, UiAction, UiActionBinding, UiActionHandler,
-    UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId, UiInputEventBinding,
-    UiInputEventHandler, UiPath, UiRect, VisualStyle, Semantics,
+    ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction, UiActionBinding,
+    UiActionHandler, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
+    UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, VisualStyle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,6 +115,7 @@ pub struct UiNode {
     pub layout_rect: UiRect,
     pub hit_rect: UiRect,
     pub paint_bounds: UiRect,
+    pub ime_cursor_rect: Option<UiRect>,
     pub interaction: InteractionRole,
     pub semantics: Option<Semantics>,
     pub click_capture_handler: Option<UiEventHandler>,
@@ -163,6 +164,7 @@ impl UiNode {
             layout_rect,
             hit_rect: layout_rect,
             paint_bounds: layout_rect,
+            ime_cursor_rect: None,
             interaction: InteractionRole::None,
             semantics: None,
             click_capture_handler: None,
@@ -208,6 +210,7 @@ impl UiNode {
             && self.layout_rect == other.layout_rect
             && self.hit_rect == other.hit_rect
             && self.paint_bounds == other.paint_bounds
+            && self.ime_cursor_rect == other.ime_cursor_rect
             && self.interaction == other.interaction
             && self.semantics == other.semantics
             && self.event_policy == other.event_policy
@@ -250,6 +253,11 @@ impl UiNode {
 
     pub fn paint_bounds(mut self, rect: UiRect) -> Self {
         self.paint_bounds = rect;
+        self
+    }
+
+    pub fn ime_cursor_rect(mut self, rect: UiRect) -> Self {
+        self.ime_cursor_rect = Some(rect);
         self
     }
 
@@ -489,6 +497,7 @@ impl UiNode {
         self.layout_rect = self.layout_rect.translate(x, y);
         self.hit_rect = self.hit_rect.translate(x, y);
         self.paint_bounds = self.paint_bounds.translate(x, y);
+        self.ime_cursor_rect = self.ime_cursor_rect.map(|rect| rect.translate(x, y));
         self.clip_rect = self.clip_rect.map(|rect| rect.translate(x, y));
         self.path = self.path.map(|path| translate_path(&path, x, y));
         self

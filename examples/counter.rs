@@ -1,7 +1,5 @@
-#[cfg(target_os = "windows")]
 use lgui::prelude::*;
 
-#[cfg(target_os = "windows")]
 fn app(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_i32);
     let increment = count.clone();
@@ -30,9 +28,8 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
         .into()
 }
 
-#[cfg(target_os = "windows")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    Application::new()
+    Application::new_skia(GraphicsPreference::Auto)
         .window_options(
             WindowOptions::new("counter")
                 .title("lgui counter")
@@ -40,9 +37,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .run(app)?;
     Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn main() {
-    eprintln!("the counter example currently requires the renderer-gdi Windows backend");
 }

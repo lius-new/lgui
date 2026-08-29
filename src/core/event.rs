@@ -139,8 +139,14 @@ pub enum SemanticInput {
     Click(UiId),
     Focus(UiId),
     Blur(UiId),
-    SetValue { target: UiId, value: String },
-    Action { target: UiId, action: super::SemanticAction },
+    SetValue {
+        target: UiId,
+        value: String,
+    },
+    Action {
+        target: UiId,
+        action: super::SemanticAction,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

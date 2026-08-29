@@ -3,10 +3,10 @@ use std::{any::type_name, borrow::Cow, cell::Cell, panic::Location, sync::Arc};
 use super::reactor::RenderCx;
 use super::{
     AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerAnimation,
-    CompositingLayerSpec, EventPolicy, InteractionRole, LayoutSpec, RenderPhase, Size, TextStyle,
-    UiElement, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
+    CompositingLayerSpec, EventPolicy, InteractionRole, LayoutSpec, RenderPhase, Semantics, Size,
+    TextStyle, UiElement, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
     UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, UiRenderContext, UiScope,
-    VisualStyle, Semantics,
+    VisualStyle,
 };
 
 // Declarative core shell only: this layer owns tree identity and composition,

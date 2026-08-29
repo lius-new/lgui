@@ -1,4 +1,11 @@
-use std::{ffi::CString, mem::ManuallyDrop, num::NonZeroU32, sync::Arc};
+use std::{
+    ffi::{CStr, CString},
+    mem::ManuallyDrop,
+    num::NonZeroU32,
+    os::raw::c_uchar,
+    sync::Arc,
+    time::Instant,
+};
 
 use glutin::{
     config::{Config, ConfigTemplateBuilder, GlConfig},
@@ -18,9 +25,13 @@ use skia_safe::{
 };
 use winit::window::Window;
 
+use super::winit::WinitFrameTimings;
 use crate::{
     core::{PhysicalRect, Scene},
-    platform::skia::{paint_scene_damage, SkiaCache, SkiaCacheStats},
+    platform::skia::{
+        cpu_cache_budget, gpu_cache_budget, paint_scene_damage, with_gpu_cache_usage, SkiaCache,
+        SkiaCacheStats,
+    },
     renderer::{FrameInfo, MemoryPressure},
 };
 
@@ -36,6 +47,8 @@ pub(crate) struct WinitOpenGlRenderer {
     _display: Display,
     _config: Config,
     _window: Arc<Window>,
+    adapter_name: Option<String>,
+    api_version: Option<String>,
 }
 
 impl WinitOpenGlRenderer {
@@ -99,6 +112,9 @@ impl WinitOpenGlRenderer {
         let _ = gl_surface
             .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()));
 
+        let adapter_name = gl_string(&display, 0x1F01);
+        let api_version = gl_string(&display, 0x1F02);
+
         let interface = skia_safe::gpu::gl::Interface::new_load_with(|name| {
             let Ok(name) = CString::new(name) else {
                 return std::ptr::null();
@@ -108,7 +124,7 @@ impl WinitOpenGlRenderer {
         .ok_or_else(|| "Skia could not load the current OpenGL interface".to_owned())?;
         let mut skia_context = direct_contexts::make_gl(interface, None)
             .ok_or_else(|| "Skia could not create an OpenGL DirectContext".to_owned())?;
-        skia_context.set_resource_cache_limit(cache_budget);
+        skia_context.set_resource_cache_limit(gpu_cache_budget(cache_budget));
         let framebuffer = FramebufferInfo {
             fboid: 0,
             format: skia_safe::gpu::gl::Format::RGBA8.into(),
@@ -123,12 +139,14 @@ impl WinitOpenGlRenderer {
             skia_context: ManuallyDrop::new(skia_context),
             framebuffer,
             size,
-            cache: SkiaCache::new(cache_budget),
+            cache: SkiaCache::new(cpu_cache_budget(cache_budget)),
             gl_surface,
             gl_context,
             _display: display,
             _config: config,
             _window: window,
+            adapter_name,
+            api_version,
         })
     }
 
@@ -162,8 +180,11 @@ impl WinitOpenGlRenderer {
         &mut self,
         scene: &Scene,
         frame: &FrameInfo<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<WinitFrameTimings, String> {
+        let acquire_started = Instant::now();
         self.ensure_current_and_sized(frame.viewport())?;
+        let acquire_ms = acquire_started.elapsed().as_secs_f32() * 1_000.0;
+        let draw_started = Instant::now();
         paint_scene_damage(self.scene_surface.canvas(), &mut self.cache, scene, frame)?;
         let image = self.scene_surface.image_snapshot();
         let destination = Rect::from_wh(self.size.0 as f32, self.size.1 as f32);
@@ -171,10 +192,20 @@ impl WinitOpenGlRenderer {
         self.window_surface
             .canvas()
             .draw_image_rect(image, None, &destination, &Paint::default());
+        let draw_ms = draw_started.elapsed().as_secs_f32() * 1_000.0;
+        let flush_started = Instant::now();
         self.skia_context.flush_and_submit();
+        let flush_ms = flush_started.elapsed().as_secs_f32() * 1_000.0;
+        let present_started = Instant::now();
         self.gl_surface
             .swap_buffers(&self.gl_context)
-            .map_err(|error| format!("swap OpenGL buffers: {error}"))
+            .map_err(|error| format!("swap OpenGL buffers: {error}"))?;
+        Ok(WinitFrameTimings {
+            acquire_ms,
+            draw_ms,
+            flush_ms,
+            present_ms: present_started.elapsed().as_secs_f32() * 1_000.0,
+        })
     }
 
     pub(crate) fn trim(&mut self, pressure: MemoryPressure) {
@@ -185,8 +216,38 @@ impl WinitOpenGlRenderer {
     }
 
     pub(crate) fn cache_stats(&self) -> SkiaCacheStats {
-        self.cache.stats()
+        with_gpu_cache_usage(self.cache.stats(), &self.skia_context)
     }
+
+    #[cfg(feature = "diagnostics")]
+    pub(crate) fn device_info(&self) -> crate::diagnostics::RendererDeviceInfo {
+        crate::diagnostics::RendererDeviceInfo {
+            adapter_name: self.adapter_name.clone(),
+            api: "OpenGL".to_owned(),
+            api_version: self.api_version.clone(),
+            color_format: "RGBA8".to_owned(),
+            present_mode: "FIFO (vsync)".to_owned(),
+        }
+    }
+}
+
+fn gl_string(display: &Display, name: u32) -> Option<String> {
+    type GlGetString = unsafe extern "system" fn(u32) -> *const c_uchar;
+    let symbol = CString::new("glGetString").unwrap();
+    let address = display.get_proc_address(&symbol);
+    if address.is_null() {
+        return None;
+    }
+    let get_string: GlGetString = unsafe { std::mem::transmute(address) };
+    let value = unsafe { get_string(name) };
+    if value.is_null() {
+        return None;
+    }
+    Some(
+        unsafe { CStr::from_ptr(value.cast()) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 impl Drop for WinitOpenGlRenderer {

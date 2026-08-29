@@ -42,14 +42,12 @@ use windows::{
     },
 };
 
-use super::{
-    blur::with_backdrop_blur_bgra, image, static_layer_raster_cache,
-};
+use super::{blur::with_backdrop_blur_bgra, image, static_layer_raster_cache};
 use lgui::core::{
-    compositing_layer_damage, Color, CompositingLayerBackground, IconStyle,
-    ImageFit, LayerTransform, OverlayStyle, PathStyle, Scene, ScenePrimitive,
-    StaticLayerBackground, StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke,
-    TextAlign, UiId, UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
+    compositing_layer_damage, Color, CompositingLayerBackground, IconStyle, ImageFit,
+    LayerTransform, OverlayStyle, PathStyle, Scene, ScenePrimitive, StaticLayerBackground,
+    StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke, TextAlign, UiId,
+    UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
 };
 use lgui::platform::win32::render_trace::{self as trace, TraceCategory};
 use lgui::platform::win32::{apply_dwrite_font_fallback, ui_font_family};
@@ -712,9 +710,11 @@ fn draw_command_d2d(resources: &mut D2dRenderer, command: &ScenePrimitive) -> Re
             if let Some(style) = style {
                 let provider = crate::assets::render_resources().custom_paint().cloned();
                 if let Some(provider) = provider {
-                    if let Some(fragment) = provider.record(key, *rect, *style).map_err(|error| {
-                        Error::new(HRESULT(0x80004005_u32 as i32), error.to_string())
-                    })? {
+                    if let Some(fragment) =
+                        provider.record(key, *rect, *style).map_err(|error| {
+                            Error::new(HRESULT(0x80004005_u32 as i32), error.to_string())
+                        })?
+                    {
                         draw_commands_d2d(resources, fragment.commands(), Some(*rect))
                     } else {
                         Ok(())

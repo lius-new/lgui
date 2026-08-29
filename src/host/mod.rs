@@ -996,9 +996,7 @@ fn elapsed_ms(started: Instant) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{
-        CompositingLayerSpec, Point, SemanticRole, Semantics, UiNode, VisualStyle,
-    };
+    use crate::core::{CompositingLayerSpec, Point, SemanticRole, Semantics, UiNode, VisualStyle};
 
     fn compositing_content_signature(scene: &Scene, id: &UiId) -> u64 {
         scene
@@ -1064,7 +1062,10 @@ mod tests {
 
         assert!(commit.damage.dirty.is_empty());
         assert_eq!(commit.semantics.nodes.len(), 1);
-        assert_eq!(commit.semantics.nodes[0].semantics.name.as_deref(), Some("After"));
+        assert_eq!(
+            commit.semantics.nodes[0].semantics.name.as_deref(),
+            Some("After")
+        );
     }
 
     #[test]
