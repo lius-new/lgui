@@ -73,6 +73,20 @@ impl<'a> UiRenderContext<'a> {
         self.component_states.with_mut(id, f)
     }
 
+    pub(crate) fn component_state_mut_for_component<T, R>(
+        &self,
+        id: &UiId,
+        owner: ComponentId,
+        invalidation_id: UiId,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> R
+    where
+        T: ComponentState + Clone + Default + 'static,
+    {
+        self.component_states
+            .with_mut_for_component(id, owner, invalidation_id, f)
+    }
+
     pub fn preserve_component_state_scope(&self, scope: &UiScope) {
         self.component_states.preserve_scope(scope);
     }

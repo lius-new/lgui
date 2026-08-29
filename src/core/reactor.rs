@@ -164,10 +164,15 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         let id = self
             .scope
             .id(format!("h.{}.{index}", HookKind::State.code()));
-        let (result, wants_frame) = self.context.component_state_mut(&id, |state: &mut T| {
-            let result = update(state);
-            (result, state.wants_frame())
-        });
+        let (result, wants_frame) = self.context.component_state_mut_for_component(
+            &id,
+            self.component_id,
+            self.scope.node_id(),
+            |state: &mut T| {
+                let result = update(state);
+                (result, state.wants_frame())
+            },
+        );
         if wants_frame {
             self.context.hook_updates().request_frame();
         }

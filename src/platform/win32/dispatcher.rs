@@ -14,7 +14,7 @@ use crate::application::{ApplicationHandle, ApplicationTask};
 pub const WM_LGUI_DISPATCH: u32 = WM_APP + 44;
 pub const WM_LGUI_FRAME_TICK: u32 = WM_APP + 45;
 
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+pub(super) const DEFAULT_FRAME_INTERVAL_MS: u64 = 16;
 
 #[derive(Clone, Default)]
 pub struct Win32Dispatcher {
@@ -28,6 +28,7 @@ struct DispatcherInner {
     frame_driver_running: AtomicBool,
     frame_tick_pending: AtomicBool,
     frame_generation: AtomicU64,
+    frame_interval_ms: AtomicU64,
     last_frame_tick: Mutex<Option<Instant>>,
     tasks: Mutex<Vec<ApplicationTask>>,
 }
@@ -89,6 +90,9 @@ impl Win32Dispatcher {
             return;
         }
         let generation = self.inner.frame_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        self.inner
+            .frame_interval_ms
+            .store(DEFAULT_FRAME_INTERVAL_MS, Ordering::Release);
         *self
             .inner
             .last_frame_tick
@@ -114,12 +118,19 @@ impl Win32Dispatcher {
             .expect("frame clock poisoned");
         last.replace(now)
             .map(|previous| now.duration_since(previous).as_secs_f32() * 1000.0)
-            .unwrap_or(FRAME_INTERVAL.as_secs_f32() * 1000.0)
+            .unwrap_or(self.frame_interval().as_secs_f32() * 1000.0)
             .clamp(1.0, 50.0)
     }
 
     pub fn finish_frame_tick(&self, should_continue: bool) {
+        self.finish_frame_tick_with_interval(should_continue, DEFAULT_FRAME_INTERVAL_MS);
+    }
+
+    pub fn finish_frame_tick_with_interval(&self, should_continue: bool, interval_ms: u64) {
         if should_continue {
+            self.inner
+                .frame_interval_ms
+                .store(interval_ms.max(1), Ordering::Release);
             self.inner
                 .frame_tick_pending
                 .store(false, Ordering::Release);
@@ -182,7 +193,7 @@ impl Win32Dispatcher {
         while self.inner.frame_driver_running.load(Ordering::Acquire)
             && self.inner.frame_generation.load(Ordering::Acquire) == generation
         {
-            std::thread::sleep(FRAME_INTERVAL);
+            std::thread::sleep(self.frame_interval());
             if !self.inner.frame_driver_running.load(Ordering::Acquire)
                 || self.inner.frame_generation.load(Ordering::Acquire) != generation
             {
@@ -202,6 +213,15 @@ impl Win32Dispatcher {
                     .store(false, Ordering::Release);
             }
         }
+    }
+
+    fn frame_interval(&self) -> Duration {
+        let interval_ms = self.inner.frame_interval_ms.load(Ordering::Acquire);
+        Duration::from_millis(if interval_ms == 0 {
+            DEFAULT_FRAME_INTERVAL_MS
+        } else {
+            interval_ms
+        })
     }
 
     fn wake(&self) {
@@ -249,5 +269,15 @@ mod tests {
         assert!(drained.frame_requested);
         assert_eq!(completed.load(Ordering::SeqCst), 1);
         assert_eq!(dispatcher.drain(), Win32DispatchResult::default());
+    }
+
+    #[test]
+    fn frame_driver_accepts_a_component_requested_interval() {
+        let dispatcher = Win32Dispatcher::new();
+
+        dispatcher.finish_frame_tick_with_interval(true, 33);
+
+        assert_eq!(dispatcher.frame_interval(), Duration::from_millis(33));
+        dispatcher.stop_frame_driver();
     }
 }

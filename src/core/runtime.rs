@@ -45,6 +45,7 @@ pub struct UiRuntime {
     task_spawner: Option<UiTaskSpawner>,
     effects: EffectRegistry,
     dirty: DirtyTracker,
+    frame_interval_ms: Option<u64>,
     previous_bounds: HashMap<UiId, UiRect>,
     current_tree: HostTree,
 }
@@ -79,6 +80,10 @@ impl UiRuntime {
 
     pub fn component_tree(&self) -> &ComponentTree {
         &self.component_tree
+    }
+
+    pub fn frame_interval_ms(&self) -> Option<u64> {
+        self.frame_interval_ms
     }
 
     pub fn invalidate_all_components(&self) {
@@ -353,18 +358,35 @@ impl UiRuntime {
     pub fn advance(&mut self, tree: &HostTree, elapsed_ms: f32) -> RuntimeOutput {
         self.reconcile_tree(tree);
         let animation_changed = self.animations.advance(elapsed_ms);
+        let mut frame_interval_ms = animation_changed.then_some(16);
         let animation_ids = self.animations.take_dirty_ids();
         self.mark_component_owners(tree, animation_ids.iter());
         self.dirty.mark_animation_ids(animation_ids);
-        let component_dirty_ids = self.component_states.advance(elapsed_ms);
-        let component_changed = !component_dirty_ids.is_empty();
-        self.mark_component_owners(tree, component_dirty_ids.iter());
+        let component_invalidations = self.component_states.advance_invalidations(elapsed_ms);
+        let component_changed = !component_invalidations.is_empty();
         let mut route_changed = false;
-        for id in &component_dirty_ids {
-            route_changed |= self.component_states.take_route_invalidation(id);
+        for invalidation in &component_invalidations {
+            frame_interval_ms = Some(
+                frame_interval_ms.map_or(invalidation.frame_interval_ms, |current| {
+                    current.min(invalidation.frame_interval_ms)
+                }),
+            );
+            if let Some(owner) = invalidation.owner {
+                self.component_tree.mark_dirty(owner);
+            } else {
+                self.mark_component_owners(tree, std::iter::once(&invalidation.target_id));
+            }
+            route_changed |= self
+                .component_states
+                .take_route_invalidation(&invalidation.state_id);
         }
-        self.dirty.mark_animation_ids(component_dirty_ids);
+        self.dirty.mark_animation_ids(
+            component_invalidations
+                .into_iter()
+                .map(|invalidation| invalidation.target_id),
+        );
         let dirty_bounds = self.dirty.take().bounds(tree);
+        self.frame_interval_ms = frame_interval_ms;
         RuntimeOutput {
             events: Vec::new(),
             handler_events: Vec::new(),
@@ -726,6 +748,95 @@ mod tests {
 
         assert!(runtime.sync_tree_animation_targets(&tree));
         assert!(runtime.component_tree().is_dirty(owner));
+    }
+
+    #[test]
+    fn bound_component_state_animation_invalidates_only_its_host_node() {
+        let mut runtime = UiRuntime::new();
+        let (owner, unrelated_owner) = {
+            let components = runtime.component_tree();
+            components.begin_render();
+            let owner = components.root(UiId::owned("rail-owner"), "rail-owner");
+            components.begin_component_execution(owner);
+            components.finish_component(owner);
+            let unrelated_owner =
+                components.root(UiId::owned("unrelated-owner"), "unrelated-owner");
+            components.begin_component_execution(unrelated_owner);
+            components.finish_component(unrelated_owner);
+            components.end_render();
+            (owner, unrelated_owner)
+        };
+        let state_id = UiId::owned("rail.h.state.0");
+        let target_id = UiId::owned("rail");
+        let target_bounds = UiRect::new(10, 20, 24, 220);
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(target_id.clone(), UiNodeKind::Panel, target_bounds).component_owner(owner),
+        );
+        runtime.component_states().with_mut_for_component(
+            &state_id,
+            owner,
+            target_id,
+            |_state: &mut AlwaysAnimatingState| {},
+        );
+
+        let output = runtime.advance(&tree, 16.0);
+
+        assert!(output.animation_changed);
+        assert_eq!(output.dirty_bounds, Some(target_bounds));
+        assert_eq!(runtime.frame_interval_ms(), Some(33));
+        assert!(runtime.component_tree().is_dirty(owner));
+        assert!(!runtime.component_tree().is_dirty(unrelated_owner));
+    }
+
+    #[test]
+    fn faster_core_animation_wins_over_component_frame_interval() {
+        let mut runtime = UiRuntime::new();
+        let owner = {
+            let components = runtime.component_tree();
+            components.begin_render();
+            let owner = components.root(UiId::owned("mixed-owner"), "mixed-owner");
+            components.begin_component_execution(owner);
+            components.finish_component(owner);
+            components.end_render();
+            owner
+        };
+        let rail_id = UiId::owned("mixed-rail");
+        let animation_id = UiId::owned("mixed-animation");
+        let animation = AnimationBinding::new(AnimProperty::Active, 0.0, 1.0);
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                rail_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(0, 0, 14, 200),
+            )
+            .component_owner(owner),
+        );
+        tree.push(
+            UiNode::new(
+                animation_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(20, 0, 40, 20),
+            )
+            .component_owner(owner)
+            .animation(animation)
+            .animation_target(AnimProperty::Active, true),
+        );
+        assert!(runtime
+            .animations_mut()
+            .set_binding_target(animation_id, animation, true));
+        runtime.component_states().with_mut_for_component(
+            &UiId::owned("mixed-rail.h.state.0"),
+            owner,
+            rail_id,
+            |_state: &mut AlwaysAnimatingState| {},
+        );
+
+        let output = runtime.advance(&tree, 16.0);
+
+        assert!(output.animation_changed);
+        assert_eq!(runtime.frame_interval_ms(), Some(16));
     }
 
     #[test]
@@ -1204,6 +1315,27 @@ mod tests {
     #[derive(Clone, Default)]
     struct InputActionState {
         value: String,
+    }
+
+    #[derive(Clone, Default)]
+    struct AlwaysAnimatingState;
+
+    impl ComponentState for AlwaysAnimatingState {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn advance(&mut self, _elapsed_ms: f32) -> bool {
+            true
+        }
+
+        fn frame_interval_ms(&self) -> u64 {
+            33
+        }
     }
 
     impl ComponentState for SemanticActionState {

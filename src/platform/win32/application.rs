@@ -88,7 +88,7 @@ use super::GdiRenderer;
 #[cfg(feature = "tray")]
 use super::Win32TrayHost;
 use super::{
-    dispatcher::{WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
+    dispatcher::{DEFAULT_FRAME_INTERVAL_MS, WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
     set_scale_preference, DpiContext, Win32Dispatcher,
 };
 
@@ -1635,10 +1635,11 @@ fn handle_frame_tick(hwnd: HWND) {
         return;
     };
     let elapsed_ms = dispatcher.frame_elapsed_ms();
-    let (repaints, should_continue) = STATE.with(|state| {
+    let (repaints, should_continue, frame_interval_ms) = STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let mut repaints = Vec::new();
         let mut should_continue = false;
+        let mut frame_interval_ms = None::<u64>;
         for (raw, window) in windows.iter_mut() {
             if window.rendering_suspended
                 || !window.visibility.desired_visible
@@ -1648,6 +1649,15 @@ fn handle_frame_tick(hwnd: HWND) {
             }
             let output = window.session.advance(elapsed_ms);
             should_continue |= output.animation_changed;
+            if output.animation_changed {
+                let interval = window
+                    .session
+                    .runtime()
+                    .frame_interval_ms()
+                    .unwrap_or(DEFAULT_FRAME_INTERVAL_MS);
+                frame_interval_ms =
+                    Some(frame_interval_ms.map_or(interval, |current| current.min(interval)));
+            }
             let repaint = if let Some(bounds) = output.dirty_bounds {
                 window.session.invalidations_mut().invalidate_rect(bounds);
                 WindowRepaint::Rect(bounds)
@@ -1661,12 +1671,15 @@ fn handle_frame_tick(hwnd: HWND) {
                 repaints.push((HWND(*raw as _), repaint));
             }
         }
-        (repaints, should_continue)
+        (repaints, should_continue, frame_interval_ms)
     });
     for (target, repaint) in repaints {
         request_window_repaint(target, repaint);
     }
-    dispatcher.finish_frame_tick(should_continue);
+    dispatcher.finish_frame_tick_with_interval(
+        should_continue,
+        frame_interval_ms.unwrap_or(DEFAULT_FRAME_INTERVAL_MS),
+    );
 }
 
 fn paint(hwnd: HWND) {
