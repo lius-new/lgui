@@ -88,6 +88,11 @@ default. `.opacity(value)` controls composition opacity without invalidating ret
 is composited. Changing only these values reuses the existing surface pixels. Translation is in
 logical pixels and is projected through the current DPI scale.
 
+Do not use a full-window compositing layer only to preserve z-order. A regular `group` already
+keeps retained scene commands in order, and dirty-region rendering replays only commands that
+intersect the changed rectangles. Reserve compositing surfaces for content that must be
+transformed, faded, or rerasterized independently; their backing storage scales with layer area.
+
 Use `animated_compositing_layer::<T>(rect, configure)` with an application-owned
 `CompositingLayerAnimation` state when a layer changes every frame. `lgui` advances the state,
 requests frames at its declared interval, and applies its `CompositingLayerSpec` directly to the

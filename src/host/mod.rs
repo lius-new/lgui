@@ -994,6 +994,10 @@ mod tests {
         let dirty = commit.damage.dirty.effective_rects();
         assert!(dirty.iter().any(|rect| rect.contains(Point::new(20, 30))));
         assert!(dirty.iter().any(|rect| rect.contains(Point::new(210, 170))));
+        assert!(
+            !dirty.iter().any(|rect| rect.contains(Point::new(150, 130))),
+            "moving a retained layer must not dirty the area between old and new bounds"
+        );
         assert_eq!(commit.metrics.reused_scene_nodes, 2);
         assert_eq!(
             commit
