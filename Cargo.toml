@@ -25,6 +25,7 @@ clipboard = [
 open-url = ["backend-win32", "windows/Win32_UI_Shell"]
 diagnostics = []
 diagnostics-serde = ["diagnostics", "dep:serde"]
+diagnostics-timing = ["diagnostics"]
 system-diagnostics = [
   "diagnostics",
   "backend-win32",

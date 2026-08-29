@@ -10,8 +10,8 @@ pub mod static_layer;
 pub mod static_layer_raster_cache;
 
 pub use gdi_renderer::{
-    clear_gdi_renderer_caches, reset_gdi_frame_blit_metrics, take_gdi_frame_blit_metrics,
-    GdiFrameBlitMetrics, GdiFrameBlitSourceMetrics, GdiRenderer,
+    clear_gdi_renderer_caches, release_gdi_compositing_layer_scope, reset_gdi_frame_blit_metrics,
+    take_gdi_frame_blit_metrics, GdiFrameBlitMetrics, GdiFrameBlitSourceMetrics, GdiRenderer,
 };
 
 pub fn draw_scene(

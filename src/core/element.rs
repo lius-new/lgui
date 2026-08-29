@@ -1,11 +1,11 @@
 use std::{borrow::Cow, sync::Arc};
 
 use super::{
-    AnimationBinding, BackdropBlurStyle, Color, ComponentId, CustomPaintStyle, EventPolicy,
-    HostTreeBuilder, IconStyle, ImageFit, InteractionRole, LayoutSpec, OverlayStyle, PathStyle,
-    RenderPhase, ScrollRasterSpec, StaticLayerSpec, TextStyle, UiAction, UiEventContext,
-    UiEventHandler, UiEventKind, UiEventPayload, UiId, UiImageSource, UiInputEventHandler, UiNode,
-    UiNodeKind, UiPath, UiRect, VisualStyle,
+    AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
+    CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, InteractionRole,
+    LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec, StaticLayerSpec, TextStyle,
+    UiAction, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId, UiImageSource,
+    UiInputEventHandler, UiNode, UiNodeKind, UiPath, UiRect, VisualStyle,
 };
 
 #[derive(Clone)]
@@ -118,6 +118,10 @@ impl UiElement {
 
     pub fn static_layer(id: UiId, rect: UiRect, spec: StaticLayerSpec) -> Self {
         Self::new(id, UiNodeKind::StaticLayer, rect).static_layer_spec(spec)
+    }
+
+    pub fn compositing_layer(id: UiId, rect: UiRect, spec: CompositingLayerSpec) -> Self {
+        Self::new(id, UiNodeKind::CompositingLayer, rect).compositing_layer_spec(spec)
     }
 
     pub fn scroll_raster(id: UiId, viewport: UiRect, spec: ScrollRasterSpec) -> Self {
@@ -341,6 +345,11 @@ impl UiElement {
 
     pub fn static_layer_spec(mut self, spec: StaticLayerSpec) -> Self {
         self.node = self.node.static_layer(spec);
+        self
+    }
+
+    pub fn compositing_layer_spec(mut self, spec: CompositingLayerSpec) -> Self {
+        self.node = self.node.compositing_layer(spec);
         self
     }
 

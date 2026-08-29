@@ -91,8 +91,10 @@ impl HostTree {
     }
 
     pub(crate) fn upsert(&mut self, node: UiNode) {
-        self.projection_changes.changed.insert(node.id.clone());
         if let Some(index) = self.nodes.iter().position(|current| current.id == node.id) {
+            if !self.nodes[index].projection_eq(&node) {
+                self.projection_changes.changed.insert(node.id.clone());
+            }
             let previous_owner = self.nodes[index].component_owner;
             if previous_owner != node.component_owner {
                 if let Some(owner) = previous_owner {
@@ -113,20 +115,20 @@ impl HostTree {
         }
     }
 
-    pub(crate) fn attach_child(&mut self, parent: &UiId, child: UiId) {
-        let changed_parent = {
+    pub(crate) fn set_children(&mut self, parent: &UiId, children: Vec<UiId>) {
+        let changed = {
             let Some(parent) = self.node_mut(parent) else {
                 return;
             };
-            if parent.children.contains(&child) {
-                None
+            if parent.children == children {
+                false
             } else {
-                parent.children.push(child);
-                Some(parent.id.clone())
+                parent.children = children;
+                true
             }
         };
-        if let Some(parent) = changed_parent {
-            self.projection_changes.changed.insert(parent);
+        if changed {
+            self.projection_changes.changed.insert(parent.clone());
             self.projection_changes.structure_changed = true;
         }
     }

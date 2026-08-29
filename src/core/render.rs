@@ -7,9 +7,9 @@ use std::{
 };
 
 use super::{
-    BackdropBlurStyle, Color, CustomPaintStyle, HostTree, OverlayStyle, PathStyle, StaticLayerSpec,
-    TextStyle, UiId, UiImageSource, UiNode, UiNodeKind, UiPath, UiPathCommand, UiRect, UiScale,
-    VisualStyle,
+    BackdropBlurStyle, Color, CompositingLayerSpec, CustomPaintStyle, HostTree, OverlayStyle,
+    PathStyle, StaticLayerSpec, TextStyle, UiId, UiImageSource, UiNode, UiNodeKind, UiPath,
+    UiPathCommand, UiRect, UiScale, VisualStyle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,6 +104,15 @@ pub enum ScenePrimitive {
         style: OverlayStyle,
         phase: RenderPhase,
     },
+    CompositingLayer {
+        id: UiId,
+        rect: UiRect,
+        spec: CompositingLayerSpec,
+        /// Commands use layer-local coordinates so moving a layer does not invalidate its surface.
+        commands: Vec<ScenePrimitive>,
+        content_signature: u64,
+        phase: RenderPhase,
+    },
     StaticLayer {
         id: UiId,
         rect: UiRect,
@@ -173,6 +182,7 @@ impl ScenePrimitive {
             | ScenePrimitive::BackdropBlur { id, .. }
             | ScenePrimitive::BackdropBlurPath { id, .. }
             | ScenePrimitive::Overlay { id, .. }
+            | ScenePrimitive::CompositingLayer { id, .. }
             | ScenePrimitive::StaticLayer { id, .. }
             | ScenePrimitive::ScrollRaster { id, .. }
             | ScenePrimitive::Clip { id, .. }
@@ -194,6 +204,7 @@ impl ScenePrimitive {
             | ScenePrimitive::BackdropBlur { phase, .. }
             | ScenePrimitive::BackdropBlurPath { phase, .. }
             | ScenePrimitive::Overlay { phase, .. }
+            | ScenePrimitive::CompositingLayer { phase, .. }
             | ScenePrimitive::StaticLayer { phase, .. }
             | ScenePrimitive::ScrollRaster { phase, .. }
             | ScenePrimitive::Clip { phase, .. }
@@ -214,6 +225,7 @@ impl ScenePrimitive {
             | ScenePrimitive::BackdropBlur { rect, .. }
             | ScenePrimitive::BackdropBlurPath { rect, .. }
             | ScenePrimitive::Overlay { rect, .. } => *rect,
+            ScenePrimitive::CompositingLayer { rect, .. } => *rect,
             ScenePrimitive::StaticLayer { rect, spec, .. } => {
                 rect.translate(spec.offset_x, spec.offset_y)
             }
@@ -228,11 +240,220 @@ impl ScenePrimitive {
         }
     }
 
+    pub fn paint_bounds(&self) -> UiRect {
+        let rect = self.rect();
+        let stroke_width = match self {
+            ScenePrimitive::Rect { style, .. } | ScenePrimitive::Ellipse { style, .. } => {
+                style.stroke.map(|stroke| stroke.width).unwrap_or(0)
+            }
+            ScenePrimitive::Line { stroke, .. } => stroke.width,
+            ScenePrimitive::Path { style, .. } => {
+                style.stroke.map(|stroke| stroke.width).unwrap_or(0)
+            }
+            _ => 0,
+        };
+        let outset = (stroke_width.max(0) + 1) / 2;
+        rect.inflate(outset, outset)
+    }
+
     pub fn signature(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         command_signature_part(self, &mut hasher);
         hasher.finish()
     }
+}
+
+/// Computes the pixels that can change when a retained layer replaces one command list with
+/// another. Returned rectangles use the same local coordinate space as `previous` and `next`.
+pub fn compositing_layer_damage(
+    previous: &[ScenePrimitive],
+    next: &[ScenePrimitive],
+    layer_bounds: UiRect,
+) -> Vec<UiRect> {
+    let mut damage = LayerDamageAccumulator::new(layer_bounds);
+    collect_command_damage(previous, next, &mut damage);
+    damage.finish()
+}
+
+struct LayerDamageAccumulator {
+    bounds: UiRect,
+    rects: Vec<UiRect>,
+    full: bool,
+}
+
+impl LayerDamageAccumulator {
+    fn new(bounds: UiRect) -> Self {
+        Self {
+            bounds,
+            rects: Vec::new(),
+            full: false,
+        }
+    }
+
+    fn add(&mut self, rect: UiRect) {
+        if self.full {
+            return;
+        }
+        let Some(rect) = rect.inflate(2, 2).intersect(self.bounds) else {
+            return;
+        };
+        if rect.width() <= 0 || rect.height() <= 0 {
+            return;
+        }
+        let mut merged = rect;
+        let mut index = 0;
+        while index < self.rects.len() {
+            if self.rects[index].inflate(2, 2).intersect(merged).is_some() {
+                merged = self.rects.remove(index).union(merged);
+            } else {
+                index += 1;
+            }
+        }
+        self.rects.push(merged);
+        let bounds_area = rect_area(self.bounds);
+        let dirty_area = self.rects.iter().copied().map(rect_area).sum::<i64>();
+        if self.rects.len() > 12
+            || bounds_area <= 0
+            || dirty_area as f32 / bounds_area as f32 >= 0.90
+        {
+            self.full = true;
+            self.rects.clear();
+        }
+    }
+
+    fn finish(self) -> Vec<UiRect> {
+        if self.full {
+            vec![self.bounds]
+        } else {
+            self.rects
+        }
+    }
+}
+
+fn collect_command_damage(
+    previous: &[ScenePrimitive],
+    next: &[ScenePrimitive],
+    damage: &mut LayerDamageAccumulator,
+) {
+    let previous_by_id = previous
+        .iter()
+        .enumerate()
+        .map(|(index, command)| (command.id(), (index, command)))
+        .collect::<HashMap<_, _>>();
+    let next_by_id = next
+        .iter()
+        .enumerate()
+        .map(|(index, command)| (command.id(), (index, command)))
+        .collect::<HashMap<_, _>>();
+
+    for (id, (previous_index, previous_command)) in &previous_by_id {
+        let Some((next_index, next_command)) = next_by_id.get(id) else {
+            damage.add(previous_command.paint_bounds());
+            continue;
+        };
+        if previous_command.signature() == next_command.signature() && previous_index == next_index
+        {
+            continue;
+        }
+        if previous_index != next_index
+            || !collect_nested_command_damage(previous_command, next_command, damage)
+        {
+            damage.add(previous_command.paint_bounds());
+            damage.add(next_command.paint_bounds());
+        }
+    }
+
+    for (id, (_, command)) in next_by_id {
+        if !previous_by_id.contains_key(id) {
+            damage.add(command.paint_bounds());
+        }
+    }
+}
+
+fn collect_nested_command_damage(
+    previous: &ScenePrimitive,
+    next: &ScenePrimitive,
+    damage: &mut LayerDamageAccumulator,
+) -> bool {
+    match (previous, next) {
+        (
+            ScenePrimitive::CompositingLayer {
+                rect: previous_rect,
+                spec: previous_spec,
+                commands: previous_commands,
+                phase: previous_phase,
+                ..
+            },
+            ScenePrimitive::CompositingLayer {
+                rect: next_rect,
+                spec: next_spec,
+                commands: next_commands,
+                phase: next_phase,
+                ..
+            },
+        ) if previous_rect == next_rect
+            && previous_spec == next_spec
+            && previous_phase == next_phase =>
+        {
+            let local_bounds = UiRect::new(0, 0, next_rect.width(), next_rect.height());
+            for rect in compositing_layer_damage(previous_commands, next_commands, local_bounds) {
+                damage.add(rect.translate(next_rect.left, next_rect.top));
+            }
+            true
+        }
+        (
+            ScenePrimitive::Clip {
+                rect: previous_rect,
+                commands: previous_commands,
+                phase: previous_phase,
+                ..
+            },
+            ScenePrimitive::Clip {
+                rect: next_rect,
+                commands: next_commands,
+                phase: next_phase,
+                ..
+            },
+        ) if previous_rect == next_rect && previous_phase == next_phase => {
+            let mut nested = LayerDamageAccumulator::new(*next_rect);
+            collect_command_damage(previous_commands, next_commands, &mut nested);
+            for rect in nested.finish() {
+                damage.add(rect);
+            }
+            true
+        }
+        (
+            ScenePrimitive::ClipPath {
+                rect: previous_rect,
+                path: previous_path,
+                commands: previous_commands,
+                phase: previous_phase,
+                ..
+            },
+            ScenePrimitive::ClipPath {
+                rect: next_rect,
+                path: next_path,
+                commands: next_commands,
+                phase: next_phase,
+                ..
+            },
+        ) if previous_rect == next_rect
+            && previous_path == next_path
+            && previous_phase == next_phase =>
+        {
+            let mut nested = LayerDamageAccumulator::new(*next_rect);
+            collect_command_damage(previous_commands, next_commands, &mut nested);
+            for rect in nested.finish() {
+                damage.add(rect);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+fn rect_area(rect: UiRect) -> i64 {
+    rect.width().max(0) as i64 * rect.height().max(0) as i64
 }
 
 #[derive(Clone, Debug, Default)]
@@ -486,6 +707,24 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             style: style.clone(),
             phase: *phase,
         },
+        ScenePrimitive::CompositingLayer {
+            id,
+            rect,
+            spec,
+            commands,
+            content_signature,
+            phase,
+        } => ScenePrimitive::CompositingLayer {
+            id: id.clone(),
+            rect: scale.physical_rect(*rect),
+            spec: *spec,
+            commands: commands
+                .iter()
+                .map(|command| project_command(command, scale))
+                .collect(),
+            content_signature: content_signature ^ signature_scale,
+            phase: *phase,
+        },
         ScenePrimitive::StaticLayer {
             id,
             rect,
@@ -631,11 +870,28 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
         let include_popup_subtree = node.render_phase == RenderPhase::Popup;
         if matches!(
             node.kind,
-            UiNodeKind::StaticLayer
+            UiNodeKind::CompositingLayer
+                | UiNodeKind::StaticLayer
                 | UiNodeKind::ScrollRaster
                 | UiNodeKind::Clip
                 | UiNodeKind::ClipPath
         ) {
+            if let Some(spec) = node.compositing_layer {
+                let (commands, content_signature) = compile_compositing_layer_commands(
+                    tree,
+                    node,
+                    &mut skip,
+                    include_popup_subtree,
+                );
+                list.push(ScenePrimitive::CompositingLayer {
+                    id: node.id.clone(),
+                    rect: node.layout_rect,
+                    spec,
+                    commands,
+                    content_signature,
+                    phase: node.render_phase,
+                });
+            }
             if let Some(spec) = node.static_layer.clone() {
                 let commands =
                     compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
@@ -717,7 +973,8 @@ pub fn scene_root_ids(tree: &HostTree) -> Vec<UiId> {
         }
         if matches!(
             node.kind,
-            UiNodeKind::StaticLayer
+            UiNodeKind::CompositingLayer
+                | UiNodeKind::StaticLayer
                 | UiNodeKind::ScrollRaster
                 | UiNodeKind::Clip
                 | UiNodeKind::ClipPath
@@ -751,11 +1008,24 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
     let include_popup_subtree = node.render_phase == RenderPhase::Popup;
     if matches!(
         node.kind,
-        UiNodeKind::StaticLayer
+        UiNodeKind::CompositingLayer
+            | UiNodeKind::StaticLayer
             | UiNodeKind::ScrollRaster
             | UiNodeKind::Clip
             | UiNodeKind::ClipPath
     ) {
+        if let Some(spec) = node.compositing_layer {
+            let (commands, content_signature) =
+                compile_compositing_layer_commands(tree, node, &mut skip, include_popup_subtree);
+            list.push(ScenePrimitive::CompositingLayer {
+                id: node.id.clone(),
+                rect: node.layout_rect,
+                spec,
+                commands,
+                content_signature,
+                phase: node.render_phase,
+            });
+        }
         if let Some(spec) = node.static_layer.clone() {
             let commands =
                 compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
@@ -842,6 +1112,18 @@ fn compile_static_layer_commands(
         compile_static_layer_child(tree, child_id, &mut commands, skip, include_popup_subtree);
     }
     commands
+}
+
+fn compile_compositing_layer_commands(
+    tree: &HostTree,
+    root: &UiNode,
+    skip: &mut HashSet<UiId>,
+    include_popup_subtree: bool,
+) -> (Vec<ScenePrimitive>, u64) {
+    let commands = compile_static_layer_commands(tree, root, skip, include_popup_subtree);
+    let commands = translate_commands(commands, -root.layout_rect.left, -root.layout_rect.top);
+    let content_signature = command_signature(&commands);
+    (commands, content_signature)
 }
 
 fn compile_scroll_raster_commands(
@@ -1061,6 +1343,21 @@ fn push_node_and_children(
         }
         return;
     }
+    if let UiNodeKind::CompositingLayer = node.kind {
+        if let Some(spec) = node.compositing_layer {
+            let (layer_commands, content_signature) =
+                compile_compositing_layer_commands(tree, node, skip, include_popup_subtree);
+            commands.push(ScenePrimitive::CompositingLayer {
+                id: node.id.clone(),
+                rect: node.layout_rect,
+                spec,
+                commands: layer_commands,
+                content_signature,
+                phase: node.render_phase,
+            });
+        }
+        return;
+    }
     if let UiNodeKind::StaticLayer = node.kind {
         if let Some(spec) = node.static_layer.clone() {
             let layer_commands =
@@ -1096,6 +1393,7 @@ fn push_node_and_children(
         node.kind,
         UiNodeKind::Group
             | UiNodeKind::Root
+            | UiNodeKind::CompositingLayer
             | UiNodeKind::StaticLayer
             | UiNodeKind::ScrollRaster
             | UiNodeKind::ClipPath
@@ -1418,6 +1716,21 @@ fn command_signature_part(command: &ScenePrimitive, hasher: &mut DefaultHasher) 
             hash_overlay_style(style, hasher);
             phase.hash(hasher);
         }
+        ScenePrimitive::CompositingLayer {
+            id,
+            rect,
+            spec,
+            content_signature,
+            phase,
+            ..
+        } => {
+            "compositing-layer".hash(hasher);
+            id.hash(hasher);
+            hash_rect(rect, hasher);
+            spec.hash(hasher);
+            content_signature.hash(hasher);
+            phase.hash(hasher);
+        }
         ScenePrimitive::StaticLayer {
             id,
             rect,
@@ -1639,6 +1952,21 @@ fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimiti
             id: id.clone(),
             rect: translate_rect(*rect),
             style: style.clone(),
+            phase: *phase,
+        },
+        ScenePrimitive::CompositingLayer {
+            id,
+            rect,
+            spec,
+            commands,
+            content_signature,
+            phase,
+        } => ScenePrimitive::CompositingLayer {
+            id: id.clone(),
+            rect: translate_rect(*rect),
+            spec: *spec,
+            commands: commands.clone(),
+            content_signature: *content_signature,
             phase: *phase,
         },
         ScenePrimitive::StaticLayer {
@@ -1901,6 +2229,10 @@ pub fn commands_for_phase(
             phase: command_phase,
             ..
         }
+        | ScenePrimitive::CompositingLayer {
+            phase: command_phase,
+            ..
+        }
         | ScenePrimitive::StaticLayer {
             phase: command_phase,
             ..
@@ -1927,6 +2259,224 @@ mod tests {
 
     fn id(value: &str) -> UiId {
         UiId::owned(value.to_string())
+    }
+
+    fn compositing_layer_tree(layer_rect: UiRect, child_rect: UiRect) -> HostTree {
+        let layer_id = id("layer");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(layer_id.clone(), UiNodeKind::CompositingLayer, layer_rect)
+                .compositing_layer(CompositingLayerSpec::new()),
+        );
+        tree.push(
+            UiNode::new(id("layer-child"), UiNodeKind::Panel, child_rect)
+                .parent(layer_id)
+                .style(VisualStyle::filled(Color::WHITE)),
+        );
+        tree
+    }
+
+    #[test]
+    fn compositing_layer_commands_use_layer_local_coordinates() {
+        let scene = compile_scene(&compositing_layer_tree(
+            UiRect::new(100, 200, 300, 400),
+            UiRect::new(120, 230, 180, 290),
+        ));
+        let ScenePrimitive::CompositingLayer { rect, commands, .. } = &scene.commands()[0] else {
+            panic!("expected compositing layer");
+        };
+        assert_eq!(*rect, UiRect::new(100, 200, 300, 400));
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].rect(), UiRect::new(20, 30, 80, 90));
+    }
+
+    #[test]
+    fn moving_a_compositing_layer_preserves_its_content_signature() {
+        let first = compile_scene(&compositing_layer_tree(
+            UiRect::new(100, 200, 300, 400),
+            UiRect::new(120, 230, 180, 290),
+        ));
+        let second = compile_scene(&compositing_layer_tree(
+            UiRect::new(500, 600, 700, 800),
+            UiRect::new(520, 630, 580, 690),
+        ));
+        let ScenePrimitive::CompositingLayer {
+            content_signature: first_signature,
+            ..
+        } = &first.commands()[0]
+        else {
+            panic!("expected first compositing layer");
+        };
+        let ScenePrimitive::CompositingLayer {
+            content_signature: second_signature,
+            ..
+        } = &second.commands()[0]
+        else {
+            panic!("expected second compositing layer");
+        };
+        assert_eq!(first_signature, second_signature);
+    }
+
+    #[test]
+    fn compositing_layer_keeps_its_scene_order_between_siblings() {
+        let layer_id = id("ordered-layer");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                id("background"),
+                UiNodeKind::Panel,
+                UiRect::new(0, 0, 100, 100),
+            )
+            .style(VisualStyle::filled(Color::BLACK)),
+        );
+        tree.push(
+            UiNode::new(
+                layer_id.clone(),
+                UiNodeKind::CompositingLayer,
+                UiRect::new(0, 0, 100, 100),
+            )
+            .compositing_layer(CompositingLayerSpec::new()),
+        );
+        tree.push(
+            UiNode::new(
+                id("layer-content"),
+                UiNodeKind::Panel,
+                UiRect::new(10, 10, 20, 20),
+            )
+            .parent(layer_id)
+            .style(VisualStyle::filled(Color::WHITE)),
+        );
+        tree.push(
+            UiNode::new(
+                id("foreground"),
+                UiNodeKind::Panel,
+                UiRect::new(0, 0, 100, 100),
+            )
+            .style(VisualStyle::filled(Color::WHITE)),
+        );
+
+        let scene = compile_scene(&tree);
+        assert_eq!(scene.commands().len(), 3);
+        assert_eq!(scene.commands()[0].id().as_str(), "background");
+        assert_eq!(scene.commands()[1].id().as_str(), "ordered-layer");
+        assert_eq!(scene.commands()[2].id().as_str(), "foreground");
+    }
+
+    #[test]
+    fn compositing_layer_damage_tracks_moved_inserted_and_removed_commands() {
+        let style = VisualStyle::filled(Color::WHITE);
+        let previous = vec![
+            ScenePrimitive::Rect {
+                id: id("moving"),
+                rect: UiRect::new(10, 10, 30, 30),
+                style,
+                phase: RenderPhase::Content,
+            },
+            ScenePrimitive::Rect {
+                id: id("removed"),
+                rect: UiRect::new(60, 10, 80, 30),
+                style,
+                phase: RenderPhase::Content,
+            },
+        ];
+        let next = vec![
+            ScenePrimitive::Rect {
+                id: id("moving"),
+                rect: UiRect::new(20, 50, 40, 70),
+                style,
+                phase: RenderPhase::Content,
+            },
+            ScenePrimitive::Rect {
+                id: id("inserted"),
+                rect: UiRect::new(70, 60, 90, 80),
+                style,
+                phase: RenderPhase::Content,
+            },
+        ];
+
+        let damage = compositing_layer_damage(&previous, &next, UiRect::new(0, 0, 100, 100));
+        assert!(damage.iter().any(|rect| rect.contains(Point::new(15, 15))));
+        assert!(damage.iter().any(|rect| rect.contains(Point::new(25, 55))));
+        assert!(damage.iter().any(|rect| rect.contains(Point::new(65, 15))));
+        assert!(damage.iter().any(|rect| rect.contains(Point::new(75, 65))));
+    }
+
+    #[test]
+    fn nested_compositing_layer_damage_stays_local_to_changed_content() {
+        let nested = |child_rect| {
+            let child = ScenePrimitive::Rect {
+                id: id("nested-child"),
+                rect: child_rect,
+                style: VisualStyle::filled(Color::WHITE),
+                phase: RenderPhase::Content,
+            };
+            ScenePrimitive::CompositingLayer {
+                id: id("nested"),
+                rect: UiRect::new(100, 80, 300, 280),
+                spec: CompositingLayerSpec::new(),
+                content_signature: child.signature(),
+                commands: vec![child],
+                phase: RenderPhase::Content,
+            }
+        };
+        let damage = compositing_layer_damage(
+            &[nested(UiRect::new(10, 10, 30, 30))],
+            &[nested(UiRect::new(20, 20, 40, 40))],
+            UiRect::new(0, 0, 500, 400),
+        );
+
+        assert!(damage.iter().any(|rect| rect.contains(Point::new(115, 95))));
+        assert!(damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(125, 105))));
+        assert!(damage
+            .iter()
+            .all(|rect| rect.right < 200 && rect.bottom < 180));
+    }
+
+    #[test]
+    fn popup_escapes_a_regular_compositing_layer() {
+        let layer_id = id("layer");
+        let content_id = id("content");
+        let popup_id = id("popup");
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(
+                layer_id.clone(),
+                UiNodeKind::CompositingLayer,
+                UiRect::new(100, 100, 300, 300),
+            )
+            .compositing_layer(CompositingLayerSpec::new()),
+        );
+        tree.push(
+            UiNode::new(
+                content_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(120, 130, 180, 190),
+            )
+            .parent(layer_id.clone())
+            .style(VisualStyle::filled(Color::WHITE)),
+        );
+        tree.push(
+            UiNode::new(
+                popup_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(140, 150, 240, 250),
+            )
+            .parent(layer_id)
+            .style(VisualStyle::filled(Color::WHITE))
+            .render_phase(RenderPhase::Popup),
+        );
+
+        let scene = compile_scene(&tree);
+        assert_eq!(scene.commands().len(), 2);
+        let ScenePrimitive::CompositingLayer { commands, .. } = &scene.commands()[0] else {
+            panic!("expected compositing layer");
+        };
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].id(), &content_id);
+        assert_eq!(commands[0].rect(), UiRect::new(20, 30, 80, 90));
+        assert_eq!(scene.commands()[1].id(), &popup_id);
     }
 
     #[test]
@@ -2141,6 +2691,41 @@ mod tests {
         assert_eq!(*rect, UiRect::new(3, 6, 18, 21));
         assert_eq!(style.height, -17);
         assert_eq!(style.tracking, 3);
+    }
+
+    #[test]
+    fn physical_projection_scales_compositing_bounds_and_local_commands() {
+        let child = ScenePrimitive::Rect {
+            id: id("layer-child"),
+            rect: UiRect::new(2, 4, 12, 14),
+            style: VisualStyle::filled(Color::WHITE),
+            phase: RenderPhase::Content,
+        };
+        let content_signature = child.signature();
+        let scene = Scene {
+            commands: Arc::new(vec![ScenePrimitive::CompositingLayer {
+                id: id("layer"),
+                rect: UiRect::new(10, 20, 110, 120),
+                spec: CompositingLayerSpec::new(),
+                commands: vec![child],
+                content_signature,
+                phase: RenderPhase::Content,
+            }]),
+        };
+
+        let projected = scene.project_to_physical(UiScale::new(1.5));
+        let ScenePrimitive::CompositingLayer {
+            rect,
+            commands,
+            content_signature: projected_signature,
+            ..
+        } = &projected.commands()[0]
+        else {
+            panic!("expected compositing layer");
+        };
+        assert_eq!(*rect, UiRect::new(15, 30, 165, 180));
+        assert_eq!(commands[0].rect(), UiRect::new(3, 6, 18, 21));
+        assert_ne!(*projected_signature, content_signature);
     }
 
     #[test]

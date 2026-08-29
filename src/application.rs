@@ -1015,6 +1015,16 @@ impl<B> Application<B> {
         self
     }
 
+    #[cfg(feature = "diagnostics")]
+    pub fn diagnostics_sink(
+        self,
+        sink: impl crate::diagnostics::DiagnosticsSink + 'static,
+    ) -> Self {
+        self.resources
+            .provide(crate::diagnostics::DiagnosticsRegistration::new(sink));
+        self
+    }
+
     #[cfg(feature = "backend-win32")]
     pub fn font_families(self, families: &'static [&'static str]) -> Self {
         self.resources.provide(crate::text::FontFamilies(families));

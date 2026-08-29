@@ -5,13 +5,15 @@ use windows::{
         Graphics::Gdi::{
             BitBlt, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, Ellipse,
             FillRect, IntersectClipRect, LineTo, MoveToEx, RestoreDC, RoundRect, SaveDC,
-            SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
-            DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DT_LEFT, DT_NOPREFIX, DT_RIGHT,
-            DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HDC, HGDIOBJ, OUT_TT_ONLY_PRECIS, PS_SOLID,
-            SRCCOPY, TRANSPARENT,
+            SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, CLIP_DEFAULT_PRECIS,
+            DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DT_LEFT, DT_NOPREFIX,
+            DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HDC, HGDIOBJ, OUT_TT_ONLY_PRECIS,
+            PS_SOLID, SRCCOPY, TRANSPARENT,
         },
     },
 };
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::application::Win32RenderError;
 use super::backbuffer::LayeredBackbuffer;
@@ -25,13 +27,17 @@ use crate::{
 pub struct GdiRenderer {
     background: Color,
     backbuffer: Option<LayeredBackbuffer>,
+    compositing_layer_scope: u64,
 }
+
+static NEXT_COMPOSITING_LAYER_SCOPE: AtomicU64 = AtomicU64::new(1);
 
 impl GdiRenderer {
     pub fn new(background: Color) -> Self {
         Self {
             background,
             backbuffer: None,
+            compositing_layer_scope: NEXT_COMPOSITING_LAYER_SCOPE.fetch_add(1, Ordering::Relaxed),
         }
     }
 
@@ -62,6 +68,18 @@ impl GdiRenderer {
                     unsafe {
                         let _ =
                             IntersectClipRect(target, rect.left, rect.top, rect.right, rect.bottom);
+                    }
+                    self.draw_commands(target, commands);
+                    unsafe {
+                        let _ = RestoreDC(target, saved);
+                    }
+                }
+            }
+            ScenePrimitive::CompositingLayer { rect, commands, .. } => {
+                let saved = unsafe { SaveDC(target) };
+                if saved != 0 {
+                    unsafe {
+                        let _ = SetViewportOrgEx(target, rect.left, rect.top, None);
                     }
                     self.draw_commands(target, commands);
                     unsafe {
@@ -152,7 +170,12 @@ impl GdiRenderer {
         let clear = clip.unwrap_or(viewport);
         self.clear(target, clear);
         #[cfg(feature = "advanced-rendering")]
-        super::enhanced::GdiRenderer::draw_scene_clipped(target, scene, clip);
+        super::enhanced::GdiRenderer::draw_scene_clipped_scoped(
+            target,
+            scene,
+            clip,
+            self.compositing_layer_scope,
+        );
         #[cfg(not(feature = "advanced-rendering"))]
         crate::renderer::RenderBackend::draw_scene(self, target, scene, clip);
     }
@@ -161,6 +184,13 @@ impl GdiRenderer {
 impl Default for GdiRenderer {
     fn default() -> Self {
         Self::new(Color(0x111418))
+    }
+}
+
+impl Drop for GdiRenderer {
+    fn drop(&mut self) {
+        #[cfg(feature = "advanced-rendering")]
+        super::enhanced::release_gdi_compositing_layer_scope(self.compositing_layer_scope);
     }
 }
 

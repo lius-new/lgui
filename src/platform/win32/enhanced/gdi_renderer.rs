@@ -11,7 +11,7 @@ use windows::{
             Gdi::{
                 AlphaBlend, BitBlt, CombineRgn, CreateCompatibleDC, CreateDIBSection, CreateFontW,
                 CreatePen, CreatePolygonRgn, CreateRectRgn, CreateSolidBrush, DeleteDC,
-                DeleteObject, DrawTextW, Ellipse, FillRect, GetGlyphIndicesW,
+                DeleteObject, DrawTextW, Ellipse, FillRect, GdiFlush, GetGlyphIndicesW,
                 GetTextExtentPoint32W, LineTo, MoveToEx, RestoreDC, RoundRect, SaveDC,
                 SelectClipRgn, SelectObject, SetBkMode, SetTextCharacterExtra, SetTextColor,
                 AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION,
@@ -33,7 +33,7 @@ use windows::{
 };
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::hash_map::DefaultHasher,
     collections::HashMap,
     hash::{Hash, Hasher},
@@ -49,9 +49,10 @@ use super::{
     static_layer::{self, StaticLayerDrawBackend},
 };
 use lgui::core::{
-    Color, CustomPaintStyle, OverlayStyle, PathStyle, Point, RadialGradientLayer, Scene,
-    ScenePrimitive, Stroke, TextAlign, TextStyle, UiPath, UiPathCommand, UiRect,
-    VerticalGradientLayer, VisualStyle,
+    compositing_layer_damage, Color, CompositingLayerBackground, CompositingLayerSpec,
+    CustomPaintStyle, OverlayStyle, PathStyle, Point, RadialGradientLayer, Scene, ScenePrimitive,
+    Stroke, TextAlign, TextStyle, UiId, UiPath, UiPathCommand, UiRect, VerticalGradientLayer,
+    VisualStyle,
 };
 use lgui::platform::win32::{draw_svg_icon, ui_font_family_at, ui_font_family_count};
 use lgui::renderer::ClipRegion;
@@ -59,6 +60,8 @@ use lgui::renderer::ClipRegion;
 thread_local! {
     static OVERLAY_CACHE: RefCell<HashMap<OverlayCacheKey, Vec<u8>>> = RefCell::new(HashMap::new());
     static GDI_BITMAP_CACHE: RefCell<GdiBitmapCache> = RefCell::new(GdiBitmapCache::default());
+    static GDI_COMPOSITING_LAYER_SCOPE: Cell<u64> = const { Cell::new(0) };
+    static GDI_COMPOSITING_LAYERS: RefCell<HashMap<GdiCompositingLayerKey, GdiCompositingLayer>> = RefCell::new(HashMap::new());
     static GDI_FRAME_BLIT_METRICS: RefCell<GdiFrameBlitMetrics> = RefCell::new(GdiFrameBlitMetrics::default());
     static GDI_FONT_FAMILY_CACHE: RefCell<HashMap<(char, i32, i32), usize>> = RefCell::new(HashMap::new());
 }
@@ -70,8 +73,17 @@ pub fn clear_gdi_renderer_caches() {
     GDI_BITMAP_CACHE.with(|cache| {
         cache.borrow_mut().clear();
     });
+    GDI_COMPOSITING_LAYERS.with(|cache| {
+        cache.borrow_mut().clear();
+    });
     GDI_FONT_FAMILY_CACHE.with(|cache| {
         cache.borrow_mut().clear();
+    });
+}
+
+pub fn release_gdi_compositing_layer_scope(scope: u64) {
+    GDI_COMPOSITING_LAYERS.with(|layers| {
+        layers.borrow_mut().retain(|key, _| key.scope != scope);
     });
 }
 
@@ -196,11 +208,29 @@ struct GdiBitmapEntry {
     memory_dc: HDC,
     bitmap: HBITMAP,
     old_bitmap: HGDIOBJ,
+    bits: *mut u8,
     width: i32,
     height: i32,
     bytes: usize,
     last_used: u64,
     opaque: bool,
+}
+
+struct GdiCompositingLayer {
+    content_signature: Option<u64>,
+    background: CompositingLayerBackground,
+    width: i32,
+    height: i32,
+    output: GdiBitmapEntry,
+    black: Option<GdiBitmapEntry>,
+    white: Option<GdiBitmapEntry>,
+    commands: Vec<ScenePrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GdiCompositingLayerKey {
+    scope: u64,
+    id: UiId,
 }
 
 impl GdiBitmapCache {
@@ -300,6 +330,7 @@ impl GdiBitmapEntry {
                 memory_dc,
                 bitmap,
                 old_bitmap,
+                bits: bits.cast(),
                 width,
                 height,
                 bytes: pixels.len(),
@@ -320,6 +351,185 @@ impl Drop for GdiBitmapEntry {
     }
 }
 
+impl GdiCompositingLayer {
+    fn new(
+        hdc: HDC,
+        width: i32,
+        height: i32,
+        background: CompositingLayerBackground,
+    ) -> Option<Self> {
+        let output_pixels = match background {
+            CompositingLayerBackground::Opaque => solid_bgra_pixels(width, height, [0, 0, 0, 255])?,
+            CompositingLayerBackground::Transparent => {
+                solid_bgra_pixels(width, height, [0, 0, 0, 0])?
+            }
+        };
+        let output = GdiBitmapEntry::new(hdc, width, height, &output_pixels, 0)?;
+        let (black, white) = match background {
+            CompositingLayerBackground::Opaque => (None, None),
+            CompositingLayerBackground::Transparent => {
+                let black_pixels = solid_bgra_pixels(width, height, [0, 0, 0, 255])?;
+                let white_pixels = solid_bgra_pixels(width, height, [255, 255, 255, 255])?;
+                (
+                    Some(GdiBitmapEntry::new(hdc, width, height, &black_pixels, 0)?),
+                    Some(GdiBitmapEntry::new(hdc, width, height, &white_pixels, 0)?),
+                )
+            }
+        };
+        Some(Self {
+            content_signature: None,
+            background,
+            width,
+            height,
+            output,
+            black,
+            white,
+            commands: Vec::new(),
+        })
+    }
+
+    fn redraw(&mut self, commands: &[ScenePrimitive], damage: &[UiRect]) {
+        unsafe {
+            let _ = GdiFlush();
+        }
+        match self.background {
+            CompositingLayerBackground::Opaque => {
+                for rect in damage {
+                    fill_gdi_surface_region(&mut self.output, *rect, [0, 0, 0, 255]);
+                    draw_gdi_commands_clipped(self.output.memory_dc, commands, *rect);
+                }
+                unsafe {
+                    let _ = GdiFlush();
+                }
+                for rect in damage {
+                    set_gdi_surface_alpha_region(&mut self.output, *rect, 255);
+                }
+                self.output.opaque = true;
+            }
+            CompositingLayerBackground::Transparent => {
+                let (Some(black), Some(white)) = (&mut self.black, &mut self.white) else {
+                    return;
+                };
+                for rect in damage {
+                    fill_gdi_surface_region(black, *rect, [0, 0, 0, 255]);
+                    fill_gdi_surface_region(white, *rect, [255, 255, 255, 255]);
+                    draw_gdi_commands_clipped(black.memory_dc, commands, *rect);
+                    draw_gdi_commands_clipped(white.memory_dc, commands, *rect);
+                }
+                unsafe {
+                    let _ = GdiFlush();
+                }
+                for rect in damage {
+                    synthesize_transparent_region(&mut self.output, black, white, *rect);
+                }
+                self.output.opaque = false;
+            }
+        }
+    }
+}
+
+fn solid_bgra_pixels(width: i32, height: i32, color: [u8; 4]) -> Option<Vec<u8>> {
+    let len = usize::try_from(width.checked_mul(height)?.checked_mul(4)?).ok()?;
+    let mut pixels = vec![0; len];
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&color);
+    }
+    Some(pixels)
+}
+
+fn clipped_surface_region(surface: &GdiBitmapEntry, rect: UiRect) -> Option<UiRect> {
+    rect.intersect(UiRect::new(0, 0, surface.width, surface.height))
+}
+
+fn fill_gdi_surface_region(surface: &mut GdiBitmapEntry, rect: UiRect, color: [u8; 4]) {
+    let Some(rect) = clipped_surface_region(surface, rect) else {
+        return;
+    };
+    for y in rect.top..rect.bottom {
+        for x in rect.left..rect.right {
+            let offset = ((y * surface.width + x) * 4) as usize;
+            unsafe {
+                std::ptr::copy_nonoverlapping(color.as_ptr(), surface.bits.add(offset), 4);
+            }
+        }
+    }
+}
+
+fn set_gdi_surface_alpha_region(surface: &mut GdiBitmapEntry, rect: UiRect, alpha: u8) {
+    let Some(rect) = clipped_surface_region(surface, rect) else {
+        return;
+    };
+    for y in rect.top..rect.bottom {
+        for x in rect.left..rect.right {
+            let offset = ((y * surface.width + x) * 4 + 3) as usize;
+            unsafe {
+                *surface.bits.add(offset) = alpha;
+            }
+        }
+    }
+}
+
+fn synthesize_transparent_region(
+    output: &mut GdiBitmapEntry,
+    black: &GdiBitmapEntry,
+    white: &GdiBitmapEntry,
+    rect: UiRect,
+) {
+    let Some(rect) = clipped_surface_region(output, rect) else {
+        return;
+    };
+    for y in rect.top..rect.bottom {
+        for x in rect.left..rect.right {
+            let offset = ((y * output.width + x) * 4) as usize;
+            unsafe {
+                let black_pixel = std::slice::from_raw_parts(black.bits.add(offset), 4);
+                let white_pixel = std::slice::from_raw_parts(white.bits.add(offset), 4);
+                let synthesized = synthesize_transparent_pixel(black_pixel, white_pixel);
+                let output_pixel = std::slice::from_raw_parts_mut(output.bits.add(offset), 4);
+                output_pixel.copy_from_slice(&synthesized);
+            }
+        }
+    }
+}
+
+fn synthesize_transparent_pixel(black: &[u8], white: &[u8]) -> [u8; 4] {
+    let backdrop = (0..3)
+        .map(|channel| white[channel].saturating_sub(black[channel]) as u16)
+        .sum::<u16>();
+    let alpha = 255_u8.saturating_sub(((backdrop + 1) / 3) as u8);
+    [
+        black[0].min(alpha),
+        black[1].min(alpha),
+        black[2].min(alpha),
+        alpha,
+    ]
+}
+
+fn draw_gdi_commands_clipped(hdc: HDC, commands: &[ScenePrimitive], clip: UiRect) {
+    let saved = unsafe { SaveDC(hdc) };
+    if saved == 0 {
+        return;
+    }
+    unsafe {
+        let _ = windows::Win32::Graphics::Gdi::IntersectClipRect(
+            hdc,
+            clip.left,
+            clip.top,
+            clip.right,
+            clip.bottom,
+        );
+    }
+    let clip_region = ClipRegion::new(clip);
+    for command in commands {
+        if clip_region.intersects(command) {
+            GdiRenderer::draw_command_clipped(hdc, command, Some(clip));
+        }
+    }
+    unsafe {
+        let _ = RestoreDC(hdc, saved);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct OverlayCacheKey {
     width: i32,
@@ -335,6 +545,18 @@ impl GdiRenderer {
     }
 
     pub fn draw_scene_clipped(hdc: HDC, list: &Scene, clip: Option<UiRect>) {
+        Self::draw_scene_clipped_scoped(hdc, list, clip, 0);
+    }
+
+    pub fn draw_scene_clipped_scoped(hdc: HDC, list: &Scene, clip: Option<UiRect>, scope: u64) {
+        GDI_COMPOSITING_LAYER_SCOPE.with(|current| current.set(scope));
+        let mut layer_ids = std::collections::HashSet::new();
+        collect_compositing_layer_ids(list.commands(), &mut layer_ids);
+        GDI_COMPOSITING_LAYERS.with(|layers| {
+            layers
+                .borrow_mut()
+                .retain(|key, _| key.scope != scope || layer_ids.contains(&key.id));
+        });
         let _clip_guard = ClipGuard::new(hdc, clip);
         let clip_region = clip.map(ClipRegion::new);
         for command in list.commands() {
@@ -367,6 +589,22 @@ impl GdiRenderer {
                 rect, source, fit, ..
             } => image::draw_ui_image(hdc, *rect, source, *fit),
             ScenePrimitive::Overlay { rect, style, .. } => draw_overlay(hdc, *rect, style),
+            ScenePrimitive::CompositingLayer {
+                id,
+                rect,
+                spec,
+                commands,
+                content_signature,
+                ..
+            } => draw_gdi_compositing_layer(
+                hdc,
+                id,
+                *rect,
+                clip,
+                *spec,
+                commands,
+                *content_signature,
+            ),
             ScenePrimitive::BackdropBlur { rect, style, .. } => {
                 draw_backdrop_blur(hdc, *rect, *style, clip)
             }
@@ -468,6 +706,166 @@ impl GdiRenderer {
             }
             ScenePrimitive::Glow { .. } => {}
         }
+    }
+}
+
+fn collect_compositing_layer_ids(
+    commands: &[ScenePrimitive],
+    ids: &mut std::collections::HashSet<UiId>,
+) {
+    for command in commands {
+        match command {
+            ScenePrimitive::CompositingLayer { id, commands, .. } => {
+                ids.insert(id.clone());
+                collect_compositing_layer_ids(commands, ids);
+            }
+            ScenePrimitive::StaticLayer { commands, .. }
+            | ScenePrimitive::ScrollRaster { commands, .. }
+            | ScenePrimitive::Clip { commands, .. }
+            | ScenePrimitive::ClipPath { commands, .. } => {
+                collect_compositing_layer_ids(commands, ids);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn draw_gdi_compositing_layer(
+    hdc: HDC,
+    id: &UiId,
+    rect: UiRect,
+    clip: Option<UiRect>,
+    spec: CompositingLayerSpec,
+    commands: &[ScenePrimitive],
+    content_signature: u64,
+) {
+    let width = rect.width().max(1);
+    let height = rect.height().max(1);
+    let key = GdiCompositingLayerKey {
+        scope: GDI_COMPOSITING_LAYER_SCOPE.with(Cell::get),
+        id: id.clone(),
+    };
+    let previous = GDI_COMPOSITING_LAYERS.with(|layers| layers.borrow_mut().remove(&key));
+    let mut layer = match previous {
+        Some(layer)
+            if layer.width == width
+                && layer.height == height
+                && layer.background == spec.background =>
+        {
+            layer
+        }
+        _ => {
+            let Some(layer) = GdiCompositingLayer::new(hdc, width, height, spec.background) else {
+                draw_gdi_compositing_layer_fallback(hdc, rect, clip, commands);
+                return;
+            };
+            layer
+        }
+    };
+
+    if layer.content_signature != Some(content_signature) {
+        let bounds = UiRect::new(0, 0, width, height);
+        let damage = if layer.commands.is_empty() {
+            vec![bounds]
+        } else {
+            compositing_layer_damage(&layer.commands, commands, bounds)
+        };
+        layer.redraw(commands, &damage);
+        layer.content_signature = Some(content_signature);
+        layer.commands = commands.to_vec();
+    }
+
+    let dest = match clip {
+        Some(clip) => {
+            let Some(dest) = rect.intersect(clip) else {
+                GDI_COMPOSITING_LAYERS.with(|layers| {
+                    layers.borrow_mut().insert(key, layer);
+                });
+                return;
+            };
+            dest
+        }
+        None => rect,
+    };
+    let source = UiRect::new(
+        dest.left - rect.left,
+        dest.top - rect.top,
+        dest.right - rect.left,
+        dest.bottom - rect.top,
+    );
+    unsafe {
+        if spec.opacity == 255 && layer.output.opaque {
+            record_gdi_frame_blit(
+                GdiFrameBlitSource::StaticLayer,
+                GdiFrameBlitKind::BitBlt,
+                dest,
+            );
+            let _ = BitBlt(
+                hdc,
+                dest.left,
+                dest.top,
+                dest.width(),
+                dest.height(),
+                Some(layer.output.memory_dc),
+                source.left,
+                source.top,
+                SRCCOPY,
+            );
+        } else {
+            record_gdi_frame_blit(
+                GdiFrameBlitSource::StaticLayer,
+                GdiFrameBlitKind::AlphaBlend,
+                dest,
+            );
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: spec.opacity,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+            let _ = AlphaBlend(
+                hdc,
+                dest.left,
+                dest.top,
+                dest.width(),
+                dest.height(),
+                layer.output.memory_dc,
+                source.left,
+                source.top,
+                source.width(),
+                source.height(),
+                blend,
+            );
+        }
+    }
+    GDI_COMPOSITING_LAYERS.with(|layers| {
+        layers.borrow_mut().insert(key, layer);
+    });
+}
+
+fn draw_gdi_compositing_layer_fallback(
+    hdc: HDC,
+    rect: UiRect,
+    clip: Option<UiRect>,
+    commands: &[ScenePrimitive],
+) {
+    let saved = unsafe { SaveDC(hdc) };
+    if saved == 0 {
+        return;
+    }
+    unsafe {
+        let _ = windows::Win32::Graphics::Gdi::SetViewportOrgEx(hdc, rect.left, rect.top, None);
+    }
+    let local_clip = clip
+        .and_then(|clip| rect.intersect(clip))
+        .map(|clip| clip.translate(-rect.left, -rect.top));
+    for command in commands {
+        if local_clip.is_none_or(|clip| ClipRegion::new(clip).intersects(command)) {
+            GdiRenderer::draw_command_clipped(hdc, command, local_clip);
+        }
+    }
+    unsafe {
+        let _ = RestoreDC(hdc, saved);
     }
 }
 
@@ -1517,6 +1915,77 @@ fn trace_custom_duration(label: &str, key: &str, duration: Duration) {
             "[ui-trace] {label}: key={key} {:.2}ms",
             duration.as_secs_f64() * 1000.0
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transparent_surface_reconstruction_preserves_black_and_partial_alpha() {
+        assert_eq!(
+            synthesize_transparent_pixel(&[0, 0, 0, 255], &[127, 127, 127, 255]),
+            [0, 0, 0, 128]
+        );
+        assert_eq!(
+            synthesize_transparent_pixel(&[0, 0, 128, 255], &[127, 127, 255, 255]),
+            [0, 0, 128, 128]
+        );
+    }
+
+    #[test]
+    fn transparent_surface_reconstruction_handles_clear_and_opaque_pixels() {
+        assert_eq!(
+            synthesize_transparent_pixel(&[0, 0, 0, 255], &[255, 255, 255, 255]),
+            [0, 0, 0, 0]
+        );
+        assert_eq!(
+            synthesize_transparent_pixel(&[10, 20, 30, 255], &[10, 20, 30, 255]),
+            [10, 20, 30, 255]
+        );
+    }
+
+    #[test]
+    fn transparent_gdi_layer_updates_only_changed_black_content() {
+        let seed = unsafe { CreateCompatibleDC(None) };
+        assert!(!seed.is_invalid());
+        let mut layer =
+            GdiCompositingLayer::new(seed, 32, 32, CompositingLayerBackground::Transparent)
+                .expect("create test layer");
+        let line = |id_value: &str, y| ScenePrimitive::Line {
+            id: UiId::owned(id_value.to_string()),
+            start: Point::new(4, y),
+            end: Point::new(24, y),
+            stroke: Stroke::new(Color::BLACK, 1, 255),
+            phase: lgui::core::RenderPhase::Content,
+        };
+        let previous = vec![line("black-line", 6)];
+        layer.redraw(&previous, &[UiRect::new(0, 0, 32, 32)]);
+        assert_eq!(surface_pixel(&layer.output, 12, 6), [0, 0, 0, 255]);
+        assert_eq!(surface_pixel(&layer.output, 12, 20), [0, 0, 0, 0]);
+
+        let next = vec![line("black-line", 20)];
+        let damage = compositing_layer_damage(
+            &previous,
+            &next,
+            UiRect::new(0, 0, layer.width, layer.height),
+        );
+        layer.redraw(&next, &damage);
+        assert_eq!(surface_pixel(&layer.output, 12, 6), [0, 0, 0, 0]);
+        assert_eq!(surface_pixel(&layer.output, 12, 20), [0, 0, 0, 255]);
+
+        unsafe {
+            let _ = DeleteDC(seed);
+        }
+    }
+
+    fn surface_pixel(surface: &GdiBitmapEntry, x: i32, y: i32) -> [u8; 4] {
+        let offset = ((y * surface.width + x) * 4) as usize;
+        unsafe {
+            let pixel = std::slice::from_raw_parts(surface.bits.add(offset), 4);
+            [pixel[0], pixel[1], pixel[2], pixel[3]]
+        }
     }
 }
 

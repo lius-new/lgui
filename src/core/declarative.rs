@@ -2,10 +2,10 @@ use std::{any::type_name, borrow::Cow, cell::Cell, panic::Location, sync::Arc};
 
 use super::reactor::RenderCx;
 use super::{
-    AnimProperty, AnimationBinding, Color, ComponentId, EventPolicy, InteractionRole, LayoutSpec,
-    RenderPhase, Size, TextStyle, UiElement, UiEventContext, UiEventHandler, UiEventKind,
-    UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect,
-    UiRenderContext, UiScope, VisualStyle,
+    AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerSpec, EventPolicy,
+    InteractionRole, LayoutSpec, RenderPhase, Size, TextStyle, UiElement, UiEventContext,
+    UiEventHandler, UiEventKind, UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler,
+    UiPath, UiRect, UiRenderContext, UiScope, VisualStyle,
 };
 
 // Declarative core shell only: this layer owns tree identity and composition,
@@ -541,6 +541,12 @@ impl ElementKey {
 pub fn group(rect: UiRect) -> Element {
     Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
         UiElement::group(cx.id, rect).children(cx.children)
+    })
+}
+
+pub fn compositing_layer(rect: UiRect, spec: CompositingLayerSpec) -> Element {
+    Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+        UiElement::compositing_layer(cx.id, rect, spec).children(cx.children)
     })
 }
 

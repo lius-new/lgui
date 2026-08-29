@@ -860,6 +860,21 @@ fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimiti
             style: style.clone(),
             phase: *phase,
         },
+        ScenePrimitive::CompositingLayer {
+            id,
+            rect,
+            spec,
+            commands,
+            content_signature,
+            phase,
+        } => ScenePrimitive::CompositingLayer {
+            id: id.clone(),
+            rect: translate_rect(*rect),
+            spec: *spec,
+            commands: commands.clone(),
+            content_signature: *content_signature,
+            phase: *phase,
+        },
         ScenePrimitive::StaticLayer {
             id,
             rect,

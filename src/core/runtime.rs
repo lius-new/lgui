@@ -4,7 +4,7 @@ use super::{
     InputEvent, KeyCode, UiAction, UiActionEvent, UiEvent, UiEventDispatcher, UiEventPayload,
     UiHandlerEvent, UiId, UiRect, UiTaskSpawner, UiUpdateQueue, UiWake,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 const FOCUS_TRAVERSAL_ACTION: &str = "ui.focus.traverse";
@@ -46,8 +46,6 @@ pub struct UiRuntime {
     effects: EffectRegistry,
     dirty: DirtyTracker,
     frame_interval_ms: Option<u64>,
-    previous_bounds: HashMap<UiId, UiRect>,
-    current_tree: HostTree,
 }
 
 impl UiRuntime {
@@ -114,14 +112,14 @@ impl UiRuntime {
         self.task_spawner.as_ref()
     }
 
-    pub fn apply_pending_updates(&mut self) -> PendingUpdateOutput {
+    pub fn apply_pending_updates(&mut self, tree: &HostTree) -> PendingUpdateOutput {
         let dirty = self
             .hook_updates
             .apply(&self.hook_states, &self.component_tree);
         let focus_changed = self
             .hook_updates
             .take_focus_request()
-            .is_some_and(|target| self.focus_node(&target));
+            .is_some_and(|target| self.focus_node(tree, &target));
         if focus_changed {
             // The caller schedules focus damage from PendingUpdateOutput. Do not leak the same
             // dirty event into the next unrelated native input pass.
@@ -168,13 +166,10 @@ impl UiRuntime {
 
     pub(crate) fn suspend_rendering(&mut self) {
         self.clear_interaction_state();
-        self.previous_bounds.clear();
-        self.current_tree = HostTree::new();
         self.dirty = DirtyTracker::default();
     }
 
     pub fn handle_input(&mut self, tree: &HostTree, input: InputEvent) -> RuntimeOutput {
-        self.reconcile_tree(tree);
         let focus_traversal = match &input {
             InputEvent::KeyDown {
                 key: KeyCode::Tab,
@@ -356,7 +351,6 @@ impl UiRuntime {
     }
 
     pub fn advance(&mut self, tree: &HostTree, elapsed_ms: f32) -> RuntimeOutput {
-        self.reconcile_tree(tree);
         let animation_changed = self.animations.advance(elapsed_ms);
         let mut frame_interval_ms = animation_changed.then_some(16);
         let animation_ids = self.animations.take_dirty_ids();
@@ -398,12 +392,15 @@ impl UiRuntime {
         }
     }
 
-    pub fn handle_default_action(&mut self, pending: UiDefaultAction) -> RuntimeOutput {
-        let tree = self.current_tree.clone();
+    pub fn handle_default_action(
+        &mut self,
+        tree: &HostTree,
+        pending: UiDefaultAction,
+    ) -> RuntimeOutput {
         if pending.action.id().as_str() == FOCUS_TRAVERSAL_ACTION {
             let events = self
                 .events
-                .focus_adjacent(&tree, pending.action.payload_value() == Some("reverse"));
+                .focus_adjacent(tree, pending.action.payload_value() == Some("reverse"));
             let handler_events = events
                 .iter()
                 .flat_map(|event| tree.handler_events(event))
@@ -411,13 +408,13 @@ impl UiRuntime {
             for event in events.iter().cloned() {
                 self.dirty.mark_event(event);
             }
-            self.mark_component_owners(&tree, events.iter().flat_map(interaction_state_target_ids));
+            self.mark_component_owners(tree, events.iter().flat_map(interaction_state_target_ids));
             let animation_changed =
-                apply_events_to_animations(&tree, &mut self.animations, events.iter().cloned());
+                apply_events_to_animations(tree, &mut self.animations, events.iter().cloned());
             if animation_changed {
-                self.mark_component_owners(&tree, events.iter().flat_map(event_target_ids));
+                self.mark_component_owners(tree, events.iter().flat_map(event_target_ids));
             }
-            let dirty_bounds = self.dirty.take().bounds(&tree);
+            let dirty_bounds = self.dirty.take().bounds(tree);
             return RuntimeOutput {
                 events,
                 handler_events,
@@ -430,7 +427,7 @@ impl UiRuntime {
         }
         let mut action_events = Vec::new();
         let (_, changed, route_changed) = self.apply_component_action(
-            &tree,
+            tree,
             &pending.action_target,
             &pending.action,
             &mut action_events,
@@ -447,7 +444,7 @@ impl UiRuntime {
             .flatten()
             .into_iter()
             .collect();
-        let dirty_bounds = self.dirty.take().bounds(&tree);
+        let dirty_bounds = self.dirty.take().bounds(tree);
         RuntimeOutput {
             events: Vec::new(),
             handler_events,
@@ -542,35 +539,17 @@ impl UiRuntime {
         true
     }
 
-    pub fn focus_node(&mut self, id: &UiId) -> bool {
-        let events = self.events.focus_node(&self.current_tree, id);
+    pub fn focus_node(&mut self, tree: &HostTree, id: &UiId) -> bool {
+        let events = self.events.focus_node(tree, id);
         if events.is_empty() {
             return false;
         }
-        self.mark_component_owners(&self.current_tree, events.iter().flat_map(event_target_ids));
+        self.mark_component_owners(tree, events.iter().flat_map(event_target_ids));
         for event in &events {
             self.dirty.mark_event(event.clone());
         }
-        apply_events_to_animations(&self.current_tree, &mut self.animations, events);
+        apply_events_to_animations(tree, &mut self.animations, events);
         true
-    }
-
-    pub fn reconcile_tree(&mut self, tree: &HostTree) {
-        self.current_tree = tree.clone();
-        let mut next_bounds = HashMap::new();
-        for node in tree.nodes() {
-            next_bounds.insert(node.id.clone(), node.paint_bounds);
-        }
-        for (id, old_bounds) in &self.previous_bounds {
-            match next_bounds.get(id) {
-                Some(new_bounds) if new_bounds != old_bounds => {
-                    self.dirty.mark_rect(old_bounds.union(*new_bounds));
-                }
-                None => self.dirty.mark_rect(*old_bounds),
-                _ => {}
-            }
-        }
-        self.previous_bounds = next_bounds;
     }
 
     fn mark_component_owners<'a>(&self, tree: &HostTree, ids: impl IntoIterator<Item = &'a UiId>) {
@@ -906,8 +885,7 @@ mod tests {
             );
         }
         let mut runtime = UiRuntime::new();
-        runtime.reconcile_tree(&base_tree);
-        assert!(runtime.focus_node(&background));
+        assert!(runtime.focus_node(&base_tree, &background));
 
         assert!(runtime.sync_tree_focus(&modal_tree));
         assert_eq!(runtime.interaction_state().focused, Some(first.clone()));
@@ -921,7 +899,7 @@ mod tests {
         );
         assert_eq!(runtime.interaction_state().focused, Some(first));
         assert_eq!(output.default_actions.len(), 1);
-        runtime.handle_default_action(output.default_actions[0].clone());
+        runtime.handle_default_action(&modal_tree, output.default_actions[0].clone());
         assert_eq!(runtime.interaction_state().focused, Some(second));
 
         assert!(runtime.sync_tree_focus(&base_tree));
@@ -954,8 +932,7 @@ mod tests {
                     .interaction(InteractionRole::Button),
             );
         }
-        runtime.reconcile_tree(&tree);
-        assert!(runtime.focus_node(&first));
+        assert!(runtime.focus_node(&tree, &first));
 
         {
             let components = runtime.component_tree();
@@ -973,7 +950,7 @@ mod tests {
                 modifiers: super::super::KeyModifiers::default(),
             },
         );
-        runtime.handle_default_action(output.default_actions[0].clone());
+        runtime.handle_default_action(&tree, output.default_actions[0].clone());
 
         assert_eq!(runtime.interaction_state().focused, Some(second));
         assert!(runtime.component_tree().is_dirty(owner));
@@ -991,8 +968,7 @@ mod tests {
                 }),
         );
         let mut runtime = UiRuntime::new();
-        runtime.reconcile_tree(&tree);
-        assert!(runtime.focus_node(&id));
+        assert!(runtime.focus_node(&tree, &id));
 
         let output = runtime.handle_input(
             &tree,
@@ -1020,10 +996,8 @@ mod tests {
         let target = UiId::new("queued-focus-target");
         let tree = interactive_button_tree(target.clone());
         let mut runtime = UiRuntime::new();
-        runtime.reconcile_tree(&tree);
-
         runtime.hook_updates().request_focus(target.clone());
-        let output = runtime.apply_pending_updates();
+        let output = runtime.apply_pending_updates(&tree);
 
         assert!(output.focus_changed);
         assert_eq!(runtime.interaction_state().focused, Some(target));
@@ -1048,11 +1022,11 @@ mod tests {
             },
         );
         for action in output.default_actions {
-            runtime.handle_default_action(action);
+            runtime.handle_default_action(&tree, action);
         }
         let output = runtime.handle_input(&tree, InputEvent::PointerMove(Point::new(180, 10)));
         for action in output.default_actions {
-            runtime.handle_default_action(action);
+            runtime.handle_default_action(&tree, action);
         }
         let output = runtime.handle_input(
             &tree,
@@ -1062,7 +1036,7 @@ mod tests {
             },
         );
         for action in output.default_actions {
-            runtime.handle_default_action(action);
+            runtime.handle_default_action(&tree, action);
         }
 
         let points = runtime
@@ -1114,7 +1088,7 @@ mod tests {
             .find(|pending| pending.action.id().as_str() == "component.choose")
             .expect("component click action")
             .clone();
-        let output = runtime.handle_default_action(action);
+        let output = runtime.handle_default_action(&tree, action);
         assert_eq!(output.action_events.len(), 1);
         assert_eq!(output.action_events[0].target, component_id);
         assert_eq!(
@@ -1148,16 +1122,18 @@ mod tests {
             )
             .component_owner(owner),
         );
-        runtime.reconcile_tree(&tree);
         runtime
             .component_states()
             .with_mut(&target, |_state: &mut SemanticActionState| {});
 
-        let output = runtime.handle_default_action(UiDefaultAction {
-            event_target: target.clone(),
-            action_target: target,
-            action: UiAction::new("component.choose"),
-        });
+        let output = runtime.handle_default_action(
+            &tree,
+            UiDefaultAction {
+                event_target: target.clone(),
+                action_target: target,
+                action: UiAction::new("component.choose"),
+            },
+        );
 
         assert!(output.animation_changed);
         assert_eq!(output.dirty_bounds, Some(UiRect::new(20, 30, 120, 70)));
@@ -1212,15 +1188,14 @@ mod tests {
         runtime
             .component_states()
             .with_mut(&input_id, |_state: &mut InputActionState| {});
-        runtime.reconcile_tree(&tree);
         let action = UiDefaultAction {
             event_target: input_id.clone(),
             action_target: input_id,
             action: UiAction::new("text.input").payload("value"),
         };
 
-        let changed = runtime.handle_default_action(action.clone());
-        let unchanged = runtime.handle_default_action(action);
+        let changed = runtime.handle_default_action(&tree, action.clone());
+        let unchanged = runtime.handle_default_action(&tree, action);
 
         assert_eq!(changed.handler_events.len(), 1);
         assert!(unchanged.handler_events.is_empty());

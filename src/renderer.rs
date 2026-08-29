@@ -8,6 +8,7 @@ pub use crate::platform::win32::enhanced::static_layer::{
 #[cfg(feature = "advanced-rendering")]
 pub fn clear_render_caches() {
     crate::platform::win32::enhanced::static_layer::clear_static_layer_memory_cache();
+    crate::platform::win32::enhanced::clear_gdi_renderer_caches();
     crate::platform::win32::enhanced::blur::clear_blur_caches();
     crate::assets::clear_image_caches();
 }
@@ -55,7 +56,7 @@ impl ClipRegion {
     }
 
     pub fn intersects(self, command: &ScenePrimitive) -> bool {
-        command.rect().intersect(self.rect).is_some()
+        command.paint_bounds().intersect(self.rect).is_some()
     }
 
     pub fn intersection(self, rect: UiRect) -> Option<UiRect> {

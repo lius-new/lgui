@@ -38,6 +38,21 @@ The GDI and Direct2D factories implement the same Win32 Application renderer con
 custom paint, overlays, backdrop blur, static layers, and scroll rasters. Direct2D owns its
 D3D11/DXGI/DirectComposition resources and recreates them after resize or presentation failure.
 
+`CompositingLayer` is the backend-neutral retained composition boundary. Its descendants compile
+into layer-local coordinates and remain in the normal layout, input, accessibility, and popup
+trees. The Host keeps the layer as one scene root while still calculating window damage from the
+changed descendants. Renderers compare stable command identities to calculate layer-local damage;
+movement, insertion, removal, reordering, nested layers, clips, and DPI projection therefore do
+not require an unrelated sibling layer to repaint. Popup descendants escape a regular layer and
+remain at the top of scene order.
+
+GDI stores each live layer in renderer-scoped DIB surfaces and releases them with the renderer.
+Transparent GDI layers use black/white coverage reconstruction so black content, partial alpha,
+text, and antialiased edges preserve premultiplied alpha. Direct2D stores each layer in an
+`ID2D1Bitmap1`; both backends clear and redraw only layer-local damage and composite only the
+intersection with window damage. Size or background-mode changes recreate a surface, opacity-only
+changes reuse its pixels, and removed layers are pruned before drawing.
+
 ## Features
 
 `--no-default-features` is portable and does not compile Windows, Tokio, images, SVG, or

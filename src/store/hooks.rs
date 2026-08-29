@@ -374,7 +374,10 @@ mod tests {
         assert_eq!(executions.load(Ordering::SeqCst), 1);
 
         stores.update_defined(COUNTER, "label", |store| store.label = "renamed");
-        assert!(ui.apply_pending_updates().dirty_ids.is_empty());
+        assert!(ui
+            .apply_pending_updates(&crate::core::HostTree::new())
+            .dirty_ids
+            .is_empty());
         mount(
             &ui,
             context.clone(),
@@ -390,7 +393,12 @@ mod tests {
             .expect("counter action missing");
         increment.call();
         increment.call();
-        assert_eq!(ui.apply_pending_updates().dirty_ids.len(), 1);
+        assert_eq!(
+            ui.apply_pending_updates(&crate::core::HostTree::new())
+                .dirty_ids
+                .len(),
+            1
+        );
         mount(&ui, context, Arc::clone(&executions), Arc::clone(&action));
 
         assert_eq!(executions.load(Ordering::SeqCst), 2);

@@ -200,7 +200,7 @@ mod tests {
             output,
             &ApplicationContext::empty(),
             &WindowId::new("test"),
-            |action| runtime.handle_default_action(action),
+            |action| runtime.handle_default_action(&tree, action),
             |_| {},
         );
 

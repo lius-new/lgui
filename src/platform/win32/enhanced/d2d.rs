@@ -44,9 +44,10 @@ use super::{
     static_layer_raster_cache,
 };
 use lgui::core::{
-    Color, CustomPaintStyle, IconStyle, ImageFit, OverlayStyle, PathStyle, Scene, ScenePrimitive,
-    StaticLayerBackground, StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke,
-    TextAlign, UiId, UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
+    compositing_layer_damage, Color, CompositingLayerBackground, CustomPaintStyle, IconStyle,
+    ImageFit, OverlayStyle, PathStyle, Scene, ScenePrimitive, StaticLayerBackground,
+    StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke, TextAlign, UiId,
+    UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
 };
 use lgui::platform::win32::render_trace::{self as trace, TraceCategory};
 use lgui::platform::win32::{apply_dwrite_font_fallback, ui_font_family};
@@ -57,6 +58,16 @@ pub struct D2dRenderer {
     scene_bitmap: ID2D1Bitmap1,
     bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
     frame_bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
+    compositing_layers: HashMap<UiId, D2dCompositingLayer>,
+}
+
+struct D2dCompositingLayer {
+    content_signature: Option<u64>,
+    background: CompositingLayerBackground,
+    width: i32,
+    height: i32,
+    bitmap: ID2D1Bitmap1,
+    commands: Vec<ScenePrimitive>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -111,11 +122,13 @@ impl D2dRenderer {
             scene_bitmap,
             bitmap_cache: HashMap::new(),
             frame_bitmap_cache: HashMap::new(),
+            compositing_layers: HashMap::new(),
         })
     }
 
     pub fn draw_scene_full(&mut self, list: &Scene) -> Result<()> {
         self.frame_bitmap_cache.clear();
+        self.retain_compositing_layers(list);
         self.ensure_static_layer_cache(list, None)?;
         unsafe {
             self.context.SetTarget(&self.scene_bitmap);
@@ -129,6 +142,7 @@ impl D2dRenderer {
 
     pub fn draw_scene_dirty(&mut self, list: &Scene, rects: &[UiRect]) -> Result<()> {
         self.frame_bitmap_cache.clear();
+        self.retain_compositing_layers(list);
         for rect in rects {
             self.ensure_static_layer_cache(list, Some(*rect))?;
         }
@@ -207,6 +221,12 @@ impl D2dRenderer {
         Ok(())
     }
 
+    fn retain_compositing_layers(&mut self, list: &Scene) {
+        let mut live = std::collections::HashSet::new();
+        collect_compositing_layer_ids(list.commands(), &mut live);
+        self.compositing_layers.retain(|id, _| live.contains(id));
+    }
+
     fn ensure_static_layer_command(
         &mut self,
         command: &ScenePrimitive,
@@ -220,6 +240,49 @@ impl D2dRenderer {
             return Ok(());
         }
         match command {
+            ScenePrimitive::CompositingLayer {
+                id,
+                rect,
+                spec,
+                commands,
+                content_signature,
+                ..
+            } => {
+                for command in commands {
+                    self.ensure_static_layer_command(command, None)?;
+                }
+                let width = rect.width().max(1);
+                let height = rect.height().max(1);
+                let previous = self.compositing_layers.remove(id);
+                let mut layer = match previous {
+                    Some(layer)
+                        if layer.width == width
+                            && layer.height == height
+                            && layer.background == spec.background =>
+                    {
+                        layer
+                    }
+                    _ => create_compositing_layer(self, width, height, spec.background)?,
+                };
+                if layer.content_signature != Some(*content_signature) {
+                    let bounds = UiRect::new(0, 0, width, height);
+                    let damage = if layer.commands.is_empty() {
+                        vec![bounds]
+                    } else {
+                        compositing_layer_damage(&layer.commands, commands, bounds)
+                    };
+                    redraw_compositing_layer(
+                        self,
+                        &layer.bitmap,
+                        spec.background,
+                        commands,
+                        &damage,
+                    )?;
+                    layer.content_signature = Some(*content_signature);
+                    layer.commands = commands.clone();
+                }
+                self.compositing_layers.insert(id.clone(), layer);
+            }
             ScenePrimitive::StaticLayer {
                 id,
                 rect,
@@ -284,6 +347,27 @@ impl D2dRenderer {
     }
 }
 
+fn collect_compositing_layer_ids(
+    commands: &[ScenePrimitive],
+    ids: &mut std::collections::HashSet<UiId>,
+) {
+    for command in commands {
+        match command {
+            ScenePrimitive::CompositingLayer { id, commands, .. } => {
+                ids.insert(id.clone());
+                collect_compositing_layer_ids(commands, ids);
+            }
+            ScenePrimitive::StaticLayer { commands, .. }
+            | ScenePrimitive::ScrollRaster { commands, .. }
+            | ScenePrimitive::Clip { commands, .. }
+            | ScenePrimitive::ClipPath { commands, .. } => {
+                collect_compositing_layer_ids(commands, ids);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn draw_scene_d2d(resources: &mut D2dRenderer, list: &Scene, clip: Option<UiRect>) -> Result<()> {
     draw_commands_d2d(resources, list.commands(), clip)
 }
@@ -332,6 +416,13 @@ fn draw_command_d2d(resources: &mut D2dRenderer, command: &ScenePrimitive) -> Re
             rect, key, style, ..
         } => draw_icon(resources, *rect, key, *style),
         ScenePrimitive::Overlay { rect, style, .. } => draw_overlay(resources, *rect, style),
+        ScenePrimitive::CompositingLayer { id, rect, spec, .. } => {
+            let Some(layer) = resources.compositing_layers.get(id) else {
+                return Ok(());
+            };
+            draw_bitmap_opacity(&resources.context, *rect, &layer.bitmap, spec.opacity_f32());
+            Ok(())
+        }
         ScenePrimitive::BackdropBlur { rect, style, .. } => {
             draw_backdrop_blur(resources, *rect, *style)
         }
@@ -663,6 +754,69 @@ fn draw_icon(
     Ok(())
 }
 
+fn create_compositing_layer(
+    resources: &mut D2dRenderer,
+    width: i32,
+    height: i32,
+    background: CompositingLayerBackground,
+) -> Result<D2dCompositingLayer> {
+    let bitmap = create_scene_bitmap(&resources.context, width, height)?;
+    Ok(D2dCompositingLayer {
+        content_signature: None,
+        background,
+        width,
+        height,
+        bitmap,
+        commands: Vec::new(),
+    })
+}
+
+fn redraw_compositing_layer(
+    resources: &mut D2dRenderer,
+    bitmap: &ID2D1Bitmap1,
+    background: CompositingLayerBackground,
+    commands: &[ScenePrimitive],
+    damage: &[UiRect],
+) -> Result<()> {
+    if damage.is_empty() {
+        return Ok(());
+    }
+    let clear = match background {
+        CompositingLayerBackground::Opaque => opaque_black(),
+        CompositingLayerBackground::Transparent => transparent(),
+    };
+    unsafe {
+        resources.context.SetTarget(bitmap);
+        resources.context.BeginDraw();
+    }
+    let mut draw_result = Ok(());
+    for rect in damage {
+        let clip = d2d_rect(*rect);
+        unsafe {
+            resources
+                .context
+                .PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED);
+            resources.context.Clear(Some(&clear));
+        }
+        if let Err(error) = draw_commands_d2d(resources, commands, Some(*rect)) {
+            draw_result = Err(error);
+        }
+        unsafe {
+            resources.context.PopAxisAlignedClip();
+        }
+        if draw_result.is_err() {
+            break;
+        }
+    }
+    let end_result = unsafe { resources.context.EndDraw(None, None) };
+    unsafe {
+        resources.context.SetTarget(&resources.scene_bitmap);
+    }
+    draw_result?;
+    end_result?;
+    Ok(())
+}
+
 fn draw_static_layer(
     resources: &mut D2dRenderer,
     id: &UiId,
@@ -920,6 +1074,21 @@ fn translate_command(command: &ScenePrimitive, dx: i32, dy: i32) -> ScenePrimiti
             id: id.clone(),
             rect: translate_rect(*rect),
             style: style.clone(),
+            phase: *phase,
+        },
+        ScenePrimitive::CompositingLayer {
+            id,
+            rect,
+            spec,
+            commands,
+            content_signature,
+            phase,
+        } => ScenePrimitive::CompositingLayer {
+            id: id.clone(),
+            rect: translate_rect(*rect),
+            spec: *spec,
+            commands: commands.clone(),
+            content_signature: *content_signature,
             phase: *phase,
         },
         ScenePrimitive::StaticLayer {

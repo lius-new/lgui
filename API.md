@@ -78,6 +78,14 @@ it is supplied through `Application::provide` and scoped to the window render op
 font, icon, image-cache, render-cache, clipboard, desktop, notification, tray, and diagnostics
 APIs do not expose Win32 types.
 
+Use `compositing_layer(rect, CompositingLayerSpec::new())` when a subtree must retain and update
+its paint independently from siblings. Child coordinates remain declarative window coordinates;
+scene compilation converts them to layer-local coordinates. `.opaque()` gives the surface an
+opaque black base and enables copy composition, while `.transparent()` preserves alpha and is the
+default. `.opacity(value)` controls composition opacity without invalidating retained content.
+Layers may be nested, and popup-phase descendants automatically escape a regular layer. This is a
+general rendering boundary for static or changing content, not an animation-specific component.
+
 ## Async Work
 
 `cx.spawn` and event-context task APIs accept ordinary Futures through the configured `UiExecutor`.

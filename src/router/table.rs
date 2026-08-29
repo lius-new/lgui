@@ -982,7 +982,10 @@ mod tests {
         assert_eq!(feed_renders.load(Ordering::SeqCst), 1);
 
         router.navigate(Location::new("/community/events"));
-        assert!(!ui.apply_pending_updates().dirty_ids.is_empty());
+        assert!(!ui
+            .apply_pending_updates(&crate::core::HostTree::new())
+            .dirty_ids
+            .is_empty());
         mount_nested_router(&ui, application, routes);
         ui.run_effects();
 
@@ -1005,7 +1008,7 @@ mod tests {
         ui.run_effects();
 
         router.navigate(Location::new("/dialog"));
-        let updates = ui.apply_pending_updates();
+        let updates = ui.apply_pending_updates(&crate::core::HostTree::new());
 
         assert!(!updates.dirty_ids.is_empty());
         assert_eq!(
@@ -1128,7 +1131,10 @@ mod tests {
         mount_nested_router(&ui, application.clone(), routes.clone());
         ui.run_effects();
         router.navigate(Location::new("/dialog"));
-        assert!(!ui.apply_pending_updates().dirty_ids.is_empty());
+        assert!(!ui
+            .apply_pending_updates(&crate::core::HostTree::new())
+            .dirty_ids
+            .is_empty());
         mount_nested_router(&ui, application, routes);
 
         assert_eq!(metadata_renders.load(Ordering::SeqCst), 2);

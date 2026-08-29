@@ -1,11 +1,11 @@
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use super::{
-    ActionId, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CustomPaintStyle, IconStyle,
-    ImageFit, LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec, StaticLayerSpec,
-    TextStyle, UiAction, UiActionBinding, UiActionHandler, UiEventContext, UiEventHandler,
-    UiEventKind, UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect,
-    VisualStyle,
+    ActionId, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
+    CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, RenderPhase,
+    ScrollRasterSpec, StaticLayerSpec, TextStyle, UiAction, UiActionBinding, UiActionHandler,
+    UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId, UiInputEventBinding,
+    UiInputEventHandler, UiPath, UiRect, VisualStyle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +26,7 @@ pub enum UiNodeKind {
     Button,
     Table,
     TableRow,
+    CompositingLayer,
     StaticLayer,
     ScrollRaster,
     Clip,
@@ -136,6 +137,7 @@ pub struct UiNode {
     pub backdrop_blur_style: Option<BackdropBlurStyle>,
     pub overlay_style: Option<OverlayStyle>,
     pub custom_style: Option<CustomPaintStyle>,
+    pub compositing_layer: Option<CompositingLayerSpec>,
     pub static_layer: Option<StaticLayerSpec>,
     pub scroll_raster: Option<ScrollRasterSpec>,
     pub clip_rect: Option<UiRect>,
@@ -182,6 +184,7 @@ impl UiNode {
             backdrop_blur_style: None,
             overlay_style: None,
             custom_style: None,
+            compositing_layer: None,
             static_layer: None,
             scroll_raster: None,
             clip_rect: None,
@@ -191,6 +194,41 @@ impl UiNode {
             render_phase: RenderPhase::Content,
             children: Vec::new(),
         }
+    }
+
+    pub(crate) fn projection_eq(&self, other: &Self) -> bool {
+        self.parent == other.parent
+            && self.kind == other.kind
+            && self.layout_rect == other.layout_rect
+            && self.hit_rect == other.hit_rect
+            && self.paint_bounds == other.paint_bounds
+            && self.interaction == other.interaction
+            && self.event_policy == other.event_policy
+            && self.auto_focus == other.auto_focus
+            && self.focus_scope == other.focus_scope
+            && self.animation_bindings == other.animation_bindings
+            && self.animation_targets == other.animation_targets
+            && self.animation_outset == other.animation_outset
+            && self.layout == other.layout
+            && self.style == other.style
+            && self.path == other.path
+            && self.path_style == other.path_style
+            && self.image_source == other.image_source
+            && self.image_fit == other.image_fit
+            && self.icon_key == other.icon_key
+            && self.icon_style == other.icon_style
+            && self.glow == other.glow
+            && self.backdrop_blur_style == other.backdrop_blur_style
+            && self.overlay_style == other.overlay_style
+            && self.custom_style == other.custom_style
+            && self.compositing_layer == other.compositing_layer
+            && self.static_layer == other.static_layer
+            && self.scroll_raster == other.scroll_raster
+            && self.clip_rect == other.clip_rect
+            && self.content_offset == other.content_offset
+            && self.text == other.text
+            && self.text_style == other.text_style
+            && self.render_phase == other.render_phase
     }
 
     pub fn parent(mut self, parent: UiId) -> Self {
@@ -408,6 +446,11 @@ impl UiNode {
 
     pub fn static_layer(mut self, spec: StaticLayerSpec) -> Self {
         self.static_layer = Some(spec);
+        self
+    }
+
+    pub fn compositing_layer(mut self, spec: CompositingLayerSpec) -> Self {
+        self.compositing_layer = Some(spec);
         self
     }
 

@@ -1,7 +1,10 @@
 use std::{
     collections::VecDeque,
+    sync::Arc,
     time::{Duration, Instant},
 };
+
+use crate::core::{HostTree, UiRect};
 
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
 #[derive(Clone, Debug, Default)]
@@ -87,6 +90,14 @@ pub enum DiagnosticPresentMode {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameRenderMetrics {
     pub build_host_tree_ms: f32,
+    pub pending_updates_ms: f32,
+    pub prepare_render_ms: f32,
+    pub retained_snapshot_ms: f32,
+    pub declarative_mount_ms: f32,
+    pub focus_animation_sync_ms: f32,
+    pub runtime_reconcile_ms: f32,
+    pub layout_ms: f32,
+    pub host_commit_ms: f32,
     pub scene_ms: f32,
     pub metadata_ms: f32,
     pub snapshot_ms: f32,
@@ -181,7 +192,24 @@ pub trait DiagnosticsProvider: Send + Sync {
 }
 
 pub trait DiagnosticsSink: Send + Sync {
-    fn record(&self, sample: &FrameSample);
+    fn record(&self, sample: FrameSample, tree: &HostTree, viewport: UiRect);
+}
+
+#[derive(Clone)]
+pub(crate) struct DiagnosticsRegistration {
+    sink: Arc<dyn DiagnosticsSink>,
+}
+
+impl DiagnosticsRegistration {
+    pub(crate) fn new(sink: impl DiagnosticsSink + 'static) -> Self {
+        Self {
+            sink: Arc::new(sink),
+        }
+    }
+
+    pub(crate) fn record(&self, sample: FrameSample, tree: &HostTree, viewport: UiRect) {
+        self.sink.record(sample, tree, viewport);
+    }
 }
 
 pub struct FrameCollector {
@@ -259,6 +287,15 @@ fn percentile(values: impl Iterator<Item = f32>, percentile: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingSink(Arc<AtomicUsize>);
+
+    impl DiagnosticsSink for CountingSink {
+        fn record(&self, _sample: FrameSample, _tree: &HostTree, _viewport: UiRect) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     fn sample(index: u64, total_ms: f32, mode: DiagnosticPresentMode) -> FrameSample {
         FrameSample {
@@ -297,5 +334,19 @@ mod tests {
             collector.query(DiagnosticsQuery::recent(1))[0].frame_index,
             3
         );
+    }
+
+    #[test]
+    fn diagnostics_registration_forwards_the_current_tree_and_frame() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let registration = DiagnosticsRegistration::new(CountingSink(Arc::clone(&count)));
+
+        registration.record(
+            sample(1, 2.0, DiagnosticPresentMode::Dirty),
+            &HostTree::new(),
+            UiRect::new(0, 0, 100, 80),
+        );
+
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 }

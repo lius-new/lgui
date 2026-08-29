@@ -107,11 +107,9 @@ impl HostTreeBuilder {
                 self.fresh_owners.insert(boundary.id);
             }
         }
+        node.children = previous_children.clone();
         if retain_children {
             self.projection_metrics.reused_component_roots += 1;
-            node.children = previous_children.clone();
-        } else {
-            node.children.clear();
         }
         if let Some(owner) = node.component_owner {
             self.seen_by_owner
@@ -124,21 +122,16 @@ impl HostTreeBuilder {
         } else {
             self.tree.push(node);
         }
-        if let Some(parent) = self.parent_stack.last() {
-            self.tree.attach_child(parent, id.clone());
-        }
         if !retain_children {
             self.parent_stack.push(id.clone());
-            for child in children.iter().cloned() {
-                self.mount_element(child);
-            }
+            let next_children = children
+                .iter()
+                .cloned()
+                .map(|child| self.mount_element(child))
+                .collect::<Vec<_>>();
             self.parent_stack.pop();
-            let next_children = self
-                .tree
-                .node(&id)
-                .map(|current| current.children.clone())
-                .unwrap_or_default();
             self.structure_changed |= previous_children != next_children;
+            self.tree.set_children(&id, next_children);
         }
         id
     }
@@ -426,16 +419,40 @@ mod tests {
     fn clean_component_reuses_its_retained_host_subtree_without_visiting_descendants() {
         let runtime = UiRuntime::new();
         let executions = Arc::new(AtomicUsize::new(0));
-        let (tree, first) = mount_retained(&runtime, HostTree::new(), Arc::clone(&executions), 1);
+        let (mut tree, first) =
+            mount_retained(&runtime, HostTree::new(), Arc::clone(&executions), 1);
         assert_eq!(tree.nodes().len(), 3);
         assert_eq!(first.visited_nodes, 3);
+        tree.take_projection_changes();
 
-        let (tree, second) = mount_retained(&runtime, tree, Arc::clone(&executions), 1);
+        let (mut tree, second) = mount_retained(&runtime, tree, Arc::clone(&executions), 1);
+        let changes = tree.take_projection_changes();
 
         assert_eq!(tree.nodes().len(), 3);
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(second.visited_nodes, 1);
         assert_eq!(second.reused_component_roots, 1);
+        assert!(changes.changed.is_empty());
+        assert!(changes.removed.is_empty());
+        assert!(!changes.structure_changed);
+    }
+
+    #[test]
+    fn identical_dirty_component_does_not_report_projection_changes() {
+        let runtime = UiRuntime::new();
+        let executions = Arc::new(AtomicUsize::new(0));
+        let (mut tree, _) = mount_retained(&runtime, HostTree::new(), Arc::clone(&executions), 1);
+        tree.take_projection_changes();
+        runtime.component_tree().mark_all_dirty();
+
+        let (mut tree, metrics) = mount_retained(&runtime, tree, Arc::clone(&executions), 1);
+        let changes = tree.take_projection_changes();
+
+        assert_eq!(executions.load(Ordering::SeqCst), 2);
+        assert_eq!(metrics.visited_nodes, 3);
+        assert!(changes.changed.is_empty());
+        assert!(changes.removed.is_empty());
+        assert!(!changes.structure_changed);
     }
 
     #[derive(Clone, Default)]
@@ -589,7 +606,13 @@ mod tests {
         count.update(|value| *value += 3);
         count.update(|value| *value += 4);
         assert_eq!(count.get(), 7);
-        assert_eq!(runtime.apply_pending_updates().dirty_ids.len(), 1);
+        assert_eq!(
+            runtime
+                .apply_pending_updates(&HostTree::new())
+                .dirty_ids
+                .len(),
+            1
+        );
         mount_stateful(&runtime, Arc::clone(&executions), Arc::clone(&state));
 
         assert_eq!(executions.load(Ordering::SeqCst), 2);

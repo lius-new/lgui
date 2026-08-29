@@ -1,3 +1,5 @@
+#[cfg(feature = "diagnostics")]
+use std::time::Instant;
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -67,6 +69,12 @@ use windows::{
 use crate::application::NotificationRegistration;
 #[cfg(feature = "tray")]
 use crate::application::TrayRegistration;
+#[cfg(all(
+    feature = "diagnostics",
+    feature = "advanced-rendering",
+    feature = "renderer-gdi"
+))]
+use crate::diagnostics::FrameBlitSourceMetrics;
 #[cfg(feature = "notifications")]
 use crate::platform::{NotificationError, NotificationHandle};
 use crate::{
@@ -80,6 +88,14 @@ use crate::{
         RuntimeOutput, Size, UiEvent, UiRect,
     },
     session::UiSession,
+};
+#[cfg(feature = "diagnostics")]
+use crate::{
+    diagnostics::{
+        duration_ms, DiagnosticPresentMode, DiagnosticsRegistration, FramePresentMetrics,
+        FrameRenderMetrics, FrameSample,
+    },
+    host::DamageReason,
 };
 
 use super::ico::create_icon_from_ico_bytes;
@@ -357,7 +373,11 @@ struct WindowState {
     close_policy: ClosePolicy,
     close_handler: Option<WindowCloseHandler>,
     dispatcher: Win32Dispatcher,
+    #[cfg(feature = "diagnostics")]
+    diagnostics: Option<Arc<DiagnosticsRegistration>>,
     render_retry_used: bool,
+    #[cfg(feature = "diagnostics")]
+    frame_index: u64,
     suppressed_ime_char_units: VecDeque<u16>,
     pending_high_surrogate: Option<u16>,
 }
@@ -801,6 +821,8 @@ fn create_window(
     if let Some(executor) = context.task_spawner() {
         session.set_task_spawner(executor);
     }
+    #[cfg(feature = "diagnostics")]
+    let diagnostics = context.try_resource::<DiagnosticsRegistration>();
     STATE.with(|state| {
         state.borrow_mut().insert(
             hwnd.0 as isize,
@@ -836,7 +858,11 @@ fn create_window(
                 close_policy: options.close_policy,
                 close_handler: options.close_handler,
                 dispatcher,
+                #[cfg(feature = "diagnostics")]
+                diagnostics,
                 render_retry_used: false,
+                #[cfg(feature = "diagnostics")]
+                frame_index: 0,
                 suppressed_ime_char_units: VecDeque::new(),
                 pending_high_surrogate: None,
             },
@@ -1844,6 +1870,8 @@ fn render_window(hwnd: HWND, target: HDC) {
         let Some(state) = state.get_mut(&(hwnd.0 as isize)) else {
             return false;
         };
+        #[cfg(feature = "diagnostics")]
+        let frame_started = state.diagnostics.as_ref().map(|_| Instant::now());
         let mut client = RECT::default();
         if let Err(source) = unsafe { GetClientRect(hwnd, &mut client) } {
             report_render_error(
@@ -1858,7 +1886,11 @@ fn render_window(hwnd: HWND, target: HDC) {
         let dpi = DpiContext::for_window(hwnd, state.logical_size);
         let logical = dpi.scale.logical_size(physical);
         let viewport = UiRect::new(0, 0, logical.width, logical.height);
+        #[cfg(feature = "diagnostics")]
+        let build_started = state.diagnostics.as_ref().map(|_| Instant::now());
         let commit = state.session.render_view(&state.view, viewport, dpi.scale);
+        #[cfg(feature = "diagnostics")]
+        let frame_build_duration = build_started.map(|started| started.elapsed());
         let physical_damage = commit
             .damage
             .dirty
@@ -1889,6 +1921,12 @@ fn render_window(hwnd: HWND, target: HDC) {
                 }
             }
         }
+        #[cfg(feature = "diagnostics")]
+        if state.diagnostics.is_some() {
+            reset_frame_present_metrics(state.renderer_factory.name());
+        }
+        #[cfg(feature = "diagnostics")]
+        let draw_started = state.diagnostics.as_ref().map(|_| Instant::now());
         #[cfg(feature = "images")]
         let result = {
             let resources = state
@@ -1909,10 +1947,98 @@ fn render_window(hwnd: HWND, target: HDC) {
             .as_mut()
             .expect("renderer was created before drawing")
             .draw_damage(hwnd, target, &scene, physical_viewport, &physical_damage);
+        #[cfg(feature = "diagnostics")]
+        let draw_present_duration = draw_started.map(|started| started.elapsed());
+        #[cfg(feature = "diagnostics")]
+        let present_metrics = state.diagnostics.as_ref().map(|_| {
+            take_frame_present_metrics(state.renderer_factory.name(), rect_pixels(&physical_damage))
+        });
         match result {
             Ok(()) => {
                 state.render_retry_used = false;
                 state.session.runtime().run_effects();
+                #[cfg(feature = "diagnostics")]
+                if let Some(diagnostics) = state.diagnostics.clone() {
+                    state.frame_index = state.frame_index.wrapping_add(1);
+                    let layout = state.session.layout_metrics();
+                    let components = state.session.component_metrics();
+                    let projection = state.session.projection_metrics();
+                    #[cfg(feature = "diagnostics-timing")]
+                    let timings = state.session.render_timings();
+                    diagnostics.record(
+                        FrameSample {
+                            frame_index: state.frame_index,
+                            recorded_at: Instant::now(),
+                            backend: state.renderer_factory.name(),
+                            mode: if physical_damage.is_empty() {
+                                DiagnosticPresentMode::Skipped
+                            } else if commit.damage.dirty.is_full() {
+                                DiagnosticPresentMode::Full
+                            } else {
+                                DiagnosticPresentMode::Dirty
+                            },
+                            frame_build_ms: frame_build_duration.map_or(0.0, duration_ms),
+                            diff_ms: 0.0,
+                            draw_present_ms: draw_present_duration.map_or(0.0, duration_ms),
+                            total_ms: frame_started
+                                .map_or(0.0, |started| duration_ms(started.elapsed())),
+                            dirty_rect_count: physical_damage.len(),
+                            dirty_area_ratio: commit.damage.dirty.area_ratio(),
+                            submit_scope: if commit.damage.dirty.is_full() {
+                                "full"
+                            } else {
+                                "dirty"
+                            },
+                            fallback_reason: commit.damage.dirty.fallback_reason(),
+                            primary_reason: commit.damage.reasons.first().map(damage_reason_label),
+                            render: FrameRenderMetrics {
+                                #[cfg(feature = "diagnostics-timing")]
+                                build_host_tree_ms: timings.retained_snapshot_ms
+                                    + timings.declarative_mount_ms
+                                    + timings.focus_animation_sync_ms,
+                                #[cfg(not(feature = "diagnostics-timing"))]
+                                build_host_tree_ms: frame_build_duration.map_or(0.0, duration_ms),
+                                #[cfg(feature = "diagnostics-timing")]
+                                pending_updates_ms: timings.pending_updates_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                prepare_render_ms: timings.prepare_render_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                retained_snapshot_ms: timings.retained_snapshot_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                declarative_mount_ms: timings.declarative_mount_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                focus_animation_sync_ms: timings.focus_animation_sync_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                runtime_reconcile_ms: timings.runtime_reconcile_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                layout_ms: timings.layout_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_commit_ms: timings.host_commit_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                render_total_ms: timings.total_ms,
+                                #[cfg(not(feature = "diagnostics-timing"))]
+                                render_total_ms: frame_build_duration.map_or(0.0, duration_ms),
+                                node_count: state.session.tree().nodes().len(),
+                                command_count: scene.commands().len(),
+                                component_executed: components.executed,
+                                component_dirty: components.dirty,
+                                projection_visited_nodes: projection.visited_nodes,
+                                projection_reused_component_roots: projection
+                                    .reused_component_roots,
+                                layout_visited_nodes: layout.visited_nodes,
+                                layout_laid_out_nodes: layout.laid_out_nodes,
+                                layout_reused_nodes: layout.reused_nodes,
+                                host_mutations: commit.metrics.host_mutations,
+                                scene_mutations: commit.metrics.scene_mutations,
+                                reused_scene_nodes: commit.metrics.reused_scene_nodes,
+                                ..FrameRenderMetrics::default()
+                            },
+                            present: present_metrics.unwrap_or_default(),
+                        },
+                        state.session.tree(),
+                        viewport,
+                    );
+                }
                 false
             }
             Err(error) => {
@@ -1933,6 +2059,87 @@ fn render_window(hwnd: HWND, target: HDC) {
         unsafe {
             let _ = InvalidateRect(Some(hwnd), None, false);
         }
+    }
+}
+
+#[cfg(feature = "diagnostics")]
+fn rect_pixels(rects: &[UiRect]) -> u64 {
+    rects.iter().fold(0_u64, |total, rect| {
+        total.saturating_add(
+            (rect.width().max(0) as u64).saturating_mul(rect.height().max(0) as u64),
+        )
+    })
+}
+
+#[cfg(feature = "diagnostics")]
+fn reset_frame_present_metrics(renderer: &'static str) {
+    #[cfg(all(feature = "advanced-rendering", feature = "renderer-gdi"))]
+    if renderer == "gdi" {
+        super::enhanced::reset_gdi_frame_blit_metrics();
+    }
+    #[cfg(not(all(feature = "advanced-rendering", feature = "renderer-gdi")))]
+    let _ = renderer;
+}
+
+#[cfg(feature = "diagnostics")]
+fn take_frame_present_metrics(
+    renderer: &'static str,
+    submitted_pixels: u64,
+) -> FramePresentMetrics {
+    #[cfg(all(feature = "advanced-rendering", feature = "renderer-gdi"))]
+    if renderer == "gdi" {
+        let metrics = super::enhanced::take_gdi_frame_blit_metrics();
+        return FramePresentMetrics {
+            submitted_pixels,
+            blit_count: metrics.blit_count,
+            bitblt_count: metrics.bitblt_count,
+            alphablend_count: metrics.alphablend_count,
+            fallback_count: metrics.fallback_count,
+            blit_pixels: metrics.blit_pixels,
+            static_layer_blits: frame_blit_metrics(metrics.static_layer),
+            overlay_blits: frame_blit_metrics(metrics.overlay),
+            backdrop_blits: frame_blit_metrics(metrics.backdrop),
+            custom_blits: frame_blit_metrics(metrics.custom),
+            other_blits: frame_blit_metrics(metrics.other),
+            ..FramePresentMetrics::default()
+        };
+    }
+    let _ = renderer;
+    FramePresentMetrics {
+        submitted_pixels,
+        ..FramePresentMetrics::default()
+    }
+}
+
+#[cfg(all(
+    feature = "diagnostics",
+    feature = "advanced-rendering",
+    feature = "renderer-gdi"
+))]
+fn frame_blit_metrics(
+    metrics: super::enhanced::GdiFrameBlitSourceMetrics,
+) -> FrameBlitSourceMetrics {
+    FrameBlitSourceMetrics {
+        blit_count: metrics.blit_count,
+        bitblt_count: metrics.bitblt_count,
+        alphablend_count: metrics.alphablend_count,
+        fallback_count: metrics.fallback_count,
+        pixels: metrics.pixels,
+    }
+}
+
+#[cfg(feature = "diagnostics")]
+fn damage_reason_label(reason: &DamageReason) -> &'static str {
+    match reason {
+        DamageReason::FirstCommit => "first-commit",
+        DamageReason::Explicit => "explicit",
+        DamageReason::Insert => "node-added",
+        DamageReason::Remove => "node-removed",
+        DamageReason::Layout => "layout",
+        DamageReason::Paint => "paint",
+        DamageReason::Interaction => "interaction",
+        DamageReason::Structure => "structure",
+        DamageReason::Clean => "clean",
     }
 }
 
@@ -1972,7 +2179,7 @@ fn dispatch_input(hwnd: HWND, input: InputEvent) {
                 output,
                 &state.context,
                 &state.id,
-                |action| session.runtime_mut().handle_default_action(action),
+                |action| session.handle_default_action(action),
                 |context| context_requested_frame |= context.flags().needs_frame,
             );
             let ime_update =

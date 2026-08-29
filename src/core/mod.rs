@@ -5,6 +5,7 @@ mod animation;
 mod builder;
 mod component_state;
 mod component_tree;
+mod compositing_layer;
 mod context;
 mod context_value;
 mod declarative;
@@ -42,12 +43,13 @@ pub use component_state::{ComponentActionOutcome, ComponentState, ComponentState
 pub use component_tree::{
     ComponentId, ComponentRuntimeMetrics, ComponentTree, HookId, HookSlotKind,
 };
+pub use compositing_layer::{CompositingLayerBackground, CompositingLayerSpec};
 pub use context::UiRenderContext;
 pub use context_value::{try_use_context, use_context, ContextProviderGuard, ContextRegistry};
 pub use declarative::{
-    clip, clip_path, component, content_text, context_provider, ellipse, fragment, glow, group,
-    line, overlay, path, precompiled, text, DeclarativeView, Element, ElementKey, ElementRenderCx,
-    Fragment, IntoClickHandler, IntoElementContent,
+    clip, clip_path, component, compositing_layer, content_text, context_provider, ellipse,
+    fragment, glow, group, line, overlay, path, precompiled, text, DeclarativeView, Element,
+    ElementKey, ElementRenderCx, Fragment, IntoClickHandler, IntoElementContent,
 };
 pub use dirty::{DirtySet, DirtyTracker};
 pub use dispatch::{dispatch_event_handlers, dispatch_hit_handlers, dispatch_runtime_output};
@@ -74,9 +76,9 @@ pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
 pub(crate) use render::clear_scroll_raster_command_cache;
 pub use render::{
-    commands_for_phase, compile_scene, compile_scene_root, scene_root_ids,
-    scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene, ScenePrimitive,
-    ScrollRasterSpec,
+    commands_for_phase, compile_scene, compile_scene_root, compositing_layer_damage,
+    scene_root_ids, scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene,
+    ScenePrimitive, ScrollRasterSpec,
 };
 pub use runtime::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 pub use scope::UiScope;

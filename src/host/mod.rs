@@ -303,11 +303,19 @@ impl HostRuntime {
                     });
                 }
                 if old_parent != parent || old_children != children {
+                    let bounds = child_structure_damage(
+                        self,
+                        tree,
+                        &old_children,
+                        &children,
+                        old_paint.union(node.paint_bounds),
+                    );
                     mutations.push(HostMutation::ReorderChildren {
                         id,
                         source: node.id.clone(),
-                        bounds: old_paint.union(node.paint_bounds),
+                        bounds,
                     });
+                    dirty_scene_sources.insert(node.id.clone());
                 }
             }
 
@@ -646,11 +654,15 @@ impl HostRuntime {
     }
 
     fn node(&self, id: HostNodeId) -> &HostNode {
+        self.try_node(id)
+            .unwrap_or_else(|| panic!("stale host node id `{id}`"))
+    }
+
+    fn try_node(&self, id: HostNodeId) -> Option<&HostNode> {
         self.slots
             .get(id.index as usize)
             .filter(|slot| slot.generation == id.generation)
             .and_then(|slot| slot.node.as_ref())
-            .unwrap_or_else(|| panic!("stale host node id `{id}`"))
     }
 
     fn node_mut(&mut self, id: HostNodeId) -> &mut HostNode {
@@ -691,7 +703,8 @@ fn scene_owner_source_for_tree(tree: &HostTree, source: &UiId) -> Option<UiId> {
 fn is_scene_container(kind: UiNodeKind) -> bool {
     matches!(
         kind,
-        UiNodeKind::StaticLayer
+        UiNodeKind::CompositingLayer
+            | UiNodeKind::StaticLayer
             | UiNodeKind::ScrollRaster
             | UiNodeKind::Clip
             | UiNodeKind::ClipPath
@@ -700,6 +713,48 @@ fn is_scene_container(kind: UiNodeKind) -> bool {
 
 fn is_scene_drawable(kind: UiNodeKind) -> bool {
     !matches!(kind, UiNodeKind::Root | UiNodeKind::Group)
+}
+
+fn child_structure_damage(
+    host: &HostRuntime,
+    tree: &HostTree,
+    previous: &[HostNodeId],
+    next: &[HostNodeId],
+    fallback: UiRect,
+) -> UiRect {
+    let previous_positions = previous
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (*id, index))
+        .collect::<HashMap<_, _>>();
+    let next_positions = next
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (*id, index))
+        .collect::<HashMap<_, _>>();
+    let mut affected = previous
+        .iter()
+        .chain(next)
+        .copied()
+        .filter(|id| previous_positions.get(id) != next_positions.get(id))
+        .collect::<HashSet<_>>();
+    let mut bounds = None;
+    for id in affected.drain() {
+        let Some(node) = host.try_node(id) else {
+            continue;
+        };
+        if node.mounted {
+            bounds = Some(bounds.map_or(node.paint_bounds, |bounds: UiRect| {
+                bounds.union(node.paint_bounds)
+            }));
+        }
+        if let Some(next) = tree.node(&node.source) {
+            bounds = Some(bounds.map_or(next.paint_bounds, |bounds: UiRect| {
+                bounds.union(next.paint_bounds)
+            }));
+        }
+    }
+    bounds.unwrap_or(fallback)
 }
 
 fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
@@ -717,6 +772,7 @@ fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.backdrop_blur_style != next.backdrop_blur_style
         || previous.overlay_style != next.overlay_style
         || previous.custom_style != next.custom_style
+        || previous.compositing_layer != next.compositing_layer
         || previous.static_layer != next.static_layer
         || previous.scroll_raster != next.scroll_raster
         || previous.clip_rect != next.clip_rect
@@ -724,13 +780,12 @@ fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.text != next.text
         || previous.text_style != next.text_style
         || previous.render_phase != next.render_phase
-        || previous.children != next.children
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{UiNode, VisualStyle};
+    use crate::core::{CompositingLayerSpec, Point, UiNode, VisualStyle};
 
     #[test]
     fn moving_a_node_damages_old_and_new_bounds_without_a_frame_snapshot() {
@@ -761,6 +816,122 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn moving_layer_damages_old_and_new_bounds_without_recompiling_siblings() {
+        let mut host = HostRuntime::new();
+        let interaction = UiInteractionState::default();
+        let viewport = UiRect::new(0, 0, 400, 300);
+        let layer_id = UiId::owned("moving-layer");
+        let child_id = UiId::owned("moving-layer-child");
+        let make_tree = |layer_rect: UiRect, child_rect: UiRect| {
+            let mut tree = HostTree::new();
+            tree.push(
+                UiNode::new(UiId::owned("background"), UiNodeKind::Panel, viewport)
+                    .style(VisualStyle::filled(crate::core::Color::BLACK)),
+            );
+            tree.push(
+                UiNode::new(layer_id.clone(), UiNodeKind::CompositingLayer, layer_rect)
+                    .compositing_layer(CompositingLayerSpec::new()),
+            );
+            tree.push(
+                UiNode::new(child_id.clone(), UiNodeKind::Panel, child_rect)
+                    .parent(layer_id.clone())
+                    .style(VisualStyle::filled(crate::core::Color::WHITE)),
+            );
+            tree.push(
+                UiNode::new(UiId::owned("foreground"), UiNodeKind::Panel, viewport)
+                    .style(VisualStyle::default()),
+            );
+            tree
+        };
+
+        host.commit(
+            &make_tree(UiRect::new(10, 20, 90, 100), UiRect::new(20, 30, 40, 50)),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+        let commit = host.commit(
+            &make_tree(
+                UiRect::new(200, 160, 280, 240),
+                UiRect::new(210, 170, 230, 190),
+            ),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+
+        let dirty = commit.damage.dirty.effective_rects();
+        assert!(dirty.iter().any(|rect| rect.contains(Point::new(20, 30))));
+        assert!(dirty.iter().any(|rect| rect.contains(Point::new(210, 170))));
+        assert_eq!(commit.metrics.reused_scene_nodes, 2);
+        assert_eq!(
+            commit
+                .scene_mutations
+                .iter()
+                .filter(|mutation| matches!(mutation, SceneMutation::Update(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn inserting_content_into_a_large_layer_keeps_window_damage_local() {
+        let mut host = HostRuntime::new();
+        let interaction = UiInteractionState::default();
+        let viewport = UiRect::new(0, 0, 800, 600);
+        let layer_id = UiId::owned("large-layer");
+        let make_tree = |include_inserted: bool| {
+            let mut tree = HostTree::new();
+            tree.push(
+                UiNode::new(layer_id.clone(), UiNodeKind::CompositingLayer, viewport)
+                    .compositing_layer(CompositingLayerSpec::new()),
+            );
+            tree.push(
+                UiNode::new(
+                    UiId::owned("stable-child"),
+                    UiNodeKind::Panel,
+                    UiRect::new(20, 20, 80, 80),
+                )
+                .parent(layer_id.clone())
+                .style(VisualStyle::filled(crate::core::Color::WHITE)),
+            );
+            if include_inserted {
+                tree.push(
+                    UiNode::new(
+                        UiId::owned("inserted-child"),
+                        UiNodeKind::Panel,
+                        UiRect::new(120, 100, 180, 160),
+                    )
+                    .parent(layer_id.clone())
+                    .style(VisualStyle::filled(crate::core::Color::WHITE)),
+                );
+            }
+            tree
+        };
+
+        host.commit(
+            &make_tree(false),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+        let commit = host.commit(
+            &make_tree(true),
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+        );
+
+        let damage = commit.damage.dirty.effective_rects();
+        assert!(damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(140, 120))));
+        assert!(!damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(700, 500))));
     }
 
     #[test]

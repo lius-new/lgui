@@ -150,7 +150,12 @@ mod tests {
         assert_eq!(unrelated_executions.load(Ordering::SeqCst), 1);
 
         router.navigate(Route::Settings);
-        assert_eq!(ui.apply_pending_updates().dirty_ids.len(), 1);
+        assert_eq!(
+            ui.apply_pending_updates(&crate::core::HostTree::new())
+                .dirty_ids
+                .len(),
+            1
+        );
         mount(
             &ui,
             router,

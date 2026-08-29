@@ -1,10 +1,12 @@
 use std::sync::Arc;
+#[cfg(feature = "diagnostics-timing")]
+use std::time::Instant;
 
 use super::{
     application::AppView,
     core::{
-        HostTree, HostTreeBuilder, LayoutCommitMetrics, LayoutRuntime, UiRuntime, UiScale,
-        UiTaskSpawner, UiWake,
+        ComponentRuntimeMetrics, HostProjectionMetrics, HostTree, HostTreeBuilder,
+        LayoutCommitMetrics, LayoutRuntime, UiRuntime, UiScale, UiTaskSpawner, UiWake,
     },
     frame::InvalidationSet,
     host::{HostCommit, HostRuntime},
@@ -23,6 +25,24 @@ pub struct UiSession {
     tree: HostTree,
     invalidations: InvalidationSet,
     render_context: Option<(UiRect, UiScale)>,
+    component_metrics: ComponentRuntimeMetrics,
+    projection_metrics: HostProjectionMetrics,
+    #[cfg(feature = "diagnostics-timing")]
+    render_timings: SessionRenderTimings,
+}
+
+#[cfg(feature = "diagnostics-timing")]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SessionRenderTimings {
+    pub pending_updates_ms: f32,
+    pub prepare_render_ms: f32,
+    pub retained_snapshot_ms: f32,
+    pub declarative_mount_ms: f32,
+    pub focus_animation_sync_ms: f32,
+    pub runtime_reconcile_ms: f32,
+    pub layout_ms: f32,
+    pub host_commit_ms: f32,
+    pub total_ms: f32,
 }
 
 impl UiSession {
@@ -75,8 +95,14 @@ impl UiSession {
         self.runtime.advance(&self.tree, elapsed_ms)
     }
 
+    pub fn handle_default_action(
+        &mut self,
+        action: super::core::UiDefaultAction,
+    ) -> super::core::RuntimeOutput {
+        self.runtime.handle_default_action(&self.tree, action)
+    }
+
     pub fn commit(&mut self, viewport: UiRect) -> HostCommit {
-        self.runtime.reconcile_tree(&self.tree);
         let changes = self.tree.take_projection_changes();
         let (_, changes) = self.layout.update_projection(&mut self.tree, changes);
         self.host.commit_projection(
@@ -89,18 +115,80 @@ impl UiSession {
     }
 
     pub fn render_view(&mut self, view: &AppView, viewport: UiRect, scale: UiScale) -> HostCommit {
+        #[cfg(feature = "diagnostics-timing")]
+        let total_started = Instant::now();
+        #[cfg(feature = "diagnostics-timing")]
+        let pending_updates_started = Instant::now();
         self.apply_pending_updates();
+        #[cfg(feature = "diagnostics-timing")]
+        let pending_updates_ms = elapsed_ms(pending_updates_started);
+
+        #[cfg(feature = "diagnostics-timing")]
+        let prepare_render_started = Instant::now();
         self.prepare_render(viewport, scale);
-        let mut tree =
-            self.build_view_tree_from(self.render_tree(), Arc::clone(view), viewport, scale);
+        #[cfg(feature = "diagnostics-timing")]
+        let prepare_render_ms = elapsed_ms(prepare_render_started);
+
+        #[cfg(feature = "diagnostics-timing")]
+        let retained_snapshot_started = Instant::now();
+        let retained = self.render_tree();
+        #[cfg(feature = "diagnostics-timing")]
+        let retained_snapshot_ms = elapsed_ms(retained_snapshot_started);
+
+        #[cfg(feature = "diagnostics-timing")]
+        let declarative_mount_started = Instant::now();
+        let (mut tree, mut projection_metrics) =
+            self.build_view_tree_from(retained, Arc::clone(view), viewport, scale);
+        #[cfg(feature = "diagnostics-timing")]
+        let declarative_mount_ms = elapsed_ms(declarative_mount_started);
+
+        #[cfg(feature = "diagnostics-timing")]
+        let focus_animation_sync_started = Instant::now();
         if self.runtime.sync_tree_focus(&tree) {
-            tree = self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
+            (tree, projection_metrics) =
+                self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
         }
         if self.runtime.sync_tree_animation_targets(&tree) {
-            tree = self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
+            (tree, projection_metrics) =
+                self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
         }
+        self.component_metrics = self.runtime.component_tree().metrics();
+        self.projection_metrics = projection_metrics;
         self.replace_tree(tree);
-        self.commit(viewport)
+        #[cfg(feature = "diagnostics-timing")]
+        let focus_animation_sync_ms = elapsed_ms(focus_animation_sync_started);
+
+        #[cfg(feature = "diagnostics-timing")]
+        let layout_started = Instant::now();
+        let changes = self.tree.take_projection_changes();
+        let (_, changes) = self.layout.update_projection(&mut self.tree, changes);
+        #[cfg(feature = "diagnostics-timing")]
+        let layout_ms = elapsed_ms(layout_started);
+
+        #[cfg(feature = "diagnostics-timing")]
+        let host_commit_started = Instant::now();
+        let commit = self.host.commit_projection(
+            &self.tree,
+            &self.runtime.interaction_state(),
+            viewport,
+            &mut self.invalidations,
+            changes,
+        );
+        #[cfg(feature = "diagnostics-timing")]
+        {
+            self.render_timings = SessionRenderTimings {
+                pending_updates_ms,
+                prepare_render_ms,
+                retained_snapshot_ms,
+                declarative_mount_ms,
+                focus_animation_sync_ms,
+                runtime_reconcile_ms: 0.0,
+                layout_ms,
+                host_commit_ms: elapsed_ms(host_commit_started),
+                total_ms: elapsed_ms(total_started),
+            };
+        }
+        commit
     }
 
     fn build_view_tree_from(
@@ -109,7 +197,7 @@ impl UiSession {
         view: AppView,
         viewport: UiRect,
         scale: UiScale,
-    ) -> HostTree {
+    ) -> (HostTree, HostProjectionMetrics) {
         let interaction = self.runtime.interaction_state();
         let mut builder = HostTreeBuilder::from_retained(retained);
         builder.mount(
@@ -126,11 +214,12 @@ impl UiSession {
             self.runtime.effects(),
             scale,
         );
-        builder.finish()
+        let metrics = builder.projection_metrics();
+        (builder.finish(), metrics)
     }
 
     pub fn apply_pending_updates(&mut self) -> super::core::PendingUpdateOutput {
-        let updates = self.runtime.apply_pending_updates();
+        let updates = self.runtime.apply_pending_updates(&self.tree);
         if updates.focus_changed {
             self.invalidate_all();
         }
@@ -139,6 +228,19 @@ impl UiSession {
 
     pub fn layout_metrics(&self) -> LayoutCommitMetrics {
         self.layout.metrics()
+    }
+
+    pub fn component_metrics(&self) -> ComponentRuntimeMetrics {
+        self.component_metrics
+    }
+
+    pub fn projection_metrics(&self) -> HostProjectionMetrics {
+        self.projection_metrics
+    }
+
+    #[cfg(feature = "diagnostics-timing")]
+    pub(crate) fn render_timings(&self) -> SessionRenderTimings {
+        self.render_timings
     }
 
     pub fn invalidate_all(&mut self) {
@@ -173,6 +275,11 @@ impl UiSession {
     pub fn set_task_spawner(&mut self, spawner: UiTaskSpawner) {
         self.runtime.set_task_spawner(spawner);
     }
+}
+
+#[cfg(feature = "diagnostics-timing")]
+fn elapsed_ms(started: Instant) -> f32 {
+    started.elapsed().as_secs_f32() * 1_000.0
 }
 
 #[cfg(test)]
