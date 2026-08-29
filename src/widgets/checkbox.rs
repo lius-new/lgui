@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     core::{
-        Color, Element, ElementKey, ElementRenderCx, InteractionRole, RenderPhase, Stroke,
-        UiElement, UiEventContext, UiId, UiRect, VisualStyle,
+        Color, Element, ElementKey, ElementRenderCx, InteractionRole, PathStyle, Point,
+        RenderPhase, Stroke, UiElement, UiEventContext, UiId, UiPath, UiPathCommand, UiRect,
+        VisualStyle,
     },
     theme::{ThemeContext, ThemeTokens},
 };
@@ -170,7 +171,7 @@ fn render_checkbox(cx: ElementRenderCx<'_, '_, '_>, checkbox: Checkbox) -> UiEle
     .hit_rect(checkbox.hit_rect);
 
     if checkbox.checked {
-        root = root.children(checkmark(
+        root = root.child(checkmark(
             &cx.id,
             checkbox.rect,
             checkbox.phase,
@@ -187,30 +188,25 @@ fn render_checkbox(cx: ElementRenderCx<'_, '_, '_>, checkbox: Checkbox) -> UiEle
     root
 }
 
-fn checkmark(id: &UiId, rect: UiRect, phase: RenderPhase, stroke: Stroke) -> [UiElement; 2] {
+fn checkmark(id: &UiId, rect: UiRect, phase: RenderPhase, stroke: Stroke) -> UiElement {
     let width = rect.width().max(1);
     let height = rect.height().max(1);
-    let start_x = rect.left + width * 2 / 9;
-    let middle_x = rect.left + width * 4 / 9;
-    let end_x = rect.left + width * 7 / 9;
-    let start_y = rect.top + height / 2;
-    let middle_y = rect.top + height * 7 / 10;
-    let end_y = rect.top + height * 3 / 10;
-    let style = VisualStyle::default().stroked(stroke);
-    [
-        UiElement::line(
-            UiId::owned(format!("{}.check.start", id.as_str())),
-            UiRect::new(start_x, start_y, middle_x, middle_y),
-            style,
-        )
-        .render_phase(phase),
-        UiElement::line(
-            UiId::owned(format!("{}.check.end", id.as_str())),
-            UiRect::new(middle_x, middle_y, end_x, end_y),
-            style,
-        )
-        .render_phase(phase),
-    ]
+    let start = Point::new(rect.left + width * 2 / 9, rect.top + height / 2);
+    let bend = Point::new(rect.left + width * 4 / 9, rect.top + height * 7 / 10);
+    let end = Point::new(rect.left + width * 7 / 9, rect.top + height * 3 / 10);
+    let path = UiPath::new([
+        UiPathCommand::MoveTo(start),
+        UiPathCommand::LineTo(bend),
+        UiPathCommand::LineTo(end),
+    ]);
+
+    UiElement::path(
+        UiId::owned(format!("{}.check", id.as_str())),
+        rect,
+        path,
+        PathStyle::default().stroked(stroke),
+    )
+    .render_phase(phase)
 }
 
 fn next_checked(checked: bool) -> bool {
@@ -223,20 +219,27 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
-    fn checkmark_stays_inside_the_checkbox_bounds() {
+    fn checkmark_is_a_continuous_rising_tick_inside_the_checkbox_bounds() {
         let rect = UiRect::new(10, 20, 28, 38);
-        for line in checkmark(
+        let checkmark = checkmark(
             &UiId::owned("checkbox"),
             rect,
             RenderPhase::Content,
             Stroke::new(Color(0xFFFFFF), 2, 0xFF),
-        ) {
-            let line = line.node().layout_rect;
-            assert!(line.left >= rect.left);
-            assert!(line.right <= rect.right);
-            assert!(line.top >= rect.top);
-            assert!(line.bottom <= rect.bottom);
+        );
+        let commands = checkmark.node().path.as_ref().unwrap().commands();
+        let [UiPathCommand::MoveTo(start), UiPathCommand::LineTo(bend), UiPathCommand::LineTo(end)] =
+            commands
+        else {
+            panic!("checkbox checkmark must be one continuous three-point path");
+        };
+
+        for point in [start, bend, end] {
+            assert!(rect.contains(*point));
         }
+        assert!(start.x < bend.x && bend.x < end.x);
+        assert!(start.y < bend.y);
+        assert!(end.y < bend.y);
     }
 
     #[test]
