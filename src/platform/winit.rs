@@ -526,6 +526,14 @@ impl WinitHost {
         if let WindowPosition::Absolute { x, y } = options.position {
             attributes = attributes.with_position(PhysicalPosition::new(x, y));
         }
+        #[cfg(target_os = "windows")]
+        {
+            attributes = super::winit_windows::with_corner_radius(
+                attributes,
+                options.corner_radius,
+                options.mode,
+            );
+        }
 
         let owner_window = options
             .owner
@@ -681,6 +689,12 @@ impl WinitHost {
                         WindowMode::Windowed => None,
                         WindowMode::Fullscreen => Some(Fullscreen::Borderless(None)),
                     });
+                    #[cfg(target_os = "windows")]
+                    super::winit_windows::set_corner_radius(
+                        &window.window,
+                        window.options.corner_radius,
+                        mode,
+                    );
                     window.full_redraw = true;
                     window.window.request_redraw();
                 }

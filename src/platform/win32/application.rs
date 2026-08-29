@@ -372,7 +372,7 @@ struct WindowState {
     maximum_size: Option<Size>,
     resizable: bool,
     native_titlebar: bool,
-    rounded_corners: bool,
+    corner_radius: i32,
     titlebar_drag_height: Option<f32>,
     drag_exclusion: Option<WindowDragExclusion>,
     windowed_style: WINDOW_STYLE,
@@ -471,7 +471,6 @@ struct OwnerVisibility {
 pub struct Win32WindowOptions {
     pub class_name: Option<String>,
     pub icon_bytes: Option<&'static [u8]>,
-    pub rounded_corners: bool,
 }
 
 impl Win32WindowOptions {
@@ -484,11 +483,6 @@ impl Win32WindowOptions {
         self.icon_bytes = Some(bytes);
         self
     }
-
-    pub fn rounded_corners(mut self, enabled: bool) -> Self {
-        self.rounded_corners = enabled;
-        self
-    }
 }
 
 impl Default for Win32WindowOptions {
@@ -496,7 +490,6 @@ impl Default for Win32WindowOptions {
         Self {
             class_name: None,
             icon_bytes: None,
-            rounded_corners: true,
         }
     }
 }
@@ -605,7 +598,6 @@ impl ApplicationBackend for Win32Application {
             instance,
             &class_name,
             options,
-            win32_options,
             view,
             context.clone(),
             Arc::clone(&factory),
@@ -702,15 +694,10 @@ fn execute_window_command(
             if let Some(hwnd) = hwnd_for_id(&options.id) {
                 show_window(hwnd);
             } else {
-                let win32_options = options
-                    .platform_options::<Win32WindowOptions>()
-                    .cloned()
-                    .unwrap_or_default();
                 let Ok(hwnd) = create_window(
                     HINSTANCE(instance as _),
                     class_name,
                     options,
-                    win32_options,
                     application_root_view(context.clone(), view),
                     context,
                     factory,
@@ -731,15 +718,10 @@ fn execute_window_command(
                     show_window(hwnd);
                 }
             } else {
-                let win32_options = options
-                    .platform_options::<Win32WindowOptions>()
-                    .cloned()
-                    .unwrap_or_default();
                 let _ = create_window(
                     HINSTANCE(instance as _),
                     class_name,
                     options,
-                    win32_options,
                     application_root_view(context.clone(), view),
                     context,
                     factory,
@@ -821,7 +803,6 @@ fn create_window(
     instance: HINSTANCE,
     class_name: &[u16],
     options: WindowOptions,
-    win32_options: Win32WindowOptions,
     view: AppView,
     context: ApplicationContext,
     renderer_factory: Arc<dyn Win32RendererFactory>,
@@ -874,10 +855,7 @@ fn create_window(
     if !options.native_titlebar {
         set_runtime_window_style(hwnd, style);
     }
-    set_window_corner_preference(
-        hwnd,
-        win32_options.rounded_corners && initial_mode == WindowMode::Windowed,
-    );
+    set_window_corner_preference(hwnd, options.corner_radius, initial_mode);
     let renderer_name = renderer_factory.name();
     let renderer = renderer_factory.create(hwnd).map_err(|source| {
         context.report_render_error(RenderError::new(
@@ -911,7 +889,7 @@ fn create_window(
                 maximum_size: options.maximum_size,
                 resizable: options.resizable,
                 native_titlebar: options.native_titlebar,
-                rounded_corners: win32_options.rounded_corners,
+                corner_radius: options.corner_radius,
                 titlebar_drag_height: options.titlebar_drag_height,
                 drag_exclusion: options.drag_exclusion,
                 windowed_style: style,
@@ -1013,8 +991,8 @@ fn set_runtime_window_style(hwnd: HWND, style: WINDOW_STYLE) {
     }
 }
 
-fn set_window_corner_preference(hwnd: HWND, rounded: bool) {
-    let preference = window_corner_preference(rounded);
+fn set_window_corner_preference(hwnd: HWND, radius: i32, mode: WindowMode) {
+    let preference = window_corner_preference(radius, mode);
     unsafe {
         // Windows versions before Windows 11 do not expose this attribute. The request is a
         // progressive enhancement, so an unsupported DWM attribute must not block creation.
@@ -1027,18 +1005,20 @@ fn set_window_corner_preference(hwnd: HWND, rounded: bool) {
     }
 }
 
-fn window_corner_preference(rounded: bool) -> DWM_WINDOW_CORNER_PREFERENCE {
-    if rounded {
-        DWMWCP_ROUND
-    } else {
+fn window_corner_preference(radius: i32, mode: WindowMode) -> DWM_WINDOW_CORNER_PREFERENCE {
+    if radius <= 0 || mode != WindowMode::Windowed {
         DWMWCP_DONOTROUND
+    } else if radius <= 4 {
+        windows::Win32::Graphics::Dwm::DWMWCP_ROUNDSMALL
+    } else {
+        DWMWCP_ROUND
     }
 }
 
 enum WindowModeTransition {
     Fullscreen,
     Windowed {
-        rounded_corners: bool,
+        corner_radius: i32,
         style: WINDOW_STYLE,
         placement: Option<WINDOWPLACEMENT>,
     },
@@ -1083,7 +1063,7 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
                 WindowModeTransition::Fullscreen
             }
             WindowMode::Windowed => WindowModeTransition::Windowed {
-                rounded_corners: window.rounded_corners,
+                corner_radius: window.corner_radius,
                 style: window.windowed_style,
                 placement: window.windowed_placement.take(),
             },
@@ -1097,7 +1077,7 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
 
     match transition {
         WindowModeTransition::Fullscreen => {
-            set_window_corner_preference(hwnd, false);
+            set_window_corner_preference(hwnd, 0, WindowMode::Fullscreen);
             let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
             let mut monitor_info = MONITORINFO {
                 cbSize: size_of::<MONITORINFO>() as u32,
@@ -1119,11 +1099,11 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
             }
         }
         WindowModeTransition::Windowed {
-            rounded_corners,
+            corner_radius,
             style,
             placement,
         } => {
-            set_window_corner_preference(hwnd, rounded_corners);
+            set_window_corner_preference(hwnd, corner_radius, WindowMode::Windowed);
             unsafe {
                 set_runtime_window_style(hwnd, style);
                 if let Some(placement) = placement {
@@ -2802,7 +2782,7 @@ mod tests {
     use super::{
         can_advance_window_animations, decode_utf16_char_unit, resize_border_hit,
         suppress_committed_ime_char, window_corner_preference, window_style, OwnerVisibility,
-        PhysicalPoint, ResizeFrameThrottle, Win32WindowOptions, WindowInteractionMode,
+        PhysicalPoint, ResizeFrameThrottle, Win32WindowOptions, WindowInteractionMode, WindowMode,
         WindowOptions, DWMWCP_DONOTROUND, DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT,
         WS_CAPTION, WS_POPUP, WS_THICKFRAME,
     };
@@ -2828,25 +2808,36 @@ mod tests {
 
     #[test]
     fn corner_preferences_map_to_explicit_dwm_requests() {
-        assert_eq!(window_corner_preference(true), DWMWCP_ROUND);
-        assert_eq!(window_corner_preference(false), DWMWCP_DONOTROUND);
+        assert_eq!(
+            window_corner_preference(0, WindowMode::Windowed),
+            DWMWCP_DONOTROUND
+        );
+        assert_eq!(
+            window_corner_preference(4, WindowMode::Windowed),
+            windows::Win32::Graphics::Dwm::DWMWCP_ROUNDSMALL
+        );
+        assert_eq!(
+            window_corner_preference(8, WindowMode::Windowed),
+            DWMWCP_ROUND
+        );
+        assert_eq!(
+            window_corner_preference(8, WindowMode::Fullscreen),
+            DWMWCP_DONOTROUND
+        );
     }
 
     #[test]
-    fn win32_window_options_own_class_icon_and_corner_policy() {
+    fn win32_window_options_own_class_and_icon_policy() {
         static ICON: &[u8] = b"icon";
         let defaults = Win32WindowOptions::default();
         assert_eq!(defaults.class_name, None);
         assert_eq!(defaults.icon_bytes, None);
-        assert!(defaults.rounded_corners);
 
         let custom = Win32WindowOptions::default()
             .class_name("Example.Window")
-            .icon_bytes(ICON)
-            .rounded_corners(false);
+            .icon_bytes(ICON);
         assert_eq!(custom.class_name.as_deref(), Some("Example.Window"));
         assert_eq!(custom.icon_bytes, Some(ICON));
-        assert!(!custom.rounded_corners);
     }
 
     #[test]

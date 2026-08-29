@@ -1,8 +1,32 @@
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{
-    platform::windows::WindowAttributesExtWindows,
+    platform::windows::{CornerPreference, WindowAttributesExtWindows, WindowExtWindows},
     window::{Window, WindowAttributes},
 };
+
+use crate::application::WindowMode;
+
+pub(crate) fn with_corner_radius(
+    attributes: WindowAttributes,
+    radius: i32,
+    mode: WindowMode,
+) -> WindowAttributes {
+    attributes.with_corner_preference(corner_preference(radius, mode))
+}
+
+pub(crate) fn set_corner_radius(window: &Window, radius: i32, mode: WindowMode) {
+    window.set_corner_preference(corner_preference(radius, mode));
+}
+
+fn corner_preference(radius: i32, mode: WindowMode) -> CornerPreference {
+    if radius <= 0 || mode != WindowMode::Windowed {
+        CornerPreference::DoNotRound
+    } else if radius <= 4 {
+        CornerPreference::RoundSmall
+    } else {
+        CornerPreference::Round
+    }
+}
 
 pub(crate) fn with_owner(
     attributes: WindowAttributes,
@@ -15,4 +39,33 @@ pub(crate) fn with_owner(
         return Err("winit did not provide a Win32 owner handle".to_owned());
     };
     Ok(attributes.with_owner_window(handle.hwnd.get()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corner_radius_maps_to_the_closest_dwm_preference() {
+        assert_eq!(
+            corner_preference(0, WindowMode::Windowed),
+            CornerPreference::DoNotRound
+        );
+        assert_eq!(
+            corner_preference(4, WindowMode::Windowed),
+            CornerPreference::RoundSmall
+        );
+        assert_eq!(
+            corner_preference(8, WindowMode::Windowed),
+            CornerPreference::Round
+        );
+    }
+
+    #[test]
+    fn fullscreen_windows_disable_dwm_rounding() {
+        assert_eq!(
+            corner_preference(8, WindowMode::Fullscreen),
+            CornerPreference::DoNotRound
+        );
+    }
 }
