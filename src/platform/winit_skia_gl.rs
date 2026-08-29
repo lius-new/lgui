@@ -70,7 +70,7 @@ impl WinitOpenGlRenderer {
         let template = ConfigTemplateBuilder::new()
             .with_alpha_size(if transparent { 8 } else { 0 })
             .with_stencil_size(8)
-            .with_transparency(transparent)
+            .with_transparency(request_gl_config_transparency(transparent))
             .prefer_hardware_accelerated(Some(true))
             .compatible_with_native_window(raw_window)
             .build();
@@ -82,9 +82,11 @@ impl WinitOpenGlRenderer {
                     + config.alpha_size() as usize
             })
             .ok_or_else(|| "no compatible OpenGL window configuration".to_owned())?;
-        if transparent
-            && (config.alpha_size() == 0 || config.supports_transparency() == Some(false))
-        {
+        if !supports_window_transparency(
+            transparent,
+            config.alpha_size(),
+            config.supports_transparency(),
+        ) {
             return Err(
                 "the selected OpenGL window configuration does not support transparency".to_owned(),
             );
@@ -231,6 +233,27 @@ impl WinitOpenGlRenderer {
     }
 }
 
+// WGL_TRANSPARENT_ARB describes pixel-format transparency rather than the DWM
+// composition used by winit windows. On Windows an alpha-capable framebuffer is
+// the relevant requirement; requesting the WGL flag rejects valid GPU configs.
+const fn request_gl_config_transparency(transparent: bool) -> bool {
+    transparent && !cfg!(target_os = "windows")
+}
+
+const fn supports_window_transparency(
+    transparent: bool,
+    alpha_size: u8,
+    config_supports_transparency: Option<bool>,
+) -> bool {
+    if !transparent {
+        return true;
+    }
+    if alpha_size == 0 {
+        return false;
+    }
+    cfg!(target_os = "windows") || !matches!(config_supports_transparency, Some(false))
+}
+
 fn gl_string(display: &Display, name: u32) -> Option<String> {
     type GlGetString = unsafe extern "system" fn(u32) -> *const c_uchar;
     let symbol = CString::new("glGetString").unwrap();
@@ -313,4 +336,33 @@ fn display_preference(_raw_window: RawWindowHandle) -> DisplayApiPreference {
 #[cfg(target_os = "macos")]
 fn display_preference(_raw_window: RawWindowHandle) -> DisplayApiPreference {
     DisplayApiPreference::Cgl
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opaque_windows_do_not_require_an_alpha_channel() {
+        assert!(supports_window_transparency(false, 0, Some(false)));
+    }
+
+    #[test]
+    fn transparent_windows_require_an_alpha_channel() {
+        assert!(!supports_window_transparency(true, 0, Some(true)));
+    }
+
+    #[test]
+    fn transparent_window_policy_matches_the_platform_compositor() {
+        #[cfg(target_os = "windows")]
+        {
+            assert!(!request_gl_config_transparency(true));
+            assert!(supports_window_transparency(true, 8, Some(false)));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(request_gl_config_transparency(true));
+            assert!(!supports_window_transparency(true, 8, Some(false)));
+        }
+    }
 }

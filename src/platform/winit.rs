@@ -39,9 +39,9 @@ use crate::{
 };
 use crate::{
     application::{
-        AppView, ApplicationBackend, ApplicationContext, ApplicationHandle, ApplicationTask,
-        ClosePolicy, GraphicsPreference, WindowCommand, WindowId, WindowMode, WindowOptions,
-        WindowPosition,
+        application_root_view, AppView, ApplicationBackend, ApplicationContext, ApplicationHandle,
+        ApplicationTask, ClosePolicy, GraphicsPreference, WindowCommand, WindowId, WindowMode,
+        WindowOptions, WindowPosition,
     },
     core::{
         dispatch_runtime_output, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState,
@@ -180,8 +180,10 @@ impl ApplicationBackend for WinitApplication {
             Arc::new(SoftContext::new(display).map_err(|error| {
                 WinitApplicationError(format!("create software display: {error}"))
             })?);
+        let main_id = options.id.clone();
         let mut handler = WinitHost {
             initial: Some((options, view)),
+            main_id,
             context,
             proxy,
             soft_context,
@@ -217,6 +219,7 @@ impl From<accesskit_winit::Event> for WinitUserEvent {
 
 struct WinitHost {
     initial: Option<(WindowOptions, AppView)>,
+    main_id: WindowId,
     context: ApplicationContext,
     proxy: EventLoopProxy<WinitUserEvent>,
     soft_context: Arc<SoftContext<OwnedDisplayHandle>>,
@@ -625,7 +628,7 @@ impl WinitHost {
     fn handle_command(&mut self, event_loop: &ActiveEventLoop, command: WindowCommand) {
         match command {
             WindowCommand::Show { options, view } => {
-                let _ = self.create_window(event_loop, options, view);
+                self.create_auxiliary_window(event_loop, options, view);
             }
             WindowCommand::Toggle { options, view } => {
                 if let Some(native) = self.ids.get(&options.id).copied() {
@@ -635,7 +638,7 @@ impl WinitHost {
                         .is_some_and(|window| !window.visible);
                     self.set_window_visibility(&options.id, visible);
                 } else {
-                    let _ = self.create_window(event_loop, options, view);
+                    self.create_auxiliary_window(event_loop, options, view);
                 }
             }
             WindowCommand::Hide(id) => {
@@ -691,6 +694,27 @@ impl WinitHost {
                 self.exit_requested = true;
                 event_loop.exit();
             }
+        }
+    }
+
+    fn create_auxiliary_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        options: WindowOptions,
+        view: AppView,
+    ) {
+        let (options, view) = prepare_auxiliary_window(&self.context, &self.main_id, options, view);
+        let id = options.id.clone();
+        if let Err(error) = self.create_window(event_loop, options, view) {
+            self.context
+                .report_render_error(crate::application::RenderError::new(
+                    id,
+                    "platform-winit",
+                    crate::renderer::RenderErrorStage::Create,
+                    "create_auxiliary_window",
+                    -1,
+                    error.to_string(),
+                ));
         }
     }
 
@@ -809,6 +833,18 @@ impl WinitHost {
             self.suppress_owned_windows(&child, suppressed);
         }
     }
+}
+
+fn prepare_auxiliary_window(
+    context: &ApplicationContext,
+    main_id: &WindowId,
+    mut options: WindowOptions,
+    view: AppView,
+) -> (WindowOptions, AppView) {
+    if options.owner.is_none() && options.id != *main_id {
+        options.owner = Some(main_id.clone());
+    }
+    (options, application_root_view(context.clone(), view))
 }
 
 impl WinitWindow {
@@ -1925,6 +1961,11 @@ fn keyboard_event(event: winit::event::KeyEvent, modifiers: ModifiersState) -> K
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
     use super::*;
 
     #[test]
@@ -2018,5 +2059,43 @@ mod tests {
                 Some(&GraphicsPreference::Software)
             }
         );
+    }
+
+    #[test]
+    fn auxiliary_windows_inherit_the_main_owner_and_application_context() {
+        let context = ApplicationContext::empty();
+        let expected = context.clone();
+        let rendered = Arc::new(AtomicBool::new(false));
+        let rendered_view = Arc::clone(&rendered);
+        let view: AppView = Arc::new(move |cx| {
+            assert!(cx.application() == expected);
+            rendered_view.store(true, Ordering::Relaxed);
+            crate::core::content_text("auxiliary")
+        });
+        let (options, view) = prepare_auxiliary_window(
+            &context,
+            &WindowId::new("main"),
+            WindowOptions::new("chat"),
+            view,
+        );
+
+        assert_eq!(options.owner, Some(WindowId::new("main")));
+        let mut session = UiSession::new();
+        let _ = session.render_view(&view, UiRect::new(0.0, 0.0, 320.0, 240.0), UiScale::ONE);
+        assert!(rendered.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn auxiliary_windows_preserve_an_explicit_owner() {
+        let context = ApplicationContext::empty();
+        let view: AppView = Arc::new(|_| crate::core::content_text("auxiliary"));
+        let (options, _) = prepare_auxiliary_window(
+            &context,
+            &WindowId::new("main"),
+            WindowOptions::new("chat").owner("workspace"),
+            view,
+        );
+
+        assert_eq!(options.owner, Some(WindowId::new("workspace")));
     }
 }
