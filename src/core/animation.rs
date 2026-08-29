@@ -226,6 +226,26 @@ impl AnimationRegistry {
         true
     }
 
+    pub(crate) fn clear_absent_values_by(
+        &mut self,
+        mut is_present: impl FnMut(&UiId) -> bool,
+        properties: &[AnimProperty],
+    ) -> bool {
+        let mut removed_ids = Vec::new();
+        self.values.retain(|(id, property), _| {
+            let remove = properties.contains(property) && !is_present(id);
+            if remove {
+                removed_ids.push(id.clone());
+            }
+            !remove
+        });
+        if removed_ids.is_empty() {
+            return false;
+        }
+        self.dirty_ids.extend(removed_ids);
+        true
+    }
+
     pub fn advance(&mut self, elapsed_ms: f32) -> bool {
         let mut changed = false;
         for ((id, _), value) in &mut self.values {

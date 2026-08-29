@@ -502,9 +502,8 @@ impl UiRuntime {
         }
         changed |=
             apply_events_to_animations(tree, &mut self.animations, interaction_events.into_iter());
-        let present_ids: HashSet<UiId> = tree.nodes().iter().map(|node| node.id.clone()).collect();
-        changed |= self.animations.clear_absent_values(
-            &present_ids,
+        changed |= self.animations.clear_absent_values_by(
+            |id| tree.node(id).is_some(),
             &[
                 AnimProperty::Hover,
                 AnimProperty::Active,
@@ -512,7 +511,8 @@ impl UiRuntime {
                 AnimProperty::Focus,
             ],
         );
-        for node in tree.nodes() {
+        let sync_ids = tree.animation_sync_ids().cloned().collect::<Vec<_>>();
+        for node in sync_ids.iter().filter_map(|id| tree.node(id)) {
             for (property, active) in node.animation_targets.iter().copied() {
                 for binding in node
                     .animation_bindings
@@ -537,6 +537,9 @@ impl UiRuntime {
     }
 
     pub fn sync_tree_focus(&mut self, tree: &HostTree) -> bool {
+        if !tree.needs_focus_sync() {
+            return false;
+        }
         let events = self.events.sync_focus_for_tree(tree);
         if events.is_empty() {
             return false;
@@ -1038,8 +1041,10 @@ mod tests {
         {
             let components = runtime.component_tree();
             components.begin_render();
-            components.begin_component_execution(owner);
-            components.finish_component(owner);
+            let retained_owner = components.root(UiId::owned("focus-owner"), "focus-owner");
+            assert_eq!(retained_owner, owner);
+            components.begin_component_execution(retained_owner);
+            components.finish_component(retained_owner);
             components.end_render();
             assert!(!components.is_dirty(owner));
         }

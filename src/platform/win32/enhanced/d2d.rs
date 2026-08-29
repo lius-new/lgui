@@ -6,7 +6,7 @@
 // explicit stable-template contract.
 use std::{
     collections::hash_map::DefaultHasher,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     mem::ManuallyDrop,
     time::{Duration, Instant},
@@ -19,14 +19,17 @@ use windows::{
             Common::{
                 D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F,
                 D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
-                D2D1_PIXEL_FORMAT, D2D_RECT_F, D2D_SIZE_U,
+                D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT, D2D_RECT_F, D2D_SIZE_U,
             },
-            ID2D1Bitmap1, ID2D1ColorContext, ID2D1DeviceContext, ID2D1SolidColorBrush,
-            D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS,
-            D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
-            D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_LINEAR,
-            D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1, D2D1_QUADRATIC_BEZIER_SEGMENT,
-            D2D1_ROUNDED_RECT,
+            ID2D1Bitmap1, ID2D1ColorContext, ID2D1DeviceContext, ID2D1LinearGradientBrush,
+            ID2D1RadialGradientBrush, ID2D1SolidColorBrush, D2D1_ANTIALIAS_MODE_ALIASED,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS, D2D1_BITMAP_OPTIONS_NONE,
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_BUFFER_PRECISION_8BPC_UNORM,
+            D2D1_COLOR_INTERPOLATION_MODE_STRAIGHT, D2D1_COLOR_SPACE_SRGB,
+            D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
+            D2D1_INTERPOLATION_MODE_LINEAR, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_QUADRATIC_BEZIER_SEGMENT,
+            D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT,
         },
         DirectWrite::{
             IDWriteFactory, IDWriteTextLayout1, DWRITE_FONT_STRETCH_NORMAL,
@@ -56,9 +59,116 @@ pub struct D2dRenderer {
     context: ID2D1DeviceContext,
     dwrite_factory: IDWriteFactory,
     scene_bitmap: ID2D1Bitmap1,
-    bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
+    bitmap_cache: D2dBitmapCache,
+    overlay_brush_cache: HashMap<D2dOverlayBrushCacheKey, D2dOverlayBrushSet>,
     frame_bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
     compositing_layers: HashMap<UiId, D2dCompositingLayer>,
+}
+
+const D2D_BITMAP_CACHE_MIN_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+const D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER: usize = 4;
+
+fn d2d_bitmap_cache_budget(width: i32, height: i32) -> usize {
+    (width.max(1) as usize)
+        .saturating_mul(height.max(1) as usize)
+        .saturating_mul(4)
+        .saturating_mul(D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER)
+        .max(D2D_BITMAP_CACHE_MIN_BUDGET_BYTES)
+}
+
+struct D2dBitmapCacheEntry {
+    bitmap: ID2D1Bitmap1,
+    bytes: usize,
+    last_used: u64,
+}
+
+struct D2dBitmapCache {
+    entries: HashMap<D2dBitmapCacheKey, D2dBitmapCacheEntry>,
+    bytes: usize,
+    tick: u64,
+    budget_bytes: usize,
+}
+
+impl D2dBitmapCache {
+    fn new(budget_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            bytes: 0,
+            tick: 0,
+            budget_bytes: budget_bytes.max(1),
+        }
+    }
+
+    fn retain_live(&mut self, live: &HashSet<D2dBitmapCacheKey>) {
+        let mut removed_bytes = 0usize;
+        self.entries.retain(|key, entry| {
+            let retain = live.contains(key);
+            if !retain {
+                removed_bytes = removed_bytes.saturating_add(entry.bytes);
+            }
+            retain
+        });
+        self.bytes = self.bytes.saturating_sub(removed_bytes);
+    }
+
+    fn get(&mut self, key: &D2dBitmapCacheKey) -> Option<ID2D1Bitmap1> {
+        self.tick = self.tick.saturating_add(1);
+        let entry = self.entries.get_mut(key)?;
+        entry.last_used = self.tick;
+        Some(entry.bitmap.clone())
+    }
+
+    fn insert(&mut self, key: D2dBitmapCacheKey, bitmap: ID2D1Bitmap1) {
+        self.tick = self.tick.saturating_add(1);
+        let bytes = key.estimated_bytes();
+        if let Some(previous) = self.entries.remove(&key) {
+            self.bytes = self.bytes.saturating_sub(previous.bytes);
+        }
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.entries.insert(
+            key,
+            D2dBitmapCacheEntry {
+                bitmap,
+                bytes,
+                last_used: self.tick,
+            },
+        );
+    }
+
+    fn evict_to_budget(&mut self) {
+        let evictions = bitmap_cache_eviction_plan(
+            self.entries
+                .iter()
+                .map(|(key, entry)| (key.clone(), entry.last_used, entry.bytes)),
+            self.bytes,
+            self.budget_bytes,
+        );
+        for key in evictions {
+            if let Some(entry) = self.entries.remove(&key) {
+                self.bytes = self.bytes.saturating_sub(entry.bytes);
+            }
+        }
+    }
+}
+
+fn bitmap_cache_eviction_plan(
+    entries: impl IntoIterator<Item = (D2dBitmapCacheKey, u64, usize)>,
+    mut bytes: usize,
+    budget_bytes: usize,
+) -> Vec<D2dBitmapCacheKey> {
+    let mut entries = entries.into_iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(_, last_used, _)| *last_used);
+    let mut evictions = Vec::new();
+    let mut remaining = entries.len();
+    for (key, _, entry_bytes) in entries {
+        if bytes <= budget_bytes || remaining <= 1 {
+            break;
+        }
+        bytes = bytes.saturating_sub(entry_bytes);
+        remaining -= 1;
+        evictions.push(key);
+    }
+    evictions
 }
 
 struct D2dCompositingLayer {
@@ -68,6 +178,17 @@ struct D2dCompositingLayer {
     height: i32,
     bitmap: ID2D1Bitmap1,
     commands: Vec<ScenePrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct D2dOverlayBrushCacheKey {
+    rect: UiRect,
+    style_signature: u64,
+}
+
+struct D2dOverlayBrushSet {
+    linear: Vec<ID2D1LinearGradientBrush>,
+    radial: Vec<ID2D1RadialGradientBrush>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -82,11 +203,6 @@ enum D2dBitmapCacheKey {
         key: &'static str,
         color: u32,
         alpha: u8,
-        width: i32,
-        height: i32,
-    },
-    Overlay {
-        signature: u64,
         width: i32,
         height: i32,
     },
@@ -105,6 +221,20 @@ enum D2dBitmapCacheKey {
     },
 }
 
+impl D2dBitmapCacheKey {
+    fn estimated_bytes(&self) -> usize {
+        let (width, height) = match self {
+            Self::Image { width, height, .. }
+            | Self::Icon { width, height, .. }
+            | Self::BackdropBlur { width, height, .. }
+            | Self::StaticLayer { width, height, .. } => (*width, *height),
+        };
+        (width.max(1) as usize)
+            .saturating_mul(height.max(1) as usize)
+            .saturating_mul(4)
+    }
+}
+
 impl D2dRenderer {
     pub fn new(
         context: ID2D1DeviceContext,
@@ -120,14 +250,15 @@ impl D2dRenderer {
             context,
             dwrite_factory,
             scene_bitmap,
-            bitmap_cache: HashMap::new(),
+            bitmap_cache: D2dBitmapCache::new(d2d_bitmap_cache_budget(width, height)),
+            overlay_brush_cache: HashMap::new(),
             frame_bitmap_cache: HashMap::new(),
             compositing_layers: HashMap::new(),
         })
     }
 
     pub fn draw_scene_full(&mut self, list: &Scene) -> Result<()> {
-        self.frame_bitmap_cache.clear();
+        self.begin_frame(list);
         self.retain_compositing_layers(list);
         self.ensure_static_layer_cache(list, None)?;
         unsafe {
@@ -137,11 +268,12 @@ impl D2dRenderer {
             draw_scene_d2d(self, list, None)?;
             self.context.EndDraw(None, None)?;
         }
+        self.bitmap_cache.evict_to_budget();
         Ok(())
     }
 
     pub fn draw_scene_dirty(&mut self, list: &Scene, rects: &[UiRect]) -> Result<()> {
-        self.frame_bitmap_cache.clear();
+        self.begin_frame(list);
         self.retain_compositing_layers(list);
         for rect in rects {
             self.ensure_static_layer_cache(list, Some(*rect))?;
@@ -159,7 +291,17 @@ impl D2dRenderer {
             }
             self.context.EndDraw(None, None)?;
         }
+        self.bitmap_cache.evict_to_budget();
         Ok(())
+    }
+
+    fn begin_frame(&mut self, list: &Scene) {
+        self.frame_bitmap_cache.clear();
+        let live = bitmap_cache_keys(list.commands());
+        self.bitmap_cache.retain_live(&live);
+        let live_overlays = overlay_brush_cache_keys(list.commands());
+        self.overlay_brush_cache
+            .retain(|key, _| live_overlays.contains(key));
     }
 
     pub fn copy_scene_to_target(
@@ -248,9 +390,6 @@ impl D2dRenderer {
                 content_signature,
                 ..
             } => {
-                for command in commands {
-                    self.ensure_static_layer_command(command, None)?;
-                }
                 let width = rect.width().max(1);
                 let height = rect.height().max(1);
                 let previous = self.compositing_layers.remove(id);
@@ -265,6 +404,9 @@ impl D2dRenderer {
                     _ => create_compositing_layer(self, width, height, spec.background)?,
                 };
                 if layer.content_signature != Some(*content_signature) {
+                    for command in commands {
+                        self.ensure_static_layer_command(command, None)?;
+                    }
                     let bounds = UiRect::new(0, 0, width, height);
                     let damage = if layer.commands.is_empty() {
                         vec![bounds]
@@ -291,8 +433,8 @@ impl D2dRenderer {
                 child_signature,
                 ..
             } => {
-                for command in commands {
-                    self.ensure_static_layer_command(command, clip)?;
+                if pure_static_layer_image(spec, commands).is_some() {
+                    return Ok(());
                 }
                 let cache_key = static_layer_cache_key(
                     id,
@@ -303,6 +445,9 @@ impl D2dRenderer {
                 );
                 if spec.cache_policy == StaticLayerCachePolicy::Disabled {
                     if !self.frame_bitmap_cache.contains_key(&cache_key) {
+                        for command in commands {
+                            self.ensure_static_layer_command(command, clip)?;
+                        }
                         let bitmap = render_static_layer_bitmap(
                             self,
                             *rect,
@@ -312,7 +457,10 @@ impl D2dRenderer {
                         )?;
                         self.frame_bitmap_cache.insert(cache_key, bitmap);
                     }
-                } else if !self.bitmap_cache.contains_key(&cache_key) {
+                } else if self.bitmap_cache.get(&cache_key).is_none() {
+                    for command in commands {
+                        self.ensure_static_layer_command(command, clip)?;
+                    }
                     let bitmap =
                         render_static_layer_bitmap(self, *rect, spec, commands, Some(&cache_key))?;
                     self.bitmap_cache.insert(cache_key, bitmap);
@@ -347,6 +495,18 @@ impl D2dRenderer {
     }
 }
 
+fn bitmap_cache_keys(commands: &[ScenePrimitive]) -> HashSet<D2dBitmapCacheKey> {
+    let mut keys = HashSet::new();
+    collect_bitmap_cache_keys(commands, &mut keys);
+    keys
+}
+
+fn overlay_brush_cache_keys(commands: &[ScenePrimitive]) -> HashSet<D2dOverlayBrushCacheKey> {
+    let mut keys = HashSet::new();
+    collect_overlay_brush_cache_keys(commands, &mut keys);
+    keys
+}
+
 fn collect_compositing_layer_ids(
     commands: &[ScenePrimitive],
     ids: &mut std::collections::HashSet<UiId>,
@@ -365,6 +525,111 @@ fn collect_compositing_layer_ids(
             }
             _ => {}
         }
+    }
+}
+
+fn collect_bitmap_cache_keys(commands: &[ScenePrimitive], keys: &mut HashSet<D2dBitmapCacheKey>) {
+    for command in commands {
+        match command {
+            ScenePrimitive::Image {
+                rect, source, fit, ..
+            } => {
+                keys.insert(image_cache_key(*rect, source, *fit));
+            }
+            ScenePrimitive::Icon {
+                rect, key, style, ..
+            } => {
+                keys.insert(icon_cache_key(*rect, key, *style));
+            }
+            ScenePrimitive::BackdropBlur { rect, style, .. } => {
+                keys.insert(backdrop_blur_cache_key(*rect, *style));
+            }
+            ScenePrimitive::StaticLayer {
+                id,
+                rect,
+                spec,
+                commands,
+                child_signature,
+                ..
+            } => {
+                if let Some((source, fit)) = pure_static_layer_image(spec, commands) {
+                    keys.insert(image_cache_key(
+                        UiRect::new(0, 0, rect.width().max(1), rect.height().max(1)),
+                        &UiImageSource::Static(source),
+                        fit,
+                    ));
+                } else if spec.cache_policy == StaticLayerCachePolicy::Disabled {
+                    collect_bitmap_cache_keys(commands, keys);
+                } else {
+                    keys.insert(static_layer_cache_key(
+                        id,
+                        spec,
+                        rect.width().max(1),
+                        rect.height().max(1),
+                        *child_signature,
+                    ));
+                }
+            }
+            ScenePrimitive::ScrollRaster { commands, .. }
+            | ScenePrimitive::Clip { commands, .. }
+            | ScenePrimitive::ClipPath { commands, .. } => {
+                collect_bitmap_cache_keys(commands, keys);
+            }
+            ScenePrimitive::CompositingLayer { .. }
+            | ScenePrimitive::Rect { .. }
+            | ScenePrimitive::Ellipse { .. }
+            | ScenePrimitive::Text { .. }
+            | ScenePrimitive::Custom { .. }
+            | ScenePrimitive::Line { .. }
+            | ScenePrimitive::Path { .. }
+            | ScenePrimitive::Glow { .. }
+            | ScenePrimitive::BackdropBlurPath { .. }
+            | ScenePrimitive::Overlay { .. } => {}
+        }
+    }
+}
+
+fn collect_overlay_brush_cache_keys(
+    commands: &[ScenePrimitive],
+    keys: &mut HashSet<D2dOverlayBrushCacheKey>,
+) {
+    for command in commands {
+        match command {
+            ScenePrimitive::Overlay { rect, style, .. } => {
+                keys.insert(overlay_brush_cache_key(*rect, style));
+            }
+            ScenePrimitive::StaticLayer { spec, commands, .. }
+                if spec.cache_policy == StaticLayerCachePolicy::Disabled =>
+            {
+                collect_overlay_brush_cache_keys(commands, keys);
+            }
+            ScenePrimitive::ScrollRaster { commands, .. }
+            | ScenePrimitive::Clip { commands, .. }
+            | ScenePrimitive::ClipPath { commands, .. } => {
+                collect_overlay_brush_cache_keys(commands, keys);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn pure_static_layer_image(
+    spec: &StaticLayerSpec,
+    commands: &[ScenePrimitive],
+) -> Option<(&'static str, ImageFit)> {
+    if !commands.is_empty() || spec.background != StaticLayerBackground::Transparent {
+        return None;
+    }
+    match spec.source {
+        StaticLayerSource::BakedAsset { key, fit } => Some((key, fit)),
+        StaticLayerSource::Hybrid {
+            baked_base: Some(key),
+            fit,
+        } => Some((key, fit)),
+        StaticLayerSource::RuntimeGenerated
+        | StaticLayerSource::Hybrid {
+            baked_base: None, ..
+        } => None,
     }
 }
 
@@ -700,30 +965,44 @@ fn draw_image(
     source: &UiImageSource,
     fit: ImageFit,
 ) -> Result<()> {
-    // Image cache is for stable asset sources only. Do not route dynamic raster output here.
-    let key = D2dBitmapCacheKey::Image {
+    let Some(bitmap) = image_bitmap(resources, rect, source, fit)? else {
+        return Ok(());
+    };
+    draw_bitmap(&resources.context, rect, &bitmap);
+    Ok(())
+}
+
+fn image_cache_key(rect: UiRect, source: &UiImageSource, fit: ImageFit) -> D2dBitmapCacheKey {
+    D2dBitmapCacheKey::Image {
         source: source.clone(),
         fit,
         width: rect.width().max(1),
         height: rect.height().max(1),
+    }
+}
+
+fn image_bitmap(
+    resources: &mut D2dRenderer,
+    rect: UiRect,
+    source: &UiImageSource,
+    fit: ImageFit,
+) -> Result<Option<ID2D1Bitmap1>> {
+    // Image cache is for stable asset sources only. Do not route dynamic raster output here.
+    let key = image_cache_key(rect, source, fit);
+    if let Some(bitmap) = resources.bitmap_cache.get(&key) {
+        return Ok(Some(bitmap));
+    }
+    let Some(image) = image::rasterize_ui_image_bgra(source, rect, fit) else {
+        return Ok(None);
     };
-    let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&key) {
-        bitmap.clone()
-    } else {
-        let Some(image) = image::rasterize_ui_image_bgra(source, rect, fit) else {
-            return Ok(());
-        };
-        let bitmap = create_bgra_bitmap(
-            &resources.context,
-            image.width,
-            image.height,
-            &image.premultiplied_bgra,
-        )?;
-        resources.bitmap_cache.insert(key, bitmap.clone());
-        bitmap
-    };
-    draw_bitmap(&resources.context, rect, &bitmap);
-    Ok(())
+    let bitmap = create_bgra_bitmap(
+        &resources.context,
+        image.width,
+        image.height,
+        &image.premultiplied_bgra,
+    )?;
+    resources.bitmap_cache.insert(key, bitmap.clone());
+    Ok(Some(bitmap))
 }
 
 fn draw_icon(
@@ -734,15 +1013,9 @@ fn draw_icon(
 ) -> Result<()> {
     // Icon cache is valid while key/style/size are stable. Highly dynamic icon styling should
     // avoid producing unbounded cache keys.
-    let cache_key = D2dBitmapCacheKey::Icon {
-        key,
-        color: style.color.0,
-        alpha: style.alpha,
-        width: rect.width().max(1),
-        height: rect.height().max(1),
-    };
+    let cache_key = icon_cache_key(rect, key, style);
     let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&cache_key) {
-        bitmap.clone()
+        bitmap
     } else {
         let Some(icon) = lgui::platform::win32::rasterize_svg_icon_bgra(key, rect, style) else {
             return Ok(());
@@ -758,6 +1031,16 @@ fn draw_icon(
     };
     draw_bitmap(&resources.context, rect, &bitmap);
     Ok(())
+}
+
+fn icon_cache_key(rect: UiRect, key: &'static str, style: IconStyle) -> D2dBitmapCacheKey {
+    D2dBitmapCacheKey::Icon {
+        key,
+        color: style.color.0,
+        alpha: style.alpha,
+        width: rect.width().max(1),
+        height: rect.height().max(1),
+    }
 }
 
 fn create_compositing_layer(
@@ -834,6 +1117,15 @@ fn draw_static_layer(
     let draw_rect = rect.translate(spec.offset_x, spec.offset_y);
     let width = rect.width().max(1);
     let height = rect.height().max(1);
+    if let Some((source, fit)) = pure_static_layer_image(spec, commands) {
+        let local_rect = UiRect::new(0, 0, width, height);
+        if let Some(bitmap) =
+            image_bitmap(resources, local_rect, &UiImageSource::Static(source), fit)?
+        {
+            draw_bitmap_opacity(&resources.context, draw_rect, &bitmap, spec.opacity_f32());
+        }
+        return Ok(());
+    }
     let cache_key = static_layer_cache_key(id, spec, width, height, child_signature);
     if spec.cache_policy == StaticLayerCachePolicy::Disabled {
         let bitmap = if let Some(bitmap) = resources.frame_bitmap_cache.get(&cache_key) {
@@ -852,7 +1144,7 @@ fn draw_static_layer(
         return Ok(());
     }
     let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&cache_key) {
-        bitmap.clone()
+        bitmap
     } else {
         let bitmap = render_static_layer_bitmap(resources, rect, spec, commands, Some(&cache_key))?;
         resources.bitmap_cache.insert(cache_key, bitmap.clone());
@@ -1217,32 +1509,137 @@ fn draw_custom_effect(
 
 fn draw_overlay(resources: &mut D2dRenderer, rect: UiRect, style: &OverlayStyle) -> Result<()> {
     let start = Instant::now();
-    let width = rect.width().max(1);
-    let height = rect.height().max(1);
-    // Overlay caching is only appropriate for stable style signatures. Animated or interaction
-    // driven overlays should use explicit drawing paths instead of relying on this cache.
-    let key = D2dBitmapCacheKey::Overlay {
-        signature: overlay_signature(style),
-        width,
-        height,
-    };
-    let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&key) {
-        bitmap.clone()
-    } else {
-        let mut pixels = vec![0u8; (width * height * 4) as usize];
-        for layer in &style.vertical_layers {
-            composite_vertical_gradient(&mut pixels, width, height, *layer);
+    let area = d2d_rect(rect);
+    let key = ensure_overlay_brush_set(resources, rect, style)?;
+    let brushes = resources
+        .overlay_brush_cache
+        .get(&key)
+        .expect("overlay brush set must exist after ensure");
+    unsafe {
+        for brush in &brushes.linear {
+            resources.context.FillRectangle(&area, brush);
         }
-        for layer in &style.radial_layers {
-            composite_radial_gradient(&mut pixels, width, height, *layer);
+        for brush in &brushes.radial {
+            resources.context.FillRectangle(&area, brush);
         }
-        let bitmap = create_bgra_bitmap(&resources.context, width, height, &pixels)?;
-        resources.bitmap_cache.insert(key, bitmap.clone());
-        bitmap
-    };
-    draw_bitmap(&resources.context, rect, &bitmap);
+    }
     trace_duration("d2d.draw_overlay", start.elapsed());
     Ok(())
+}
+
+fn ensure_overlay_brush_set(
+    resources: &mut D2dRenderer,
+    rect: UiRect,
+    style: &OverlayStyle,
+) -> Result<D2dOverlayBrushCacheKey> {
+    let key = overlay_brush_cache_key(rect, style);
+    if resources.overlay_brush_cache.contains_key(&key) {
+        return Ok(key);
+    }
+
+    let width = rect.width().max(1) as f32;
+    let height = rect.height().max(1) as f32;
+    let mut linear = Vec::with_capacity(style.vertical_layers.len());
+    let mut radial = Vec::with_capacity(style.radial_layers.len());
+    unsafe {
+        for layer in &style.vertical_layers {
+            let stops = [
+                D2D1_GRADIENT_STOP {
+                    position: 0.0,
+                    color: d2d_color_alpha(layer.color, layer.alpha_top),
+                },
+                D2D1_GRADIENT_STOP {
+                    position: 1.0,
+                    color: d2d_color_alpha(layer.color, layer.alpha_bottom),
+                },
+            ];
+            let collection = resources.context.CreateGradientStopCollection(
+                &stops,
+                D2D1_COLOR_SPACE_SRGB,
+                D2D1_COLOR_SPACE_SRGB,
+                D2D1_BUFFER_PRECISION_8BPC_UNORM,
+                D2D1_EXTEND_MODE_CLAMP,
+                D2D1_COLOR_INTERPOLATION_MODE_STRAIGHT,
+            )?;
+            let properties = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                startPoint: windows_numerics::Vector2 {
+                    X: rect.left as f32,
+                    Y: rect.top as f32,
+                },
+                endPoint: windows_numerics::Vector2 {
+                    X: rect.left as f32,
+                    Y: rect.top as f32 + height,
+                },
+            };
+            linear.push(resources.context.CreateLinearGradientBrush(
+                &properties,
+                None,
+                &collection,
+            )?);
+        }
+        for layer in &style.radial_layers {
+            let stops = radial_gradient_stops(*layer);
+            let collection = resources.context.CreateGradientStopCollection(
+                &stops,
+                D2D1_COLOR_SPACE_SRGB,
+                D2D1_COLOR_SPACE_SRGB,
+                D2D1_BUFFER_PRECISION_8BPC_UNORM,
+                D2D1_EXTEND_MODE_CLAMP,
+                D2D1_COLOR_INTERPOLATION_MODE_STRAIGHT,
+            )?;
+            let radius = (width.min(height) * layer.radius).max(1.0);
+            let properties = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                center: windows_numerics::Vector2 {
+                    X: rect.left as f32 + width * layer.center_x,
+                    Y: rect.top as f32 + height * layer.center_y,
+                },
+                gradientOriginOffset: windows_numerics::Vector2 { X: 0.0, Y: 0.0 },
+                radiusX: radius,
+                radiusY: radius,
+            };
+            radial.push(resources.context.CreateRadialGradientBrush(
+                &properties,
+                None,
+                &collection,
+            )?);
+        }
+    }
+    let brushes = D2dOverlayBrushSet { linear, radial };
+    resources.overlay_brush_cache.insert(key.clone(), brushes);
+    Ok(key)
+}
+
+fn overlay_brush_cache_key(rect: UiRect, style: &OverlayStyle) -> D2dOverlayBrushCacheKey {
+    D2dOverlayBrushCacheKey {
+        rect,
+        style_signature: overlay_signature(style),
+    }
+}
+
+fn overlay_signature(style: &OverlayStyle) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    style.vertical_layers.len().hash(&mut hasher);
+    for layer in &style.vertical_layers {
+        layer.color.0.hash(&mut hasher);
+        layer.alpha_top.to_bits().hash(&mut hasher);
+        layer.alpha_bottom.to_bits().hash(&mut hasher);
+    }
+    style.radial_layers.len().hash(&mut hasher);
+    for layer in &style.radial_layers {
+        layer.color.0.hash(&mut hasher);
+        layer.alpha.to_bits().hash(&mut hasher);
+        layer.center_x.to_bits().hash(&mut hasher);
+        layer.center_y.to_bits().hash(&mut hasher);
+        layer.radius.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn radial_gradient_stops(layer: lgui::core::RadialGradientLayer) -> [D2D1_GRADIENT_STOP; 5] {
+    [0.0_f32, 0.25, 0.5, 0.75, 1.0].map(|position| D2D1_GRADIENT_STOP {
+        position,
+        color: d2d_color_alpha(layer.color, layer.alpha * (1.0 - position).powi(2)),
+    })
 }
 
 fn draw_backdrop_blur(
@@ -1250,18 +1647,13 @@ fn draw_backdrop_blur(
     rect: UiRect,
     style: lgui::core::BackdropBlurStyle,
 ) -> Result<()> {
-    let signature = backdrop_blur_signature(rect, style);
     let Some(result) = with_backdrop_blur_bgra(rect, style, |pixels, width, height, opacity| {
         if opacity <= 0.0 {
             return Ok(());
         }
-        let key = D2dBitmapCacheKey::BackdropBlur {
-            signature,
-            width,
-            height,
-        };
+        let key = backdrop_blur_cache_key(rect, style);
         let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&key) {
-            bitmap.clone()
+            bitmap
         } else {
             let bitmap = create_bgra_bitmap(&resources.context, width, height, pixels)?;
             resources.bitmap_cache.insert(key, bitmap.clone());
@@ -1273,6 +1665,17 @@ fn draw_backdrop_blur(
         return Ok(());
     };
     result
+}
+
+fn backdrop_blur_cache_key(
+    rect: UiRect,
+    style: lgui::core::BackdropBlurStyle,
+) -> D2dBitmapCacheKey {
+    D2dBitmapCacheKey::BackdropBlur {
+        signature: backdrop_blur_signature(rect, style),
+        width: rect.width().max(1),
+        height: rect.height().max(1),
+    }
 }
 
 fn draw_backdrop_blur_path(
@@ -1465,106 +1868,6 @@ fn backdrop_blur_signature(rect: UiRect, style: lgui::core::BackdropBlurStyle) -
     hasher.finish()
 }
 
-fn composite_vertical_gradient(
-    pixels: &mut [u8],
-    width: i32,
-    height: i32,
-    layer: lgui::core::VerticalGradientLayer,
-) {
-    let (red, green, blue) = color_components(layer.color);
-    for y in 0..height {
-        let t = if height <= 1 {
-            1.0
-        } else {
-            y as f32 / (height - 1) as f32
-        };
-        let alpha = layer.alpha_top + (layer.alpha_bottom - layer.alpha_top) * t;
-        let alpha_u8 = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
-        if alpha_u8 == 0 {
-            continue;
-        }
-        for x in 0..width {
-            let index = ((y * width + x) * 4) as usize;
-            composite_premultiplied_pixel(
-                &mut pixels[index..index + 4],
-                red,
-                green,
-                blue,
-                alpha_u8,
-            );
-        }
-    }
-}
-
-fn composite_radial_gradient(
-    pixels: &mut [u8],
-    width: i32,
-    height: i32,
-    layer: lgui::core::RadialGradientLayer,
-) {
-    let (red, green, blue) = color_components(layer.color);
-    let center_x = width as f32 * layer.center_x;
-    let center_y = height as f32 * layer.center_y;
-    let radius = (width.min(height) as f32 * layer.radius).max(1.0);
-
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 + 0.5 - center_x;
-            let dy = y as f32 + 0.5 - center_y;
-            let distance = ((dx * dx + dy * dy).sqrt() / radius).clamp(0.0, 1.0);
-            let falloff = (1.0 - distance).powf(2.0);
-            let alpha = (layer.alpha * falloff).clamp(0.0, 1.0);
-            if alpha <= 0.0 {
-                continue;
-            }
-            let index = ((y * width + x) * 4) as usize;
-            composite_premultiplied_pixel(
-                &mut pixels[index..index + 4],
-                red,
-                green,
-                blue,
-                (alpha * 255.0).round() as u8,
-            );
-        }
-    }
-}
-
-fn composite_premultiplied_pixel(pixel: &mut [u8], red: u8, green: u8, blue: u8, alpha: u8) {
-    let alpha_f = alpha as f32 / 255.0;
-    let inv_alpha = 1.0 - alpha_f;
-    pixel[0] = ((blue as f32 * alpha_f) + (pixel[0] as f32 * inv_alpha)).round() as u8;
-    pixel[1] = ((green as f32 * alpha_f) + (pixel[1] as f32 * inv_alpha)).round() as u8;
-    pixel[2] = ((red as f32 * alpha_f) + (pixel[2] as f32 * inv_alpha)).round() as u8;
-    pixel[3] = ((alpha as f32) + (pixel[3] as f32 * inv_alpha)).round() as u8;
-}
-
-fn overlay_signature(style: &OverlayStyle) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    style.vertical_layers.len().hash(&mut hasher);
-    for layer in &style.vertical_layers {
-        layer.color.0.hash(&mut hasher);
-        layer.alpha_top.to_bits().hash(&mut hasher);
-        layer.alpha_bottom.to_bits().hash(&mut hasher);
-    }
-    style.radial_layers.len().hash(&mut hasher);
-    for layer in &style.radial_layers {
-        layer.color.0.hash(&mut hasher);
-        layer.alpha.to_bits().hash(&mut hasher);
-        layer.center_x.to_bits().hash(&mut hasher);
-        layer.center_y.to_bits().hash(&mut hasher);
-        layer.radius.to_bits().hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-fn color_components(color: Color) -> (u8, u8, u8) {
-    (
-        ((color.0 >> 16) & 0xFF) as u8,
-        ((color.0 >> 8) & 0xFF) as u8,
-        (color.0 & 0xFF) as u8,
-    )
-}
-
 fn draw_text(
     context: &ID2D1DeviceContext,
     dwrite_factory: &IDWriteFactory,
@@ -1669,12 +1972,16 @@ fn rounded_rect(rect: UiRect, radius: i32) -> D2D1_ROUNDED_RECT {
 }
 
 fn d2d_color(color: Color, alpha: u8) -> D2D1_COLOR_F {
+    d2d_color_alpha(color, alpha as f32 / 255.0)
+}
+
+fn d2d_color_alpha(color: Color, alpha: f32) -> D2D1_COLOR_F {
     let rgb = color.0;
     D2D1_COLOR_F {
         r: ((rgb >> 16) & 0xFF) as f32 / 255.0,
         g: ((rgb >> 8) & 0xFF) as f32 / 255.0,
         b: (rgb & 0xFF) as f32 / 255.0,
-        a: alpha as f32 / 255.0,
+        a: alpha.clamp(0.0, 1.0),
     }
 }
 
@@ -1837,5 +2144,165 @@ mod tests {
         let expected = transform.transform_point(rect, rect.left as f32, rect.top as f32);
         assert!((actual.0 - expected.0).abs() < 0.001);
         assert!((actual.1 - expected.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn bitmap_cache_budget_evicts_oldest_entries_and_keeps_one_oversized_entry() {
+        let first = image_cache_key(
+            UiRect::new(0, 0, 10, 10),
+            &UiImageSource::Static("first"),
+            ImageFit::Fill,
+        );
+        let second = image_cache_key(
+            UiRect::new(0, 0, 20, 10),
+            &UiImageSource::Static("second"),
+            ImageFit::Fill,
+        );
+        let third = image_cache_key(
+            UiRect::new(0, 0, 30, 10),
+            &UiImageSource::Static("third"),
+            ImageFit::Fill,
+        );
+        let entries = vec![
+            (first.clone(), 1, first.estimated_bytes()),
+            (second.clone(), 2, second.estimated_bytes()),
+            (third.clone(), 3, third.estimated_bytes()),
+        ];
+        let total = entries.iter().map(|(_, _, bytes)| bytes).sum();
+
+        let evictions = bitmap_cache_eviction_plan(entries, total, third.estimated_bytes());
+
+        assert_eq!(evictions, vec![first, second]);
+        assert!(bitmap_cache_eviction_plan(
+            vec![(third.clone(), 1, third.estimated_bytes())],
+            third.estimated_bytes(),
+            1,
+        )
+        .is_empty());
+        assert_eq!(
+            d2d_bitmap_cache_budget(1432, 860),
+            D2D_BITMAP_CACHE_MIN_BUDGET_BYTES
+        );
+        assert!(d2d_bitmap_cache_budget(3840, 2160) > D2D_BITMAP_CACHE_MIN_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn native_radial_gradient_stops_follow_the_quadratic_falloff() {
+        let stops = radial_gradient_stops(lgui::core::RadialGradientLayer::new(
+            Color(0x336699),
+            0.8,
+            0.5,
+            0.5,
+            0.5,
+        ));
+
+        assert_eq!(stops.map(|stop| stop.position), [0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert!((stops[0].color.a - 0.8).abs() < 0.0001);
+        assert!((stops[2].color.a - 0.2).abs() < 0.0001);
+        assert_eq!(stops[4].color.a, 0.0);
+    }
+
+    #[test]
+    fn overlay_brush_cache_reachability_tracks_style_and_rect() {
+        let rect = UiRect::new(0, 0, 320, 180);
+        let style = OverlayStyle::new()
+            .vertical(lgui::core::VerticalGradientLayer::new(
+                Color(0x112233),
+                0.1,
+                0.4,
+            ))
+            .radial(lgui::core::RadialGradientLayer::new(
+                Color(0x445566),
+                0.2,
+                0.5,
+                0.5,
+                0.6,
+            ));
+        let overlay = |rect, style| ScenePrimitive::Overlay {
+            id: UiId::owned("overlay".to_string()),
+            rect,
+            style,
+            phase: lgui::core::RenderPhase::Content,
+        };
+
+        let keys = overlay_brush_cache_keys(&[overlay(rect, style.clone())]);
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains(&overlay_brush_cache_key(rect, &style)));
+
+        let moved_keys = overlay_brush_cache_keys(&[overlay(rect.translate(10, 0), style.clone())]);
+        let changed_style = style.radial(lgui::core::RadialGradientLayer::new(
+            Color(0x778899),
+            0.3,
+            0.4,
+            0.4,
+            0.5,
+        ));
+        let changed_keys = overlay_brush_cache_keys(&[overlay(rect, changed_style)]);
+
+        assert!(keys.is_disjoint(&moved_keys));
+        assert!(keys.is_disjoint(&changed_keys));
+    }
+
+    #[test]
+    fn transparent_pure_image_static_layer_reuses_the_image_cache_key() {
+        let rect = UiRect::new(0, 0, 320, 180);
+        let spec = StaticLayerSpec::new(StaticLayerSource::hybrid(
+            Some("background"),
+            ImageFit::Cover,
+        ))
+        .cache_policy(StaticLayerCachePolicy::Memory)
+        .transparent_background();
+        assert_eq!(
+            pure_static_layer_image(&spec, &[]),
+            Some(("background", ImageFit::Cover))
+        );
+
+        let mut keys = HashSet::new();
+        collect_bitmap_cache_keys(
+            &[ScenePrimitive::StaticLayer {
+                id: UiId::owned("static".to_string()),
+                rect,
+                spec: spec.clone(),
+                commands: Vec::new(),
+                child_signature: 7,
+                phase: lgui::core::RenderPhase::Content,
+            }],
+            &mut keys,
+        );
+
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains(&image_cache_key(
+            UiRect::new(0, 0, rect.width(), rect.height()),
+            &UiImageSource::Static("background"),
+            ImageFit::Cover,
+        )));
+        assert!(pure_static_layer_image(
+            &StaticLayerSpec::new(StaticLayerSource::baked("background", ImageFit::Cover)),
+            &[],
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn bitmap_cache_reachability_replaces_keys_from_the_previous_scene() {
+        let image = |name| ScenePrimitive::Image {
+            id: UiId::owned(format!("{name}-image")),
+            rect: UiRect::new(0, 0, 64, 64),
+            source: UiImageSource::Static(name),
+            fit: ImageFit::Cover,
+            phase: lgui::core::RenderPhase::Content,
+        };
+
+        let login_keys = bitmap_cache_keys(&[image("login")]);
+        let lobby_keys = bitmap_cache_keys(&[image("lobby")]);
+
+        assert_eq!(login_keys.len(), 1);
+        assert_eq!(lobby_keys.len(), 1);
+        assert!(login_keys.is_disjoint(&lobby_keys));
+        assert!(lobby_keys.contains(&image_cache_key(
+            UiRect::new(0, 0, 64, 64),
+            &UiImageSource::Static("lobby"),
+            ImageFit::Cover,
+        )));
     }
 }

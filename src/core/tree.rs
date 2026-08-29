@@ -3,6 +3,10 @@ use super::{
     InteractionRole, Point, Scene, UiAction, UiActionHandler, UiEvent, UiEventHandler, UiEventKind,
     UiEventPayload, UiHandlerEvent, UiId, UiNode, UiRect,
 };
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct HitResult {
@@ -52,8 +56,9 @@ impl Eq for HitResult {}
 
 #[derive(Clone, Default)]
 pub struct HostTree {
-    nodes: Vec<UiNode>,
-    owners: std::collections::HashMap<ComponentId, std::collections::HashSet<UiId>>,
+    nodes: Vec<Arc<UiNode>>,
+    node_indices: Arc<HashMap<UiId, usize>>,
+    owners: Arc<HashMap<ComponentId, HashSet<UiId>>>,
     projection_changes: ProjectionChanges,
 }
 
@@ -62,13 +67,16 @@ pub(crate) struct ProjectionChanges {
     pub changed: std::collections::HashSet<UiId>,
     pub removed: std::collections::HashSet<UiId>,
     pub structure_changed: bool,
+    pub(crate) animation_sync: std::collections::HashSet<UiId>,
+    pub(crate) focus_sync: bool,
 }
 
 impl HostTree {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
-            owners: std::collections::HashMap::new(),
+            node_indices: Arc::new(HashMap::new()),
+            owners: Arc::new(HashMap::new()),
             projection_changes: ProjectionChanges::default(),
         }
     }
@@ -76,40 +84,45 @@ impl HostTree {
     pub fn push(&mut self, node: UiNode) {
         self.projection_changes.changed.insert(node.id.clone());
         self.projection_changes.structure_changed = true;
+        self.mark_runtime_sync_for_insert(&node);
         if let Some(parent_id) = node.parent.as_ref() {
             if let Some(parent) = self.node_mut(parent_id) {
                 parent.children.push(node.id.clone());
             }
         }
         if let Some(owner) = node.component_owner {
-            self.owners
+            Arc::make_mut(&mut self.owners)
                 .entry(owner)
                 .or_default()
                 .insert(node.id.clone());
         }
-        self.nodes.push(node);
+        let index = self.nodes.len();
+        Arc::make_mut(&mut self.node_indices).insert(node.id.clone(), index);
+        self.nodes.push(Arc::new(node));
     }
 
     pub(crate) fn upsert(&mut self, node: UiNode) {
-        if let Some(index) = self.nodes.iter().position(|current| current.id == node.id) {
+        if let Some(index) = self.node_indices.get(&node.id).copied() {
             if !self.nodes[index].projection_eq(&node) {
                 self.projection_changes.changed.insert(node.id.clone());
             }
+            let previous = Arc::clone(&self.nodes[index]);
+            self.mark_runtime_sync_for_update(&previous, &node);
             let previous_owner = self.nodes[index].component_owner;
             if previous_owner != node.component_owner {
                 if let Some(owner) = previous_owner {
-                    if let Some(ids) = self.owners.get_mut(&owner) {
+                    if let Some(ids) = Arc::make_mut(&mut self.owners).get_mut(&owner) {
                         ids.remove(&node.id);
                     }
                 }
+                if let Some(owner) = node.component_owner {
+                    Arc::make_mut(&mut self.owners)
+                        .entry(owner)
+                        .or_default()
+                        .insert(node.id.clone());
+                }
             }
-            if let Some(owner) = node.component_owner {
-                self.owners
-                    .entry(owner)
-                    .or_default()
-                    .insert(node.id.clone());
-            }
-            self.nodes[index] = node;
+            self.nodes[index] = Arc::new(node);
         } else {
             self.push(node);
         }
@@ -164,25 +177,40 @@ impl HostTree {
         if remove.is_empty() {
             return false;
         }
+        for id in remove {
+            if let Some(index) = self.node_indices.get(id).copied() {
+                let node = Arc::clone(&self.nodes[index]);
+                self.mark_runtime_sync_for_remove(&node);
+            }
+        }
         self.nodes.retain(|node| !remove.contains(&node.id));
         self.projection_changes
             .removed
             .extend(remove.iter().cloned());
         self.projection_changes.structure_changed = true;
         for node in &mut self.nodes {
-            node.children.retain(|child| !remove.contains(child));
-            if node
+            let children_changed = node.children.iter().any(|child| remove.contains(child));
+            let parent_changed = node
                 .parent
                 .as_ref()
                 .is_some_and(|parent| remove.contains(parent))
-            {
+                ;
+            if !children_changed && !parent_changed {
+                continue;
+            }
+            let node = Arc::make_mut(node);
+            if children_changed {
+                node.children.retain(|child| !remove.contains(child));
+            }
+            if parent_changed {
                 node.parent = None;
             }
         }
-        self.owners.retain(|_, ids| {
+        Arc::make_mut(&mut self.owners).retain(|_, ids| {
             ids.retain(|id| !remove.contains(id));
             !ids.is_empty()
         });
+        self.rebuild_node_indices();
         true
     }
 
@@ -206,9 +234,9 @@ impl HostTree {
         let mut seen = std::collections::HashSet::new();
         fn append(
             id: &UiId,
-            nodes: &std::collections::HashMap<UiId, UiNode>,
+            nodes: &std::collections::HashMap<UiId, Arc<UiNode>>,
             seen: &mut std::collections::HashSet<UiId>,
-            ordered: &mut Vec<UiNode>,
+            ordered: &mut Vec<Arc<UiNode>>,
         ) {
             if !seen.insert(id.clone()) {
                 return;
@@ -228,26 +256,47 @@ impl HostTree {
             append(id, &nodes, &mut seen, &mut ordered);
         }
         self.nodes = ordered;
+        self.rebuild_node_indices();
     }
 
     pub(crate) fn take_projection_changes(&mut self) -> ProjectionChanges {
         std::mem::take(&mut self.projection_changes)
     }
 
-    pub fn nodes(&self) -> &[UiNode] {
+    pub fn nodes(&self) -> &[Arc<UiNode>] {
         &self.nodes
     }
 
-    pub(crate) fn nodes_mut(&mut self) -> &mut [UiNode] {
-        &mut self.nodes
-    }
-
     pub fn node(&self, id: &UiId) -> Option<&UiNode> {
-        self.nodes.iter().find(|node| &node.id == id)
+        self.node_indices
+            .get(id)
+            .and_then(|index| self.nodes.get(*index))
+            .map(Arc::as_ref)
     }
 
     pub fn node_mut(&mut self, id: &UiId) -> Option<&mut UiNode> {
-        self.nodes.iter_mut().find(|node| &node.id == id)
+        let index = self.node_indices.get(id).copied()?;
+        self.nodes.get_mut(index).map(Arc::make_mut)
+    }
+
+    pub(crate) fn changed_nodes(&self, changed: &HashSet<UiId>) -> Vec<&UiNode> {
+        let mut indices = changed
+            .iter()
+            .filter_map(|id| self.node_indices.get(id).copied())
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices
+            .into_iter()
+            .filter_map(|index| self.nodes.get(index).map(Arc::as_ref))
+            .collect()
+    }
+
+    pub(crate) fn animation_sync_ids(&self) -> impl Iterator<Item = &UiId> {
+        self.projection_changes.animation_sync.iter()
+    }
+
+    pub(crate) fn needs_focus_sync(&self) -> bool {
+        self.projection_changes.focus_sync
     }
 
     pub(crate) fn update_compositing_layer(
@@ -255,8 +304,8 @@ impl HostTree {
         id: &UiId,
         spec: CompositingLayerSpec,
     ) -> Option<UiRect> {
-        let index = self.nodes.iter().position(|node| &node.id == id)?;
-        let node = &mut self.nodes[index];
+        let index = self.node_indices.get(id).copied()?;
+        let node = Arc::make_mut(&mut self.nodes[index]);
         let previous = node.compositing_layer?;
         if previous == spec {
             return None;
@@ -279,6 +328,45 @@ impl HostTree {
             (Some(bounds), None) | (None, Some(bounds)) => Some(bounds),
             (None, None) => None,
         }
+    }
+
+    fn rebuild_node_indices(&mut self) {
+        self.node_indices = Arc::new(
+            self.nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (node.id.clone(), index))
+                .collect(),
+        );
+    }
+
+    fn mark_runtime_sync_for_insert(&mut self, node: &UiNode) {
+        if node_needs_animation_sync(node) {
+            self.projection_changes
+                .animation_sync
+                .insert(node.id.clone());
+        }
+        self.projection_changes.focus_sync |= node_affects_focus(node);
+    }
+
+    fn mark_runtime_sync_for_update(&mut self, previous: &UiNode, next: &UiNode) {
+        if previous.animation_bindings != next.animation_bindings
+            || previous.animation_targets != next.animation_targets
+        {
+            self.projection_changes
+                .animation_sync
+                .insert(next.id.clone());
+        }
+        self.projection_changes.focus_sync |= !focus_projection_eq(previous, next);
+    }
+
+    fn mark_runtime_sync_for_remove(&mut self, node: &UiNode) {
+        if node_needs_animation_sync(node) {
+            self.projection_changes
+                .animation_sync
+                .insert(node.id.clone());
+        }
+        self.projection_changes.focus_sync |= node_affects_focus(node);
     }
 
     pub fn action_handler(&self, target: &UiId, id: &ActionId) -> Option<UiActionHandler> {
@@ -545,6 +633,7 @@ impl HostTree {
                     .rev()
                     .find(|node| node.render_phase != super::RenderPhase::Popup && contains(node))
             })
+            .map(Arc::as_ref)
     }
 
     fn node_visible_at_point(&self, node: &UiNode, point: Point) -> bool {
@@ -634,6 +723,22 @@ impl HostTree {
     }
 }
 
+fn node_needs_animation_sync(node: &UiNode) -> bool {
+    !node.animation_bindings.is_empty() || !node.animation_targets.is_empty()
+}
+
+fn node_affects_focus(node: &UiNode) -> bool {
+    node.event_policy.focus || node.auto_focus || node.focus_scope
+}
+
+fn focus_projection_eq(previous: &UiNode, next: &UiNode) -> bool {
+    previous.parent == next.parent
+        && previous.render_phase == next.render_phase
+        && previous.event_policy.focus == next.event_policy.focus
+        && previous.auto_focus == next.auto_focus
+        && previous.focus_scope == next.focus_scope
+}
+
 fn node_dirty_bounds(node: &UiNode) -> UiRect {
     let (x, y) = node.animation_outset;
     node.paint_bounds.inflate(x, y)
@@ -642,7 +747,78 @@ fn node_dirty_bounds(node: &UiNode) -> UiRect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{RenderPhase, UiNodeKind};
+    use crate::core::{AnimProperty, AnimationBinding, RenderPhase, UiNodeKind, VisualStyle};
+
+    #[test]
+    fn retained_clone_shares_unchanged_nodes_and_detaches_only_updated_nodes() {
+        let first_id = UiId::new("first");
+        let second_id = UiId::new("second");
+        let mut original = HostTree::new();
+        original.push(UiNode::new(
+            first_id.clone(),
+            UiNodeKind::Panel,
+            UiRect::new(0, 0, 10, 10),
+        ));
+        original.push(UiNode::new(
+            second_id.clone(),
+            UiNodeKind::Panel,
+            UiRect::new(10, 0, 20, 10),
+        ));
+        original.take_projection_changes();
+
+        let mut next = original.clone();
+        assert!(Arc::ptr_eq(&original.nodes[0], &next.nodes[0]));
+        assert!(Arc::ptr_eq(&original.nodes[1], &next.nodes[1]));
+
+        next.upsert(
+            UiNode::new(
+                first_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(0, 0, 10, 10),
+            )
+            .style(VisualStyle::filled(crate::core::Color::WHITE)),
+        );
+
+        assert!(!Arc::ptr_eq(&original.nodes[0], &next.nodes[0]));
+        assert!(Arc::ptr_eq(&original.nodes[1], &next.nodes[1]));
+        assert_ne!(original.node(&first_id).unwrap().style, next.node(&first_id).unwrap().style);
+        assert!(next.node(&second_id).is_some());
+    }
+
+    #[test]
+    fn runtime_sync_changes_track_only_relevant_nodes() {
+        let plain_id = UiId::new("plain");
+        let animated_id = UiId::new("animated");
+        let mut tree = HostTree::new();
+        tree.push(UiNode::new(
+            plain_id.clone(),
+            UiNodeKind::Panel,
+            UiRect::new(0, 0, 10, 10),
+        ));
+        tree.push(
+            UiNode::new(
+                animated_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(10, 0, 20, 10),
+            )
+            .animation(AnimationBinding::new(AnimProperty::Opacity, 0.0, 1.0))
+            .animation_target(AnimProperty::Opacity, false),
+        );
+        assert_eq!(tree.animation_sync_ids().count(), 1);
+        tree.take_projection_changes();
+
+        tree.upsert(
+            UiNode::new(
+                plain_id,
+                UiNodeKind::Panel,
+                UiRect::new(0, 0, 10, 10),
+            )
+            .style(VisualStyle::filled(crate::core::Color::WHITE)),
+        );
+
+        assert_eq!(tree.animation_sync_ids().count(), 0);
+        assert!(!tree.needs_focus_sync());
+    }
 
     #[test]
     fn popup_hit_testing_wins_over_later_siblings_and_ancestor_clips() {

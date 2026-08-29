@@ -93,11 +93,24 @@ keeps retained scene commands in order, and dirty-region rendering replays only 
 intersect the changed rectangles. Reserve compositing surfaces for content that must be
 transformed, faded, or rerasterized independently; their backing storage scales with layer area.
 
+Direct2D keeps reusable image, icon, blur, and static-layer bitmaps only while their cache keys are
+reachable from the current Scene and within the backend cache budget. A transparent static layer
+whose only content is a baked image reuses that image bitmap instead of allocating a second
+same-sized render target. Overlay gradients are drawn with native Direct2D brushes, and their
+brush resources are reused while the matching overlay remains on the active Scene.
+
 Use `animated_compositing_layer::<T>(rect, configure)` with an application-owned
 `CompositingLayerAnimation` state when a layer changes every frame. `lgui` advances the state,
 requests frames at its declared interval, and applies its `CompositingLayerSpec` directly to the
 retained node without reexecuting the component or rebuilding static children. Layers may be
 nested, and popup-phase descendants automatically escape a regular layer.
+
+Retained `HostTree` snapshots share unchanged node storage and keep an indexed node lookup table.
+Mounting, layout, focus/animation synchronization, Host commits, and retained Scene reconciliation
+therefore operate on the projection change set instead of copying or scanning every node for a
+composition-only frame. Runtime diagnostics expose `host_visited_nodes`, `scene_compiled_nodes`,
+the individual focus/animation sync and rebuild timings, and the Host change-scan, node-patch,
+Scene-reconcile, Scene-snapshot, damage, and finalize timings.
 
 ## Async Work
 

@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+#[cfg(feature = "diagnostics-timing")]
+use std::time::Instant;
 
 use crate::{
     core::{
@@ -67,9 +69,22 @@ pub enum SceneMutation {
 pub struct HostCommitMetrics {
     pub host_nodes: usize,
     pub scene_nodes: usize,
+    pub visited_host_nodes: usize,
+    pub compiled_scene_nodes: usize,
     pub host_mutations: usize,
     pub scene_mutations: usize,
     pub reused_scene_nodes: usize,
+}
+
+#[cfg(feature = "diagnostics-timing")]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct HostCommitTimings {
+    pub change_scan_ms: f32,
+    pub node_patch_ms: f32,
+    pub scene_reconcile_ms: f32,
+    pub scene_snapshot_ms: f32,
+    pub damage_ms: f32,
+    pub finalize_ms: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +94,8 @@ pub struct HostCommit {
     pub damage: DamageReport,
     pub scene: Scene,
     pub metrics: HostCommitMetrics,
+    #[cfg(feature = "diagnostics-timing")]
+    pub(crate) timings: HostCommitTimings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +191,7 @@ impl HostRuntime {
                 .cloned()
                 .collect(),
             structure_changed: true,
+            ..crate::core::ProjectionChanges::default()
         };
         self.commit_projection(tree, interaction, viewport, invalidations, changes)
     }
@@ -186,6 +204,8 @@ impl HostRuntime {
         invalidations: &mut InvalidationSet,
         changes: crate::core::ProjectionChanges,
     ) -> HostCommit {
+        #[cfg(feature = "diagnostics-timing")]
+        let change_scan_started = Instant::now();
         let mut mutations = Vec::new();
         let mut dirty_scene_sources = HashSet::new();
         let mut compositing_updates = HashMap::new();
@@ -214,6 +234,10 @@ impl HostRuntime {
         });
         let scene_structure_changed =
             changes.structure_changed || !changes.removed.is_empty() || scene_topology_changed;
+        #[cfg(feature = "diagnostics-timing")]
+        let change_scan_ms = elapsed_ms(change_scan_started);
+        #[cfg(feature = "diagnostics-timing")]
+        let node_patch_started = Instant::now();
         let mut removed_sources = changes.removed.clone();
         removed_sources.extend(kind_changed_sources);
         let removed = removed_sources
@@ -240,32 +264,32 @@ impl HostRuntime {
         }
 
         let initializing = !self.initialized;
-        for node in tree
-            .nodes()
-            .iter()
-            .filter(|node| changes.changed.contains(&node.id) || initializing)
-        {
+        let changed_nodes = if initializing {
+            tree.nodes().iter().map(|node| node.as_ref()).collect()
+        } else {
+            tree.changed_nodes(&changes.changed)
+        };
+        for node in &changed_nodes {
             if !self.sources.contains_key(&node.id) {
                 let id = self.allocate(node.id.clone());
                 self.sources.insert(node.id.clone(), id);
             }
         }
 
-        let next_order = if changes.structure_changed || !self.initialized {
-            tree.nodes()
+        let order_changed = if changes.structure_changed || !self.initialized {
+            let next_order = tree
+                .nodes()
                 .iter()
                 .map(|node| self.sources[&node.id])
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let changed = self.initialized && self.paint_order != next_order;
+            self.paint_order = next_order;
+            changed
         } else {
-            self.paint_order.clone()
+            false
         };
-        let order_changed = self.initialized && self.paint_order != next_order;
 
-        for node in tree
-            .nodes()
-            .iter()
-            .filter(|node| changes.changed.contains(&node.id) || initializing)
-        {
+        for node in &changed_nodes {
             let id = self.sources[&node.id];
             let parent = node
                 .parent
@@ -364,32 +388,57 @@ impl HostRuntime {
             current.layout_bounds = node.layout_rect;
             current.paint_bounds = next_paint;
             current.interaction = flags;
-            current.node = node.clone();
+            current.node = (*node).clone();
         }
-        self.paint_order = next_order;
-
-        let (scene_mutations, scene, reused_scene_nodes) = self.reconcile_scene(
-            tree,
-            dirty_scene_sources,
-            compositing_updates,
-            order_changed,
-            scene_structure_changed,
-        );
+        #[cfg(feature = "diagnostics-timing")]
+        let node_patch_ms = elapsed_ms(node_patch_started);
+        #[cfg(feature = "diagnostics-timing")]
+        let scene_reconcile_started = Instant::now();
+        let (scene_mutations, scene, reused_scene_nodes, compiled_scene_nodes, _scene_snapshot_ms) =
+            self.reconcile_scene(
+                tree,
+                dirty_scene_sources,
+                compositing_updates,
+                order_changed,
+                scene_structure_changed,
+            );
+        #[cfg(feature = "diagnostics-timing")]
+        let scene_reconcile_ms =
+            (elapsed_ms(scene_reconcile_started) - _scene_snapshot_ms).max(0.0);
+        #[cfg(feature = "diagnostics-timing")]
+        let damage_started = Instant::now();
         let damage = self.calculate_damage(viewport, &mutations, invalidations);
+        #[cfg(feature = "diagnostics-timing")]
+        let damage_ms = elapsed_ms(damage_started);
+        #[cfg(feature = "diagnostics-timing")]
+        let finalize_started = Instant::now();
         self.initialized = true;
         let metrics = HostCommitMetrics {
             host_nodes: self.sources.len(),
             scene_nodes: self.scene.len(),
+            visited_host_nodes: changed_nodes.len(),
+            compiled_scene_nodes,
             host_mutations: mutations.len(),
             scene_mutations: scene_mutations.len(),
             reused_scene_nodes,
         };
+        #[cfg(feature = "diagnostics-timing")]
+        let finalize_ms = elapsed_ms(finalize_started);
         HostCommit {
             mutations,
             scene_mutations,
             damage,
             scene,
             metrics,
+            #[cfg(feature = "diagnostics-timing")]
+            timings: HostCommitTimings {
+                change_scan_ms,
+                node_patch_ms,
+                scene_reconcile_ms,
+                scene_snapshot_ms: _scene_snapshot_ms,
+                damage_ms,
+                finalize_ms,
+            },
         }
     }
 
@@ -423,27 +472,32 @@ impl HostRuntime {
         compositing_updates: HashMap<UiId, CompositingLayerSpec>,
         host_order_changed: bool,
         scene_structure_changed: bool,
-    ) -> (Vec<SceneMutation>, Scene, usize) {
-        let retained_root_sources = (!scene_structure_changed && self.initialized).then(|| {
-            self.scene_order
+    ) -> (Vec<SceneMutation>, Scene, usize, usize, f32) {
+        let retained_order = !scene_structure_changed
+            && self.initialized
+            && self
+                .scene_order
                 .iter()
-                .map(|id| self.try_node(*id).map(|node| node.source.clone()))
-                .collect::<Option<Vec<_>>>()
-        });
-        let root_sources = retained_root_sources
-            .flatten()
-            .unwrap_or_else(|| scene_root_ids(tree));
-        let live = root_sources
-            .iter()
-            .filter_map(|source| self.sources.get(source))
-            .copied()
-            .collect::<HashSet<_>>();
-        let removed = self
-            .scene
-            .keys()
-            .filter(|id| !live.contains(id))
-            .copied()
-            .collect::<Vec<_>>();
+                .all(|id| self.try_node(*id).is_some());
+        let root_ids = if retained_order {
+            self.scene_order.clone()
+        } else {
+            scene_root_ids(tree)
+                .iter()
+                .filter_map(|source| self.sources.get(source))
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        let removed = if retained_order {
+            Vec::new()
+        } else {
+            let live = root_ids.iter().copied().collect::<HashSet<_>>();
+            self.scene
+                .keys()
+                .filter(|id| !live.contains(id))
+                .copied()
+                .collect::<Vec<_>>()
+        };
         let mut mutations = removed
             .iter()
             .copied()
@@ -456,7 +510,9 @@ impl HostRuntime {
         let mut dirty_roots = HashSet::new();
         for source in dirty_sources {
             if let Some(owner) = scene_owner_source_for_tree(tree, &source) {
-                dirty_roots.insert(owner);
+                if let Some(id) = self.sources.get(&owner) {
+                    dirty_roots.insert(*id);
+                }
             }
         }
 
@@ -466,12 +522,12 @@ impl HostRuntime {
             let Some(owner_source) = scene_owner_source_for_tree(tree, &source) else {
                 continue;
             };
-            if dirty_roots.contains(&owner_source) {
-                continue;
-            }
             let Some(owner_id) = self.sources.get(&owner_source).copied() else {
                 continue;
             };
+            if dirty_roots.contains(&owner_id) {
+                continue;
+            }
             let Some(scene) = self.scene.get_mut(&owner_id) else {
                 continue;
             };
@@ -485,41 +541,39 @@ impl HostRuntime {
         }
 
         let mut reused = 0;
-        for source in &root_sources {
-            let id = self.sources[source];
-            if self.scene.contains_key(&id) && !dirty_roots.contains(source) {
-                if !fast_updated.contains(&id) {
+        let mut compiled = 0;
+        for id in &root_ids {
+            if self.scene.contains_key(id) && !dirty_roots.contains(id) {
+                if !fast_updated.contains(id) {
                     reused += 1;
                 }
                 continue;
             }
-            let compiled = compile_scene_root(tree, source);
-            let commands = compiled.commands().to_vec();
+            let source = self.node(*id).source.clone();
+            let compiled_scene = compile_scene_root(tree, &source);
+            compiled += 1;
+            let commands = compiled_scene.commands().to_vec();
             let signature = command_signature(&commands);
-            match self.scene.get_mut(&id) {
+            match self.scene.get_mut(id) {
                 Some(scene) if scene.signature == signature => reused += 1,
                 Some(scene) => {
                     scene.signature = signature;
                     scene.commands = commands;
-                    mutations.push(SceneMutation::Update(id));
+                    mutations.push(SceneMutation::Update(*id));
                 }
                 None => {
                     self.scene.insert(
-                        id,
+                        *id,
                         SceneNode {
                             signature,
                             commands,
                         },
                     );
-                    mutations.push(SceneMutation::Insert(id));
+                    mutations.push(SceneMutation::Insert(*id));
                 }
             }
         }
-        let next_scene_order = root_sources
-            .iter()
-            .filter_map(|source| self.sources.get(source))
-            .copied()
-            .collect::<Vec<_>>();
+        let next_scene_order = root_ids;
         if host_order_changed || self.scene_order != next_scene_order {
             mutations.push(SceneMutation::Reorder);
         }
@@ -546,32 +600,34 @@ impl HostRuntime {
             let updated = mutations
                 .iter()
                 .filter_map(|mutation| match mutation {
-                    SceneMutation::Update(id) => Some(*id),
+                    SceneMutation::Update(id) if !fast_updated.contains(id) => Some(*id),
                     _ => None,
                 })
                 .collect::<HashSet<_>>();
-            let previous_ranges = self.scene_ranges.clone();
-            let mut next_ranges = HashMap::with_capacity(previous_ranges.len());
-            let mut offset = 0_isize;
-            for id in &self.scene_order {
-                let (old_start, old_end) = previous_ranges[id];
-                let start = (old_start as isize + offset) as usize;
-                let end = (old_end as isize + offset) as usize;
-                if updated.contains(id) && !fast_updated.contains(id) {
-                    let commands = self
-                        .scene
-                        .get(id)
-                        .map(|node| node.commands.clone())
-                        .unwrap_or_default();
-                    let next_end = start + commands.len();
-                    self.composed_scene.replace_range(start..end, commands);
-                    offset += next_end as isize - end as isize;
-                    next_ranges.insert(*id, (start, next_end));
-                } else {
-                    next_ranges.insert(*id, (start, end));
+            if !updated.is_empty() {
+                let previous_ranges = std::mem::take(&mut self.scene_ranges);
+                let mut next_ranges = HashMap::with_capacity(previous_ranges.len());
+                let mut offset = 0_isize;
+                for id in &self.scene_order {
+                    let (old_start, old_end) = previous_ranges[id];
+                    let start = (old_start as isize + offset) as usize;
+                    let end = (old_end as isize + offset) as usize;
+                    if updated.contains(id) {
+                        let commands = self
+                            .scene
+                            .get(id)
+                            .map(|node| node.commands.clone())
+                            .unwrap_or_default();
+                        let next_end = start + commands.len();
+                        self.composed_scene.replace_range(start..end, commands);
+                        offset += next_end as isize - end as isize;
+                        next_ranges.insert(*id, (start, next_end));
+                    } else {
+                        next_ranges.insert(*id, (start, end));
+                    }
                 }
+                self.scene_ranges = next_ranges;
             }
-            self.scene_ranges = next_ranges;
         }
         for (source, spec) in fast_specs {
             let patched = self
@@ -579,7 +635,14 @@ impl HostRuntime {
                 .patch_compositing_layer_spec(&source, spec);
             debug_assert!(patched, "retained compositing command must exist");
         }
-        (mutations, self.composed_scene.clone(), reused)
+        #[cfg(feature = "diagnostics-timing")]
+        let snapshot_started = Instant::now();
+        let scene = self.composed_scene.clone();
+        #[cfg(feature = "diagnostics-timing")]
+        let snapshot_ms = elapsed_ms(snapshot_started);
+        #[cfg(not(feature = "diagnostics-timing"))]
+        let snapshot_ms = 0.0;
+        (mutations, scene, reused, compiled, snapshot_ms)
     }
 
     fn calculate_damage(
@@ -880,6 +943,11 @@ fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.render_phase != next.render_phase
 }
 
+#[cfg(feature = "diagnostics-timing")]
+fn elapsed_ms(started: Instant) -> f32 {
+    started.elapsed().as_secs_f32() * 1_000.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1108,6 +1176,9 @@ mod tests {
             &mut InvalidationSet::new(),
             changes,
         );
+
+        assert_eq!(second.metrics.visited_host_nodes, 1);
+        assert_eq!(second.metrics.compiled_scene_nodes, 0);
 
         assert_eq!(
             compositing_content_signature(&second.scene, &layer_id),

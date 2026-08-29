@@ -2009,11 +2009,40 @@ fn render_window(hwnd: HWND, target: HDC) {
                                 #[cfg(feature = "diagnostics-timing")]
                                 focus_animation_sync_ms: timings.focus_animation_sync_ms,
                                 #[cfg(feature = "diagnostics-timing")]
+                                focus_sync_ms: timings.focus_sync_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                focus_rebuild_ms: timings.focus_rebuild_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                animation_target_sync_ms: timings.animation_target_sync_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                animation_rebuild_ms: timings.animation_rebuild_ms,
+                                #[cfg(feature = "diagnostics-timing")]
                                 runtime_reconcile_ms: timings.runtime_reconcile_ms,
                                 #[cfg(feature = "diagnostics-timing")]
                                 layout_ms: timings.layout_ms,
                                 #[cfg(feature = "diagnostics-timing")]
                                 host_commit_ms: timings.host_commit_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_change_scan_ms: commit.timings.change_scan_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_node_patch_ms: commit.timings.node_patch_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_scene_reconcile_ms: commit.timings.scene_reconcile_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_scene_snapshot_ms: commit.timings.scene_snapshot_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_damage_ms: commit.timings.damage_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_finalize_ms: commit.timings.finalize_ms,
+                                #[cfg(feature = "diagnostics-timing")]
+                                host_unattributed_ms: (timings.host_commit_ms
+                                    - commit.timings.change_scan_ms
+                                    - commit.timings.node_patch_ms
+                                    - commit.timings.scene_reconcile_ms
+                                    - commit.timings.scene_snapshot_ms
+                                    - commit.timings.damage_ms
+                                    - commit.timings.finalize_ms)
+                                    .max(0.0),
                                 #[cfg(feature = "diagnostics-timing")]
                                 render_total_ms: timings.total_ms,
                                 #[cfg(not(feature = "diagnostics-timing"))]
@@ -2025,9 +2054,15 @@ fn render_window(hwnd: HWND, target: HDC) {
                                 projection_visited_nodes: projection.visited_nodes,
                                 projection_reused_component_roots: projection
                                     .reused_component_roots,
+                                #[cfg(feature = "diagnostics-timing")]
+                                animation_sync_nodes: timings.animation_sync_nodes,
+                                #[cfg(feature = "diagnostics-timing")]
+                                focus_sync_needed: timings.focus_sync_needed,
                                 layout_visited_nodes: layout.visited_nodes,
                                 layout_laid_out_nodes: layout.laid_out_nodes,
                                 layout_reused_nodes: layout.reused_nodes,
+                                host_visited_nodes: commit.metrics.visited_host_nodes,
+                                scene_compiled_nodes: commit.metrics.compiled_scene_nodes,
                                 host_mutations: commit.metrics.host_mutations,
                                 scene_mutations: commit.metrics.scene_mutations,
                                 reused_scene_nodes: commit.metrics.reused_scene_nodes,

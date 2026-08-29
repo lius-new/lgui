@@ -39,6 +39,12 @@ pub(crate) struct SessionRenderTimings {
     pub retained_snapshot_ms: f32,
     pub declarative_mount_ms: f32,
     pub focus_animation_sync_ms: f32,
+    pub focus_sync_ms: f32,
+    pub focus_rebuild_ms: f32,
+    pub animation_target_sync_ms: f32,
+    pub animation_rebuild_ms: f32,
+    pub animation_sync_nodes: usize,
+    pub focus_sync_needed: bool,
     pub runtime_reconcile_ms: f32,
     pub layout_ms: f32,
     pub host_commit_ms: f32,
@@ -143,20 +149,41 @@ impl UiSession {
         let declarative_mount_ms = elapsed_ms(declarative_mount_started);
 
         #[cfg(feature = "diagnostics-timing")]
-        let focus_animation_sync_started = Instant::now();
-        if self.runtime.sync_tree_focus(&tree) {
+        let focus_sync_started = Instant::now();
+        #[cfg(feature = "diagnostics-timing")]
+        let focus_sync_needed = tree.needs_focus_sync();
+        let focus_changed = self.runtime.sync_tree_focus(&tree);
+        #[cfg(feature = "diagnostics-timing")]
+        let focus_sync_ms = elapsed_ms(focus_sync_started);
+        #[cfg(feature = "diagnostics-timing")]
+        let focus_rebuild_started = Instant::now();
+        if focus_changed {
             (tree, projection_metrics) =
                 self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
         }
-        if self.runtime.sync_tree_animation_targets(&tree) {
+        #[cfg(feature = "diagnostics-timing")]
+        let focus_rebuild_ms = elapsed_ms(focus_rebuild_started);
+        #[cfg(feature = "diagnostics-timing")]
+        let animation_target_sync_started = Instant::now();
+        #[cfg(feature = "diagnostics-timing")]
+        let animation_sync_nodes = tree.animation_sync_ids().count();
+        let animation_targets_changed = self.runtime.sync_tree_animation_targets(&tree);
+        #[cfg(feature = "diagnostics-timing")]
+        let animation_target_sync_ms = elapsed_ms(animation_target_sync_started);
+        #[cfg(feature = "diagnostics-timing")]
+        let animation_rebuild_started = Instant::now();
+        if animation_targets_changed {
             (tree, projection_metrics) =
                 self.build_view_tree_from(tree, Arc::clone(view), viewport, scale);
         }
+        #[cfg(feature = "diagnostics-timing")]
+        let animation_rebuild_ms = elapsed_ms(animation_rebuild_started);
         self.component_metrics = self.runtime.component_tree().metrics();
         self.projection_metrics = projection_metrics;
         self.replace_tree(tree);
         #[cfg(feature = "diagnostics-timing")]
-        let focus_animation_sync_ms = elapsed_ms(focus_animation_sync_started);
+        let focus_animation_sync_ms =
+            focus_sync_ms + focus_rebuild_ms + animation_target_sync_ms + animation_rebuild_ms;
 
         #[cfg(feature = "diagnostics-timing")]
         let layout_started = Instant::now();
@@ -182,6 +209,12 @@ impl UiSession {
                 retained_snapshot_ms,
                 declarative_mount_ms,
                 focus_animation_sync_ms,
+                focus_sync_ms,
+                focus_rebuild_ms,
+                animation_target_sync_ms,
+                animation_rebuild_ms,
+                animation_sync_nodes,
+                focus_sync_needed,
                 runtime_reconcile_ms: 0.0,
                 layout_ms,
                 host_commit_ms: elapsed_ms(host_commit_started),
