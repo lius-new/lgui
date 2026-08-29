@@ -45,19 +45,19 @@ use windows::{
                 IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, PostQuitMessage,
                 RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW,
                 SetWindowPlacement, SetWindowPos, ShowWindow, TranslateMessage, UnregisterClassW,
-                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, HICON,
-                HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP,
-                HTTOPLEFT, HTTOPRIGHT, ICON_BIG, ICON_SMALL, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG,
-                SIZE_MINIMIZED, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON,
-                SM_CYICON, SM_CYSIZEFRAME, SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-                SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT,
-                WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY,
-                WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
+                CW_USEDEFAULT, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, HICON, HTBOTTOM, HTBOTTOMLEFT,
+                HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+                ICON_BIG, ICON_SMALL, IDC_ARROW, LWA_ALPHA, MINMAXINFO, MSG, SIZE_MINIMIZED,
+                SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SM_CYICON,
+                SM_CYSIZEFRAME, SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
+                SWP_NOZORDER, SW_HIDE, SW_SHOW, WA_INACTIVE, WINDOWPLACEMENT, WINDOW_EX_STYLE,
+                WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
+                WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
                 WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCALCSIZE,
-                WM_NCHITTEST, WM_PAINT, WM_SETICON, WM_SIZE, WNDCLASSEXW, WS_CAPTION,
-                WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-                WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_MOVING,
+                WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT, WM_SETICON, WM_SIZE, WM_SIZING, WNDCLASSEXW,
+                WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX,
+                WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
             },
         },
     },
@@ -94,6 +94,7 @@ use super::{
 
 const WINDOW_CLASS: &str = "LguiApplicationWindow";
 const BACKGROUND_RETRIM_DELAY: Duration = Duration::from_secs(3);
+const INTERACTIVE_RESIZE_FRAME_INTERVAL_MS: u64 = 33;
 static BACKGROUND_TRIM_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
@@ -350,6 +351,8 @@ struct WindowState {
     hide_on_deactivate: bool,
     background_memory_optimization: bool,
     rendering_suspended: bool,
+    interaction_mode: WindowInteractionMode,
+    resize_frame_throttle: ResizeFrameThrottle,
     visibility: OwnerVisibility,
     close_policy: ClosePolicy,
     close_handler: Option<WindowCloseHandler>,
@@ -357,6 +360,68 @@ struct WindowState {
     render_retry_used: bool,
     suppressed_ime_char_units: VecDeque<u16>,
     pending_high_surrogate: Option<u16>,
+}
+
+impl WindowState {
+    fn can_advance_animations(&self) -> bool {
+        can_advance_window_animations(
+            self.rendering_suspended,
+            self.visibility,
+            self.interaction_mode,
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum WindowInteractionMode {
+    #[default]
+    Idle,
+    MoveResize,
+    Moving,
+    Sizing,
+}
+
+fn can_advance_window_animations(
+    rendering_suspended: bool,
+    visibility: OwnerVisibility,
+    interaction_mode: WindowInteractionMode,
+) -> bool {
+    !rendering_suspended
+        && visibility.desired_visible
+        && !visibility.hidden_for_owner
+        && interaction_mode == WindowInteractionMode::Idle
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ResizeFrameThrottle {
+    pending: bool,
+    elapsed_ms: f32,
+}
+
+impl ResizeFrameThrottle {
+    fn begin(&mut self) {
+        self.pending = false;
+        self.elapsed_ms = INTERACTIVE_RESIZE_FRAME_INTERVAL_MS as f32;
+    }
+
+    fn request(&mut self) {
+        self.pending = true;
+    }
+
+    fn advance(&mut self, elapsed_ms: f32) -> bool {
+        self.elapsed_ms = (self.elapsed_ms + elapsed_ms.max(0.0))
+            .min(INTERACTIVE_RESIZE_FRAME_INTERVAL_MS as f32);
+        if !self.pending || self.elapsed_ms < INTERACTIVE_RESIZE_FRAME_INTERVAL_MS as f32 {
+            return false;
+        }
+        self.pending = false;
+        self.elapsed_ms = 0.0;
+        true
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -435,7 +500,8 @@ impl ApplicationBackend for Win32Application {
         let class_icons = WindowClassIcons::from_ico_bytes(options.icon_bytes)?;
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
-            style: CS_HREDRAW | CS_VREDRAW,
+            // WM_SIZE drives invalidation explicitly so interactive resize can be throttled.
+            style: Default::default(),
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
             hIcon: class_icons.large(),
@@ -761,6 +827,8 @@ fn create_window(
                 hide_on_deactivate: options.hide_on_deactivate,
                 background_memory_optimization: options.background_memory_optimization,
                 rendering_suspended: false,
+                interaction_mode: WindowInteractionMode::Idle,
+                resize_frame_throttle: ResizeFrameThrottle::default(),
                 visibility: OwnerVisibility {
                     desired_visible: initially_visible,
                     hidden_for_owner: false,
@@ -1366,13 +1434,26 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_SIZE => {
+            let resize_dispatcher = STATE.with(|state| {
+                let mut windows = state.borrow_mut();
+                let window = windows.get_mut(&(hwnd.0 as isize))?;
+                if window.interaction_mode != WindowInteractionMode::Sizing {
+                    return None;
+                }
+                window.resize_frame_throttle.request();
+                Some(window.dispatcher.clone())
+            });
             if wparam.0 as u32 == SIZE_MINIMIZED {
                 hide_owned_windows(hwnd);
-            } else {
+            } else if resize_dispatcher.is_none() {
                 restore_owned_windows(hwnd);
             }
-            unsafe {
-                let _ = InvalidateRect(Some(hwnd), None, false);
+            if let Some(dispatcher) = resize_dispatcher {
+                dispatcher.start_frame_driver();
+            } else {
+                unsafe {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
             }
             LRESULT(0)
         }
@@ -1381,11 +1462,61 @@ extern "system" fn window_proc(
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_ENTERSIZEMOVE => {
+            STATE.with(|state| {
+                if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+                    window.interaction_mode = WindowInteractionMode::MoveResize;
+                    window.resize_frame_throttle.reset();
+                }
+            });
             hide_owned_windows(hwnd);
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
+        WM_MOVING => {
+            STATE.with(|state| {
+                if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
+                    window.interaction_mode = WindowInteractionMode::Moving;
+                }
+            });
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+        WM_SIZING => {
+            let dispatcher = STATE.with(|state| {
+                let mut windows = state.borrow_mut();
+                let window = windows.get_mut(&(hwnd.0 as isize))?;
+                if window.interaction_mode != WindowInteractionMode::Sizing {
+                    window.interaction_mode = WindowInteractionMode::Sizing;
+                    window.resize_frame_throttle.begin();
+                }
+                Some(window.dispatcher.clone())
+            });
+            if let Some(dispatcher) = dispatcher {
+                dispatcher.start_frame_driver();
+            }
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
         WM_EXITSIZEMOVE => {
+            let exit = STATE.with(|state| {
+                let mut windows = state.borrow_mut();
+                let window = windows.get_mut(&(hwnd.0 as isize))?;
+                let was_sizing = window.interaction_mode == WindowInteractionMode::Sizing;
+                window.interaction_mode = WindowInteractionMode::Idle;
+                window.resize_frame_throttle.reset();
+                Some((
+                    was_sizing,
+                    window
+                        .can_advance_animations()
+                        .then(|| window.dispatcher.clone()),
+                ))
+            });
             restore_owned_windows(hwnd);
+            if let Some((was_sizing, dispatcher)) = exit {
+                if was_sizing {
+                    request_window_repaint(hwnd, WindowRepaint::Full);
+                }
+                if let Some(dispatcher) = dispatcher {
+                    dispatcher.start_frame_driver();
+                }
+            }
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_ACTIVATE => {
@@ -1646,6 +1777,22 @@ fn handle_frame_tick(hwnd: HWND) {
                 || window.visibility.hidden_for_owner
             {
                 continue;
+            }
+            match window.interaction_mode {
+                WindowInteractionMode::MoveResize | WindowInteractionMode::Moving => continue,
+                WindowInteractionMode::Sizing => {
+                    should_continue = true;
+                    frame_interval_ms = Some(
+                        frame_interval_ms.map_or(INTERACTIVE_RESIZE_FRAME_INTERVAL_MS, |current| {
+                            current.min(INTERACTIVE_RESIZE_FRAME_INTERVAL_MS)
+                        }),
+                    );
+                    if window.resize_frame_throttle.advance(elapsed_ms) {
+                        repaints.push((HWND(*raw as _), WindowRepaint::Full));
+                    }
+                    continue;
+                }
+                WindowInteractionMode::Idle => {}
             }
             let output = window.session.advance(elapsed_ms);
             should_continue |= output.animation_changed;
@@ -2099,10 +2246,10 @@ mod tests {
     use windows::Win32::Foundation::RECT;
 
     use super::{
-        decode_utf16_char_unit, resize_border_hit, suppress_committed_ime_char,
-        window_corner_preference, window_style, OwnerVisibility, Point, WindowOptions,
-        DWMWCP_DONOTROUND, DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT, WS_CAPTION, WS_POPUP,
-        WS_THICKFRAME,
+        can_advance_window_animations, decode_utf16_char_unit, resize_border_hit,
+        suppress_committed_ime_char, window_corner_preference, window_style, OwnerVisibility,
+        Point, ResizeFrameThrottle, WindowInteractionMode, WindowOptions, DWMWCP_DONOTROUND,
+        DWMWCP_ROUND, HTBOTTOMRIGHT, HTCLIENT, HTTOPLEFT, WS_CAPTION, WS_POPUP, WS_THICKFRAME,
     };
 
     #[test]
@@ -2199,5 +2346,74 @@ mod tests {
         assert!(!child.restore_for_owner());
         assert!(!child.desired_visible);
         assert!(!child.hidden_for_owner);
+    }
+
+    #[test]
+    fn only_visible_idle_windows_advance_animations() {
+        let visible = OwnerVisibility::visible();
+        assert!(can_advance_window_animations(
+            false,
+            visible,
+            WindowInteractionMode::Idle
+        ));
+        assert!(!can_advance_window_animations(
+            false,
+            visible,
+            WindowInteractionMode::MoveResize
+        ));
+        assert!(!can_advance_window_animations(
+            false,
+            visible,
+            WindowInteractionMode::Moving
+        ));
+        assert!(!can_advance_window_animations(
+            false,
+            visible,
+            WindowInteractionMode::Sizing
+        ));
+        assert!(!can_advance_window_animations(
+            true,
+            visible,
+            WindowInteractionMode::Idle
+        ));
+
+        let mut hidden_for_owner = visible;
+        assert!(hidden_for_owner.hide_for_owner());
+        assert!(!can_advance_window_animations(
+            false,
+            hidden_for_owner,
+            WindowInteractionMode::Idle
+        ));
+    }
+
+    #[test]
+    fn interactive_resize_emits_first_pending_frame_on_next_tick() {
+        let mut throttle = ResizeFrameThrottle::default();
+        throttle.begin();
+        throttle.request();
+
+        assert!(throttle.advance(1.0));
+    }
+
+    #[test]
+    fn interactive_resize_coalesces_requests_until_frame_interval_elapses() {
+        let mut throttle = ResizeFrameThrottle::default();
+        throttle.begin();
+        throttle.request();
+        assert!(throttle.advance(1.0));
+
+        throttle.request();
+        assert!(!throttle.advance(10.0));
+        throttle.request();
+        assert!(!throttle.advance(22.0));
+        assert!(throttle.advance(1.0));
+    }
+
+    #[test]
+    fn interactive_resize_does_not_emit_without_a_pending_request() {
+        let mut throttle = ResizeFrameThrottle::default();
+        throttle.begin();
+
+        assert!(!throttle.advance(33.0));
     }
 }
