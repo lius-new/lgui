@@ -1,4 +1,6 @@
-use crate::core::UiEventContext;
+use std::future::Future;
+
+use crate::core::{async_handler, UiAsyncContext, UiEventContext};
 use crate::core::{
     AnimProperty, AnimationBinding, Element, ElementKey, ElementRenderCx, InteractionRole,
     IntoElementContent, RenderPhase, UiAction, UiElement, UiEventHandler, UiId, UiRect,
@@ -47,6 +49,15 @@ impl Panel {
         F: Fn(&mut UiEventContext) + Send + Sync + 'static,
     {
         self.click_handler = Some(std::sync::Arc::new(handler));
+        self
+    }
+
+    pub fn on_click_async<F, Fut>(mut self, handler: F) -> Self
+    where
+        F: Fn(UiAsyncContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.click_handler = Some(async_handler(handler));
         self
     }
 

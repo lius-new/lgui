@@ -19,10 +19,11 @@ pub use crate::assets::{
     ImageLoader, ImageSource, ImageStatus, RemoteImageLoader, RemoteImageLoaderHandle,
     RenderResources,
 };
+pub use crate::command::{Command, CommandContext, CommandFuture, CommandHandle, CommandHandler};
 pub use crate::core::{
-    component, context_provider, group, Align, Axis, Color, EdgeInsets, Element, ElementKey,
-    RenderCx, RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiRect,
-    VisualStyle,
+    async_handler, async_handler_with, component, context_provider, group, Align, Axis, Color,
+    EdgeInsets, Element, ElementKey, RenderCx, RootComponent, Size, State, StateSetter, Stroke,
+    TextAlign, TextStyle, UiAsyncContext, UiEventContext, UiRect, VisualStyle,
 };
 #[cfg(feature = "open-url")]
 pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};
@@ -35,6 +36,7 @@ pub use crate::diagnostics::{
 pub use crate::dialogs::{
     FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
 };
+pub use crate::events::{AsyncEventHandler, Event, EventFuture, EventSubscription};
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
     Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationError,

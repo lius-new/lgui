@@ -11,6 +11,84 @@ Components access `cx.application()`, `cx.windows()`, and event-context `cx.wind
 Auxiliary windows are declared with `WindowOptions`; `.owner(id)` declares an explicit owner.
 Business code never receives native handles.
 
+## Commands And Events
+
+Applications define typed command contracts and register their service-backed handlers on the
+Application builder. The command name is diagnostic metadata; dispatch uses the Rust command type
+and does not serialize arguments or results.
+
+```rust,ignore
+struct Login;
+
+impl Command for Login {
+    type Args = LoginRequest;
+    type Output = AuthSession;
+    type Error = AuthError;
+
+    const NAME: &'static str = "auth.login";
+}
+
+Application::new()
+    .command::<Login>(move |_cx, request| {
+        let auth = auth.clone();
+        async move { auth.login(request).await }
+    })
+    .executor(executor)
+    .run(app)?;
+```
+
+Async UI handlers receive an owned `UiAsyncContext`, so they can await without retaining the
+synchronous input-dispatch borrow. The configured Application executor runs the handler.
+
+```rust,ignore
+button(rect, "Login", style).on_click_async(move |ui| {
+    let request = request.clone();
+    let set_session = set_session.clone();
+    async move {
+        set_session(ui.invoke::<Login>(request).await.ok());
+    }
+})
+```
+
+Controlled widgets with value callbacks use the same adapter without a Store requirement:
+
+```rust,ignore
+checkbox(rect, checked, async_handler_with(move |ui, checked| async move {
+    ui.invoke::<SetPreference>(checked).await.ok();
+}))
+```
+
+Effects can retain a cloneable command handle and await it independently of Store:
+
+```rust,ignore
+let load_profile = cx.command::<LoadProfile>();
+cx.use_async_effect(user_id.clone(), move || async move {
+    set_profile(load_profile.invoke(user_id).await.ok());
+});
+```
+
+Events are typed Application broadcasts. `emit` is synchronous and returns the number of current
+listeners. `use_event` and `use_event_async` subscriptions are Effect-owned and unsubscribe when
+their dependencies change or their component unmounts.
+
+```rust,ignore
+#[derive(Clone)]
+struct DownloadProgress { received: u64, total: u64 }
+
+impl Event for DownloadProgress {
+    const NAME: &'static str = "download.progress";
+}
+
+cx.use_event::<DownloadProgress>((), move |progress| {
+    set_progress(progress.received as f32 / progress.total as f32);
+});
+
+ui.emit(DownloadProgress { received, total });
+```
+
+Use Commands for typed request/response work, Events for ephemeral broadcasts, State for local
+component values, and Store for shared renderable snapshots. None requires another.
+
 ## State And Effects
 
 `cx.state(value)` returns a generation-aware `State<T>`. `set` and `update` enqueue only the owning

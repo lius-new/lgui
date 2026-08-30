@@ -60,6 +60,38 @@ fn runtime_has_no_application_platform_or_backend_dependencies() {
 }
 
 #[test]
+fn typed_commands_and_events_are_transport_free() {
+    let forbidden = [
+        "serde",
+        "serde_json",
+        "Payload",
+        "InvokeRequest",
+        "InvokeResponse",
+        "crate::platform",
+        "crate::store",
+        "crate::router",
+        "crate::frontend",
+    ];
+    let violations = ["src/command", "src/events"]
+        .into_iter()
+        .flat_map(rust_sources)
+        .flat_map(|(path, source)| {
+            forbidden.iter().filter_map(move |needle| {
+                source
+                    .contains(needle)
+                    .then(|| format!("{} contains `{needle}`", path.display()))
+            })
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        violations.is_empty(),
+        "typed application capability violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn win32_backend_has_no_application_dependencies() {
     let forbidden = [
         "crate::frontend",

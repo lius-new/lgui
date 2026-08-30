@@ -1,11 +1,11 @@
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, future::Future, sync::Arc};
 
 use super::{
-    AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
+    async_handler, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
     CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, InteractionRole,
     LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec, StaticLayerSpec, TextStyle,
-    UiAction, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId, UiImageSource,
-    UiInputEventHandler, UiNode, UiNodeKind, UiPath, UiRect, VisualStyle,
+    UiAction, UiAsyncContext, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
+    UiImageSource, UiInputEventHandler, UiNode, UiNodeKind, UiPath, UiRect, VisualStyle,
 };
 
 #[derive(Clone)]
@@ -198,6 +198,15 @@ impl UiElement {
 
     pub fn on_click_handler(mut self, handler: UiEventHandler) -> Self {
         self.node = self.node.on_click_handler(handler);
+        self
+    }
+
+    pub fn on_click_async<F, Fut>(mut self, handler: F) -> Self
+    where
+        F: Fn(UiAsyncContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.node = self.node.on_click_handler(async_handler(handler));
         self
     }
 

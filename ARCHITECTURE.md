@@ -3,7 +3,8 @@
 ## Ownership
 
 `Application` owns one `ApplicationContext`, its typed resources, Store registry, Router registry,
-WindowManager, platform Dispatcher, and every window session. Each `UiSession` owns component
+Command registry, Event bus, WindowManager, platform Dispatcher, and every window session. Each
+`UiSession` owns component
 identity, local State, Effects, the retained host tree, layout state, input state, and scene
 commits. Platform backends own native windows, native messages, renderer devices, caches, and
 frame presentation.
@@ -18,6 +19,12 @@ history and declarative route trees are also Application-scoped. History stores 
 route matching produces an ancestor-to-leaf chain with decoded parameters and opaque application
 metadata. Every nested Outlet is its own retained component boundary, preserving parent component
 identity and lifecycle while invalidating only the branch selected by navigation.
+
+Commands are Application-scoped typed request/response contracts. Registration and invocation use
+the command Rust type; names exist only for diagnostics. Command arguments, outputs, and errors are
+not serialized. Events are Application-scoped typed broadcasts. Component subscriptions are owned
+by Effects and are removed on dependency changes or unmount. Commands and Events do not depend on
+Store, Router, a platform backend, or an application business type.
 
 `WindowManager` handles typed IDs, explicit owner relationships, show/hide/toggle/close, owner
 movement and visibility restoration, DPI changes, input, and native resource release. Auxiliary

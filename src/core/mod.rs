@@ -70,8 +70,9 @@ pub use geometry::{
     EdgeInsets, PhysicalPoint, PhysicalRect, PhysicalSize, Point, Size, UiRect, UiScale,
 };
 pub use handler::{
-    IntoUiHandler, UiActionBinding, UiActionEvent, UiActionHandler, UiEventHandler, UiEventKind,
-    UiEventPayload, UiHandlerEvent, UiInputEventBinding, UiInputEventHandler,
+    async_handler, async_handler_with, IntoUiHandler, UiActionBinding, UiActionEvent,
+    UiActionHandler, UiEventHandler, UiEventKind, UiEventPayload, UiHandlerEvent,
+    UiInputEventBinding, UiInputEventHandler, UiValueEventHandler,
 };
 pub use hook_state::{HookStateStore, UiUpdateQueue, UiWake};
 pub use id::{UiId, UiIdPath};

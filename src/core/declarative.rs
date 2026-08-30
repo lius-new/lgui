@@ -1,12 +1,12 @@
-use std::{any::type_name, borrow::Cow, cell::Cell, panic::Location, sync::Arc};
+use std::{any::type_name, borrow::Cow, cell::Cell, future::Future, panic::Location, sync::Arc};
 
 use super::reactor::RenderCx;
 use super::{
-    AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerAnimation,
+    async_handler, AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerAnimation,
     CompositingLayerSpec, EventPolicy, InteractionRole, LayoutSpec, RenderPhase, Semantics, Size,
-    TextStyle, UiElement, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
-    UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, UiRenderContext, UiScope,
-    VisualStyle,
+    TextStyle, UiAsyncContext, UiElement, UiEventContext, UiEventHandler, UiEventKind,
+    UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect,
+    UiRenderContext, UiScope, VisualStyle,
 };
 
 // Declarative core shell only: this layer owns tree identity and composition,
@@ -228,6 +228,14 @@ impl Element {
         F: Fn(&mut UiEventContext) + Send + Sync + 'static,
     {
         self.on_click_handler(Arc::new(handler))
+    }
+
+    pub fn on_click_async<F, Fut>(self, handler: F) -> Self
+    where
+        F: Fn(UiAsyncContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.on_click_handler(async_handler(handler))
     }
 
     pub fn on_click_capture<F>(self, handler: F) -> Self

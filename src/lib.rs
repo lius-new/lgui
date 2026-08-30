@@ -9,6 +9,7 @@ pub mod application;
 pub mod assets;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+pub mod command;
 pub mod core;
 #[cfg(feature = "open-url")]
 pub mod desktop;
@@ -16,6 +17,7 @@ pub mod desktop;
 pub mod diagnostics;
 #[cfg(feature = "dialogs")]
 pub mod dialogs;
+pub mod events;
 pub mod frame;
 pub mod host;
 #[cfg(feature = "svg")]

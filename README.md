@@ -4,14 +4,18 @@
 component and starts it with `Application::new().run(app)`; `lgui` owns the component session,
 retained host tree, event dispatch, reactive updates, windows, renderer, and frame submission.
 
-The portable core provides typed component State, committed Effects, Context, Store selectors and
-actions, declarative Router outlets, layout, input, and scene construction. Optional features add
+The portable core provides typed component State, committed Effects, Commands, Events, Context,
+Store selectors and actions, declarative Router outlets, layout, input, and scene construction. Optional features add
 the Win32 application backend, GDI or Direct2D rendering, multiple windows, images, SVG, advanced
 rendering, clipboard, notifications, tray integration, diagnostics, and Tokio execution.
 
 Application resources are ordinary typed data. Asset resolvers and custom paint providers are
 provided to `Application`, while renderers own their native caches and device resources. Business
 crates do not create a second runtime, dispatcher, presenter, WndProc, or window registry.
+
+Commands and Events are typed, Application-scoped capabilities. They provide an `invoke` and
+`emit` programming model without string dispatch, serialization, IPC, or a Store dependency.
+Applications define the concrete contracts and register service-backed command handlers.
 
 ```rust,ignore
 fn app(cx: &mut RenderCx<'_, '_>) -> Element {

@@ -1,10 +1,37 @@
-use std::{ops::Range, sync::Arc};
+use std::{future::Future, ops::Range, sync::Arc};
 
-use super::{ActionId, KeyboardEvent, PointerData, UiAction, UiEventContext, UiId, WheelDelta};
+use super::{
+    ActionId, KeyboardEvent, PointerData, UiAction, UiAsyncContext, UiEventContext, UiId,
+    WheelDelta,
+};
 
 pub type UiEventHandler = Arc<dyn Fn(&mut UiEventContext) + Send + Sync>;
 pub type UiInputEventHandler = Arc<dyn Fn(&mut UiEventContext, &UiEventPayload) + Send + Sync>;
 pub type UiActionHandler = Arc<dyn Fn(&mut UiEventContext, &UiAction) + Send + Sync>;
+pub type UiValueEventHandler<A> = Arc<dyn Fn(&mut UiEventContext, A) + Send + Sync>;
+
+pub fn async_handler<F, Fut>(handler: F) -> UiEventHandler
+where
+    F: Fn(UiAsyncContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    Arc::new(move |context| {
+        let future = handler(context.async_context());
+        let _ = context.spawn(future);
+    })
+}
+
+pub fn async_handler_with<A, F, Fut>(handler: F) -> UiValueEventHandler<A>
+where
+    A: Send + 'static,
+    F: Fn(UiAsyncContext, A) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    Arc::new(move |context, argument| {
+        let future = handler(context.async_context(), argument);
+        let _ = context.spawn(future);
+    })
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UiEventKind {
@@ -165,5 +192,76 @@ where
 impl IntoUiHandler for UiEventHandler {
     fn into_handler(self) -> UiEventHandler {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        task::{Context, Poll, Waker},
+    };
+
+    use crate::{
+        application::{ApplicationContext, WindowId},
+        core::{UiTask, UiTaskSpawner},
+    };
+
+    use super::*;
+
+    #[test]
+    fn async_handler_spawns_with_an_owned_ui_context() {
+        let application = ApplicationContext::empty();
+        application.set_executor(Arc::new(|mut task: UiTask| {
+            let waker = Waker::noop();
+            let mut context = Context::from_waker(waker);
+            assert!(matches!(task.as_mut().poll(&mut context), Poll::Ready(())));
+        }) as UiTaskSpawner);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler = async_handler({
+            let calls = Arc::clone(&calls);
+            move |context| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    assert_eq!(context.window().unwrap().id().as_str(), "async-handler");
+                    calls.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        let mut context = UiEventContext::new(application, WindowId::new("async-handler"));
+
+        handler(&mut context);
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(context.flags().consumed);
+    }
+
+    #[test]
+    fn async_handler_with_moves_the_control_argument_into_the_task() {
+        let application = ApplicationContext::empty();
+        application.set_executor(Arc::new(|mut task: UiTask| {
+            let waker = Waker::noop();
+            let mut context = Context::from_waker(waker);
+            assert!(matches!(task.as_mut().poll(&mut context), Poll::Ready(())));
+        }) as UiTaskSpawner);
+        let total = Arc::new(AtomicUsize::new(0));
+        let handler = async_handler_with({
+            let total = Arc::clone(&total);
+            move |_context, amount| {
+                let total = Arc::clone(&total);
+                async move {
+                    total.fetch_add(amount, Ordering::SeqCst);
+                }
+            }
+        });
+        let mut context = UiEventContext::new(application, WindowId::new("async-handler-with"));
+
+        handler(&mut context, 3);
+
+        assert_eq!(total.load(Ordering::SeqCst), 3);
+        assert!(context.flags().consumed);
     }
 }

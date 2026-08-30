@@ -1,6 +1,10 @@
 use std::{future::Future, sync::Arc};
 
 use crate::application::{ApplicationContext, WindowHandle, WindowId, WindowManager};
+use crate::{
+    command::{Command, CommandHandle},
+    events::Event,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UiEventFlags {
@@ -22,6 +26,7 @@ pub struct UiEventContext {
 #[derive(Clone)]
 pub struct UiAsyncContext {
     application: ApplicationContext,
+    window: Option<WindowHandle>,
 }
 
 impl UiEventContext {
@@ -44,6 +49,27 @@ impl UiEventContext {
         T: Send + Sync + 'static,
     {
         self.application.resource::<T>()
+    }
+
+    pub fn try_resource<T>(&self) -> Option<Arc<T>>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.application.try_resource::<T>()
+    }
+
+    pub fn command<C>(&self) -> CommandHandle<C>
+    where
+        C: Command,
+    {
+        self.application.command::<C>()
+    }
+
+    pub fn emit<E>(&self, event: E) -> usize
+    where
+        E: Event,
+    {
+        self.application.emit(event)
     }
 
     #[cfg(feature = "store")]
@@ -117,10 +143,15 @@ impl UiEventContext {
     where
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let context = UiAsyncContext {
-            application: self.application.clone(),
-        };
+        let context = self.async_context();
         let _ = self.spawn(handler(context));
+    }
+
+    pub fn async_context(&self) -> UiAsyncContext {
+        UiAsyncContext {
+            application: self.application.clone(),
+            window: Some(self.window.clone()),
+        }
     }
 
     pub fn window(&self) -> WindowHandle {
@@ -169,6 +200,13 @@ impl UiEventContext {
 }
 
 impl UiAsyncContext {
+    pub(crate) fn application_only(application: ApplicationContext) -> Self {
+        Self {
+            application,
+            window: None,
+        }
+    }
+
     pub fn application(&self) -> ApplicationContext {
         self.application.clone()
     }
@@ -178,6 +216,66 @@ impl UiAsyncContext {
         T: Send + Sync + 'static,
     {
         self.application.resource::<T>()
+    }
+
+    pub fn try_resource<T>(&self) -> Option<Arc<T>>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.application.try_resource::<T>()
+    }
+
+    pub fn command<C>(&self) -> CommandHandle<C>
+    where
+        C: Command,
+    {
+        self.application.command::<C>()
+    }
+
+    pub async fn invoke<C>(&self, args: C::Args) -> Result<C::Output, C::Error>
+    where
+        C: Command,
+    {
+        self.application.invoke::<C>(args).await
+    }
+
+    pub fn emit<E>(&self, event: E) -> usize
+    where
+        E: Event,
+    {
+        self.application.emit(event)
+    }
+
+    pub fn window(&self) -> Option<WindowHandle> {
+        self.window.clone()
+    }
+
+    pub fn windows(&self) -> WindowManager {
+        self.application.windows()
+    }
+
+    #[cfg(feature = "router")]
+    pub fn navigate<R>(&self, route: R)
+    where
+        R: Default + Clone + PartialEq + Send + Sync + 'static,
+    {
+        self.application.router::<R>().navigate(route);
+    }
+
+    #[cfg(feature = "router")]
+    pub fn replace<R>(&self, route: R)
+    where
+        R: Default + Clone + PartialEq + Send + Sync + 'static,
+    {
+        self.application.router::<R>().replace(route);
+    }
+
+    #[cfg(feature = "router")]
+    pub fn back<R>(&self)
+    where
+        R: Default + Clone + PartialEq + Send + Sync + 'static,
+    {
+        self.application.router::<R>().back();
     }
 
     #[cfg(feature = "store")]

@@ -13,6 +13,10 @@ use super::{
     ComponentId, ComponentState, DeclarativeView, HookId, HookSlotKind, Observable, UiElement,
     UiId, UiRenderContext, UiScope,
 };
+use crate::{
+    command::{Command, CommandHandle},
+    events::{AsyncEventHandler, Event},
+};
 
 pub struct RenderCx<'a, 'ctx> {
     scope: UiScope,
@@ -111,6 +115,60 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
 
     pub fn application(&mut self) -> crate::application::ApplicationContext {
         self.use_context::<crate::application::ApplicationContext>()
+    }
+
+    pub fn command<C>(&mut self) -> CommandHandle<C>
+    where
+        C: Command,
+    {
+        self.application().command::<C>()
+    }
+
+    pub fn use_event<E>(
+        &mut self,
+        deps: impl Clone + PartialEq + 'static,
+        handler: impl Fn(E) + Send + Sync + 'static,
+    ) where
+        E: Event,
+    {
+        let application = self.application();
+        self.use_effect(deps, move || {
+            let subscription = application.subscribe::<E>(handler);
+            move || drop(subscription)
+        });
+    }
+
+    pub fn use_event_once<E>(&mut self, handler: impl Fn(E) + Send + Sync + 'static)
+    where
+        E: Event,
+    {
+        self.use_event::<E>((), handler);
+    }
+
+    pub fn use_event_async<E>(
+        &mut self,
+        deps: impl Clone + PartialEq + 'static,
+        handler: impl AsyncEventHandler<E>,
+    ) where
+        E: Event,
+    {
+        let application = self.application();
+        let handler = Arc::new(handler);
+        self.use_effect(deps, move || {
+            let task_application = application.clone();
+            let subscription = application.subscribe::<E>(move |event| {
+                let context = super::UiAsyncContext::application_only(task_application.clone());
+                let _ = task_application.spawn(handler.call(context, event));
+            });
+            move || drop(subscription)
+        });
+    }
+
+    pub fn use_event_async_once<E>(&mut self, handler: impl AsyncEventHandler<E>)
+    where
+        E: Event,
+    {
+        self.use_event_async::<E>((), handler);
     }
 
     pub(crate) fn compile<V>(&self, view: V) -> UiElement
@@ -470,8 +528,72 @@ impl UiFocusHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::ComponentTree;
+    use crate::{
+        application::ApplicationContext,
+        core::{
+            component, content_text, context_provider, ComponentTree, HostTree, HostTreeBuilder,
+            RootComponent, UiRect, UiRuntime, UiScale,
+        },
+        events::Event,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone)]
+    struct HookEvent;
+
+    impl Event for HookEvent {
+        const NAME: &'static str = "test.hook";
+    }
+
+    #[allow(dead_code)]
+    fn async_event_hook_is_part_of_the_portable_api(cx: &mut RenderCx<'_, '_>) {
+        cx.use_event_async_once::<HookEvent>(|_, _| async {});
+    }
+
+    struct EventRoot {
+        application: ApplicationContext,
+        mounted: bool,
+        deliveries: Arc<AtomicUsize>,
+    }
+
+    impl RootComponent for EventRoot {
+        fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
+            let content = if self.mounted {
+                let deliveries = Arc::clone(&self.deliveries);
+                component((), move |cx, _| {
+                    let deliveries = Arc::clone(&deliveries);
+                    cx.use_event_once::<HookEvent>(move |_| {
+                        deliveries.fetch_add(1, Ordering::SeqCst);
+                    });
+                    content_text("mounted")
+                })
+            } else {
+                content_text("unmounted")
+            };
+            context_provider(self.application, content)
+        }
+    }
+
+    fn mount_event_root(ui: &UiRuntime, tree: HostTree, root: EventRoot) -> HostTree {
+        let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
+        let interaction = ui.interaction_state();
+        let mut builder = HostTreeBuilder::from_retained(tree);
+        builder.mount(
+            root,
+            viewport,
+            &interaction,
+            ui.animations(),
+            ui.component_states(),
+            ui.component_tree(),
+            ui.contexts(),
+            ui.hook_states(),
+            ui.hook_updates(),
+            ui.task_spawner(),
+            ui.effects(),
+            UiScale::ONE,
+        );
+        builder.finish()
+    }
 
     #[test]
     fn equality_setter_is_directly_callable_and_try_update_enqueues_once() {
@@ -529,5 +651,40 @@ mod tests {
 
         assert!(updates.apply(&store, &components).is_empty());
         assert!(!components.is_dirty(new_owner));
+    }
+
+    #[test]
+    fn event_hook_unsubscribes_when_its_component_unmounts() {
+        let ui = UiRuntime::new();
+        let application = ApplicationContext::empty();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+
+        let tree = mount_event_root(
+            &ui,
+            HostTree::new(),
+            EventRoot {
+                application: application.clone(),
+                mounted: true,
+                deliveries: Arc::clone(&deliveries),
+            },
+        );
+        ui.run_effects();
+        assert_eq!(application.emit(HookEvent), 1);
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
+
+        ui.component_tree().mark_all_dirty();
+        let _tree = mount_event_root(
+            &ui,
+            tree,
+            EventRoot {
+                application: application.clone(),
+                mounted: false,
+                deliveries: Arc::clone(&deliveries),
+            },
+        );
+        ui.run_effects();
+
+        assert_eq!(application.emit(HookEvent), 0);
+        assert_eq!(deliveries.load(Ordering::SeqCst), 1);
     }
 }

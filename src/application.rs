@@ -2,8 +2,11 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     future::Future,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
 };
+
+#[cfg(feature = "router")]
+use std::sync::Mutex;
 
 use crate::platform::dpi::ScalePreference;
 #[cfg(feature = "notifications")]
@@ -11,10 +14,12 @@ use crate::platform::NotificationHandle;
 #[cfg(feature = "tray")]
 use crate::platform::{TrayMenuEntry, TrayMenuItem};
 use crate::{
+    command::{Command, CommandHandle, CommandHandler, CommandRegistry},
     core::{
         component, context_provider, Element, RenderCx, RootComponent, Size, UiExecutor, UiRect,
         UiTaskSpawner,
     },
+    events::{Event, EventBus, EventSubscription},
     resources::Resources,
 };
 
@@ -305,6 +310,8 @@ pub struct ApplicationContext {
 struct ApplicationContextInner {
     resources: Resources,
     executor: RwLock<Option<UiTaskSpawner>>,
+    commands: CommandRegistry,
+    events: EventBus,
     #[cfg(feature = "store")]
     stores: Arc<StoreRuntime>,
     #[cfg(feature = "router")]
@@ -314,16 +321,28 @@ struct ApplicationContextInner {
 
 impl ApplicationContext {
     pub fn empty() -> Self {
-        Self::new(Resources::new(), None)
+        Self::new(
+            Resources::new(),
+            None,
+            CommandRegistry::default(),
+            EventBus::default(),
+        )
     }
 
-    fn new(resources: Resources, executor: Option<UiTaskSpawner>) -> Self {
+    fn new(
+        resources: Resources,
+        executor: Option<UiTaskSpawner>,
+        commands: CommandRegistry,
+        events: EventBus,
+    ) -> Self {
         #[cfg(feature = "store")]
         let stores = Arc::new(StoreRuntime::new(resources.clone()));
         Self {
             inner: Arc::new(ApplicationContextInner {
                 resources,
                 executor: RwLock::new(executor),
+                commands,
+                events,
                 #[cfg(feature = "store")]
                 stores,
                 #[cfg(feature = "router")]
@@ -349,6 +368,38 @@ impl ApplicationContext {
         T: Send + Sync + 'static,
     {
         self.inner.resources.get::<T>()
+    }
+
+    pub fn command<C>(&self) -> CommandHandle<C>
+    where
+        C: Command,
+    {
+        CommandHandle::new(self.clone())
+    }
+
+    pub async fn invoke<C>(&self, args: C::Args) -> Result<C::Output, C::Error>
+    where
+        C: Command,
+    {
+        self.command::<C>().invoke(args).await
+    }
+
+    pub fn emit<E>(&self, event: E) -> usize
+    where
+        E: Event,
+    {
+        self.inner.events.emit(event)
+    }
+
+    pub fn subscribe<E>(&self, listener: impl Fn(E) + Send + Sync + 'static) -> EventSubscription
+    where
+        E: Event,
+    {
+        self.inner.events.subscribe(listener)
+    }
+
+    pub(crate) fn command_registry(&self) -> &CommandRegistry {
+        &self.inner.commands
     }
 
     #[cfg(feature = "store")]
@@ -1064,6 +1115,8 @@ pub struct Application<B> {
     window: WindowOptions,
     resources: Resources,
     executor: Option<UiTaskSpawner>,
+    commands: CommandRegistry,
+    events: EventBus,
 }
 
 impl<B> Application<B> {
@@ -1073,6 +1126,8 @@ impl<B> Application<B> {
             window: WindowOptions::default(),
             resources: Resources::new(),
             executor: None,
+            commands: CommandRegistry::default(),
+            events: EventBus::default(),
         }
     }
 
@@ -1091,6 +1146,18 @@ impl<B> Application<B> {
 
     pub fn executor(mut self, executor: impl UiExecutor) -> Self {
         self.executor = Some(Arc::new(executor));
+        self
+    }
+
+    pub fn command<C>(self, handler: impl CommandHandler<C>) -> Self
+    where
+        C: Command,
+    {
+        assert!(
+            self.commands.register::<C>(handler),
+            "command `{}` is already registered",
+            C::NAME
+        );
         self
     }
 
@@ -1264,7 +1331,8 @@ where
             self.resources
                 .provide(crate::dialogs::system_file_dialogs());
         }
-        let context = ApplicationContext::new(self.resources, self.executor);
+        let context =
+            ApplicationContext::new(self.resources, self.executor, self.commands, self.events);
         let backend_context = context.clone();
         let view: AppView = Arc::new(view);
         let root = application_root_view(context, view);
@@ -1274,9 +1342,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
+        task::{Context, Poll, Waker},
     };
 
     use super::*;
@@ -1284,6 +1355,18 @@ mod tests {
     struct RecordingBackend(Arc<Mutex<Option<WindowOptions>>>);
 
     struct ReportingBackend;
+
+    struct BuilderCommand;
+
+    impl Command for BuilderCommand {
+        type Args = usize;
+        type Output = usize;
+        type Error = ();
+
+        const NAME: &'static str = "test.builder";
+    }
+
+    struct InvokingBackend(Arc<Mutex<Option<usize>>>);
 
     impl ApplicationBackend for RecordingBackend {
         type Error = ();
@@ -1318,6 +1401,41 @@ mod tests {
             ));
             Ok(())
         }
+    }
+
+    impl ApplicationBackend for InvokingBackend {
+        type Error = ();
+
+        fn run(
+            self,
+            _options: WindowOptions,
+            _view: AppView,
+            context: ApplicationContext,
+        ) -> Result<(), Self::Error> {
+            let mut future = Box::pin(context.invoke::<BuilderCommand>(41));
+            let waker = Waker::noop();
+            let mut task_context = Context::from_waker(waker);
+            let Poll::Ready(result) = future.as_mut().poll(&mut task_context) else {
+                panic!("test command unexpectedly pending");
+            };
+            *self.0.lock().expect("command result lock poisoned") = Some(result?);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn application_builder_registers_commands_on_the_runtime_context() {
+        let result = Arc::new(Mutex::new(None));
+
+        Application::with_backend(InvokingBackend(Arc::clone(&result)))
+            .command::<BuilderCommand>(|_, value| async move { Ok(value + 1) })
+            .run(|cx| crate::core::group(cx.viewport()))
+            .expect("invoking backend should run");
+
+        assert_eq!(
+            *result.lock().expect("command result lock poisoned"),
+            Some(42)
+        );
     }
 
     #[test]
@@ -1595,7 +1713,12 @@ mod tests {
         fn context_with_counter(counter: Arc<AtomicUsize>) -> ApplicationContext {
             let resources = Resources::new();
             resources.provide(CreateCounter(counter));
-            ApplicationContext::new(resources, None)
+            ApplicationContext::new(
+                resources,
+                None,
+                CommandRegistry::default(),
+                EventBus::default(),
+            )
         }
 
         #[test]
