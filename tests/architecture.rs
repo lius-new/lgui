@@ -703,3 +703,31 @@ fn winit_backend_declares_its_skia_renderer_dependency() {
         "backend-winit must express its Skia software-renderer dependency"
     );
 }
+
+#[test]
+fn win32_remote_images_are_owned_by_the_framework_asset_runtime() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let backend = fs::read_to_string(root.join("src/platform/win32/application/host/backend.rs"))
+        .expect("read Win32 application backend");
+    for required in ["install_remote_image_loader", "http_image_loader"] {
+        assert!(
+            backend.contains(required),
+            "Win32 application lost framework remote image setup `{required}`"
+        );
+    }
+
+    let cache = fs::read_to_string(root.join("src/platform/win32/assets/image_cache.rs"))
+        .expect("read Win32 image cache");
+    for required in ["lgui-image-http", "loader.load(&url)"] {
+        assert!(
+            cache.contains(required),
+            "Win32 image cache lost remote loading behavior `{required}`"
+        );
+    }
+    for forbidden in ["liugc", "crate::backend"] {
+        assert!(
+            !cache.contains(forbidden),
+            "framework image cache leaked application dependency `{forbidden}`"
+        );
+    }
+}

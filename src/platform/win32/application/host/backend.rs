@@ -8,9 +8,16 @@ impl ApplicationBackend for Win32Application {
             .platform_options::<Win32WindowOptions>()
             .cloned()
             .unwrap_or_default();
-        #[cfg(feature = "images")]
+        #[cfg(feature = "images-win32")]
         let _gdiplus = super::super::super::gdiplus::GdiPlusRuntime::start()?;
-        #[cfg(feature = "images")]
+        #[cfg(feature = "images-win32")]
+        let _remote_image_loader = super::super::super::install_remote_image_loader(
+            context
+                .try_resource::<crate::assets::RemoteImageLoaderHandle>()
+                .map(|loader| (*loader).clone())
+                .unwrap_or_else(crate::assets::http_image_loader),
+        );
+        #[cfg(feature = "images-win32")]
         let _image_cache =
             crate::assets::install_image_cache(super::super::super::portable_image_cache_handle());
         #[cfg(feature = "advanced-rendering")]

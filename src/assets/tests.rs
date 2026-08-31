@@ -1,7 +1,10 @@
 use super::*;
 use crate::core::PhysicalSize;
 use std::{
+    io::{Read, Write},
+    net::TcpListener,
     sync::{mpsc, Arc},
+    thread,
     time::Duration,
 };
 
@@ -51,4 +54,25 @@ fn async_image_cache_wakes_and_publishes_loaded_bytes() {
         .expect("image completion wake");
     assert_eq!(cache.request(&source), ImageStatus::Ready);
     assert_eq!(cache.bytes(&source).as_deref(), Some(&[1, 2, 3, 4][..]));
+}
+
+#[test]
+fn http_image_loader_fetches_remote_bytes() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind image fixture server");
+    let address = listener.local_addr().expect("fixture server address");
+    let server = thread::spawn(move || {
+        let (mut connection, _) = listener.accept().expect("accept image request");
+        let mut request = [0_u8; 1024];
+        let _ = connection.read(&mut request).expect("read image request");
+        connection
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nLGUi")
+            .expect("write image response");
+    });
+
+    let bytes = HttpImageLoader
+        .load(&format!("http://{address}/avatar.png"))
+        .expect("fetch image fixture");
+
+    assert_eq!(bytes.as_ref(), b"LGUi");
+    server.join().expect("image fixture server");
 }

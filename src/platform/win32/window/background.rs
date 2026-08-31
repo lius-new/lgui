@@ -1,7 +1,7 @@
 pub(super) fn release_visual_caches() {
     crate::core::clear_scroll_raster_command_cache();
 
-    #[cfg(feature = "images")]
+    #[cfg(feature = "images-win32")]
     {
         super::clear_cached_decoded_image_cache();
         super::clear_cached_image_cache();

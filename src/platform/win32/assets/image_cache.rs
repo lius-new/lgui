@@ -27,25 +27,38 @@ use windows::Win32::{
 
 pub const WM_IMAGE_CACHE_INVALIDATED: u32 = WM_APP + 42;
 
-pub type RemoteImageCompletion = Box<dyn FnOnce(Option<Vec<u8>>) + Send + 'static>;
-pub type RemoteImageLoader = Arc<dyn Fn(String, RemoteImageCompletion) + Send + Sync + 'static>;
-
 static IMAGE_CACHE: LazyLock<Mutex<ImageCache>> =
     LazyLock::new(|| Mutex::new(ImageCache::default()));
 static IMAGE_CACHE_EPOCH: AtomicU64 = AtomicU64::new(0);
 static IMAGE_REPAINT_HWND: LazyLock<Mutex<Option<isize>>> = LazyLock::new(|| Mutex::new(None));
 static IMAGE_REPAINT_PENDING: AtomicBool = AtomicBool::new(false);
-static REMOTE_IMAGE_LOADER: LazyLock<Mutex<Option<RemoteImageLoader>>> =
+static REMOTE_IMAGE_LOADER: LazyLock<Mutex<Option<crate::assets::RemoteImageLoaderHandle>>> =
     LazyLock::new(|| Mutex::new(None));
 
 thread_local! {
     static DECODED_IMAGE_CACHE: RefCell<HashMap<String, DecodedImage>> = RefCell::new(HashMap::new());
 }
 
-pub fn set_remote_image_loader(loader: RemoteImageLoader) {
-    *REMOTE_IMAGE_LOADER
+pub(crate) struct RemoteImageLoaderGuard {
+    previous: Option<crate::assets::RemoteImageLoaderHandle>,
+}
+
+impl Drop for RemoteImageLoaderGuard {
+    fn drop(&mut self) {
+        *REMOTE_IMAGE_LOADER
+            .lock()
+            .expect("remote image loader lock poisoned") = self.previous.take();
+    }
+}
+
+pub(crate) fn install_remote_image_loader(
+    loader: crate::assets::RemoteImageLoaderHandle,
+) -> RemoteImageLoaderGuard {
+    let previous = REMOTE_IMAGE_LOADER
         .lock()
-        .expect("remote image loader lock poisoned") = Some(loader);
+        .expect("remote image loader lock poisoned")
+        .replace(loader);
+    RemoteImageLoaderGuard { previous }
 }
 
 #[derive(Clone, Copy)]
@@ -55,7 +68,7 @@ pub enum ImageFit {
     Contain,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CachedImageStatus {
     Loading,
     Ready,
@@ -299,13 +312,17 @@ fn start_image_load(key: String, source: ImageSource, epoch: u64) {
                 fail_image_load(key, epoch);
                 return;
             };
-            loader(
-                url,
-                Box::new(move |result| match result {
-                    Some(bytes) => finish_image_load(key, bytes, epoch),
-                    None => fail_image_load(key, epoch),
-                }),
-            );
+            let failure_key = key.clone();
+            if std::thread::Builder::new()
+                .name("lgui-image-http".to_owned())
+                .spawn(move || match loader.load(&url) {
+                    Ok(bytes) => finish_image_load(key, bytes.to_vec(), epoch),
+                    Err(_) => fail_image_load(key, epoch),
+                })
+                .is_err()
+            {
+                fail_image_load(failure_key, epoch);
+            }
         }
     }
 }
@@ -494,5 +511,51 @@ fn decode_image(bytes: &[u8]) -> Option<DecodedImage> {
             width: i32::try_from(width).ok()?,
             height: i32::try_from(height).ok()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    const ONE_PIXEL_PNG: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xB5,
+        0x1C, 0x0C, 0x02, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x64,
+        0xF8, 0x0F, 0x00, 0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xE3, 0x66, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    struct TestRemoteLoader;
+
+    impl crate::assets::RemoteImageLoader for TestRemoteLoader {
+        fn load(&self, _url: &str) -> Result<crate::assets::AssetBytes, crate::assets::AssetError> {
+            Ok(Arc::from(ONE_PIXEL_PNG))
+        }
+    }
+
+    #[test]
+    fn remote_loader_populates_the_win32_image_cache() {
+        let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start()
+            .expect("start GDI+ for image cache test");
+        clear_cached_image_cache();
+        let _loader = install_remote_image_loader(crate::assets::RemoteImageLoaderHandle::new(
+            TestRemoteLoader,
+        ));
+        let source = ImageSource::url("https://example.invalid/avatar.png");
+
+        assert_eq!(request_cached_image(&source), CachedImageStatus::Loading);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while request_cached_image(&source) == CachedImageStatus::Loading
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert_eq!(request_cached_image(&source), CachedImageStatus::Ready);
+        let (_, width, height) = cached_image_data(&source).expect("cached remote image");
+        assert_eq!((width, height), (1, 1));
+        clear_cached_image_cache();
     }
 }

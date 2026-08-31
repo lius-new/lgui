@@ -1,4 +1,3 @@
-#[cfg(feature = "renderer-skia")]
 use std::io::Read;
 use std::sync::Arc;
 
@@ -25,17 +24,14 @@ impl RemoteImageLoaderHandle {
         Self(Arc::new(loader))
     }
 
-    #[cfg(any(test, feature = "backend-winit"))]
-    pub(super) fn load(&self, url: &str) -> Result<AssetBytes, AssetError> {
+    pub(crate) fn load(&self, url: &str) -> Result<AssetBytes, AssetError> {
         self.0.load(url)
     }
 }
 
-#[cfg(feature = "renderer-skia")]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HttpImageLoader;
 
-#[cfg(feature = "renderer-skia")]
 impl RemoteImageLoader for HttpImageLoader {
     fn load(&self, url: &str) -> Result<AssetBytes, AssetError> {
         const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
@@ -62,7 +58,6 @@ impl RemoteImageLoader for HttpImageLoader {
     }
 }
 
-#[cfg(feature = "renderer-skia")]
 pub fn http_image_loader() -> RemoteImageLoaderHandle {
     RemoteImageLoaderHandle::new(HttpImageLoader)
 }

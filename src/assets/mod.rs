@@ -9,7 +9,6 @@ pub use cache::{clear_image_caches, request_image, ImageCacheHandle};
 pub use custom_paint::SvgRenderer;
 pub use custom_paint::{CustomPaintProvider, SceneFragment};
 pub use model::{AssetBytes, AssetError, ImageData, ImageSource, ImageStatus};
-#[cfg(feature = "renderer-skia")]
 pub use resolver::{http_image_loader, HttpImageLoader};
 pub use resolver::{AssetResolver, ImageLoader, RemoteImageLoader, RemoteImageLoaderHandle};
 pub use resources::RenderResources;

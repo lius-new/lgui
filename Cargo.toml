@@ -22,7 +22,6 @@ advanced-rendering = [
 ]
 renderer-skia = [
   "dep:skia-safe",
-  "dep:ureq",
   "images",
   "svg",
 ]
@@ -71,7 +70,7 @@ system-diagnostics = [
   "backend-win32",
   "windows/Win32_System_SystemInformation",
 ]
-images = []
+images = ["dep:ureq"]
 images-win32 = [
   "images",
   "backend-win32",
