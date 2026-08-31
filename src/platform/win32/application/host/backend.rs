@@ -33,13 +33,9 @@ impl ApplicationBackend for Win32Application {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
         set_scale_preference(options.scale_preference);
-        #[cfg(feature = "notifications")]
-        let notification_registration = context.try_resource::<NotificationRegistration>();
-        #[cfg(feature = "notifications")]
-        if let Some(registration) = notification_registration.as_ref() {
-            super::super::super::notifications::initialize_process_identity(&registration.identity)
-                .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
-        }
+        #[cfg(feature = "notifications-win32")]
+        super::super::super::services::install_notification_service(&context)
+            .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None) }?.0);
         let class_name = wide(win32_options.class_name.as_deref().unwrap_or(WINDOW_CLASS));
         let cursor = unsafe { LoadCursorW(None, IDC_ARROW) }?;
@@ -79,21 +75,6 @@ impl ApplicationBackend for Win32Application {
             dispatcher.clone(),
         )?;
         dispatcher.attach(hwnd);
-        #[cfg(feature = "notifications")]
-        if let Some(registration) = notification_registration {
-            let service =
-                super::super::super::Win32NotificationService::new(&registration.identity)
-                    .map_err(|error| {
-                        Error::new(HRESULT(0x80004005_u32 as i32), error.to_string())
-                    })?;
-            context
-                .resources()
-                .provide(NotificationHandle::new(move |notification| {
-                    service
-                        .show(&notification.title, &notification.body)
-                        .map_err(|error| NotificationError::new(error.to_string()))
-                }));
-        }
         #[cfg(feature = "store")]
         context.stores().set_wake({
             let dispatcher = dispatcher.clone();
@@ -120,20 +101,32 @@ impl ApplicationBackend for Win32Application {
                 );
             });
         });
-        #[cfg(feature = "tray")]
+        #[cfg(feature = "tray-win32")]
         let mut tray_host = if let Some(registration) = context.try_resource::<TrayRegistration>() {
             let visibility_dispatcher = dispatcher.clone();
             let main_hwnd = hwnd.0 as isize;
+            let action_context = context.clone();
+            let action_registration = Arc::clone(&registration);
             Some(
-                Win32TrayHost::spawn(registration, context.clone(), hwnd, move |visible| {
-                    let dispatcher = visibility_dispatcher.clone();
-                    dispatcher.post(move || {
-                        if visible {
-                            show_window(HWND(main_hwnd as _));
-                        } else {
-                            hide_window(HWND(main_hwnd as _));
-                        }
-                    });
+                Win32TrayHost::spawn(registration.options.clone(), move |action| {
+                    dispatch_tray_action(
+                        &action_registration,
+                        &action_context,
+                        action,
+                        |visible| {
+                            let dispatcher = visibility_dispatcher.clone();
+                            dispatcher.post(move || {
+                                if visible {
+                                    show_window(HWND(main_hwnd as _));
+                                    unsafe {
+                                        let _ = SetForegroundWindow(HWND(main_hwnd as _));
+                                    }
+                                } else {
+                                    hide_window(HWND(main_hwnd as _));
+                                }
+                            });
+                        },
+                    );
                 })
                 .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?,
             )
@@ -150,7 +143,7 @@ impl ApplicationBackend for Win32Application {
                 DispatchMessageW(&message);
             }
         }
-        #[cfg(feature = "tray")]
+        #[cfg(feature = "tray-win32")]
         if let Some(host) = tray_host.as_mut() {
             host.shutdown();
         }

@@ -56,7 +56,7 @@ renderer-skia-metal = [
   "dep:lgui-skia-metal-features",
 ]
 backend-win32 = [
-  "dep:windows",
+  "windows-platform",
   "windows/Win32_System_ProcessStatus",
   "windows/Win32_System_Threading",
 ]
@@ -80,8 +80,10 @@ images-win32 = [
   "windows/Win32_UI_Shell",
 ]
 multi-window = []
-notifications = [
-  "backend-win32",
+notifications = []
+notifications-win32 = [
+  "notifications",
+  "windows-platform",
   "windows/Data_Xml_Dom",
   "windows/UI_Notifications",
   "windows/Win32_UI_Shell",
@@ -109,7 +111,9 @@ svg = [
 ]
 theme = []
 tokio = ["async", "dep:tokio"]
-tray = ["backend-win32", "windows/Win32_UI_Shell"]
+tray = []
+tray-win32 = ["tray", "windows-platform", "windows/Win32_UI_Shell"]
+windows-platform = ["dep:windows"]
 widgets = ["theme"]
 
 [dependencies]

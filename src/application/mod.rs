@@ -5,16 +5,22 @@ mod builder;
 mod context;
 mod error;
 mod handle;
-#[cfg(feature = "notifications")]
-mod notification;
 mod renderer_selection;
-#[cfg(feature = "tray")]
+#[cfg(all(
+    feature = "tray-win32",
+    any(feature = "backend-win32", feature = "backend-winit")
+))]
 mod tray;
 mod view;
-mod window;
 
 pub use crate::renderer::RenderErrorStage;
 
+#[cfg(feature = "tray")]
+pub use crate::services::{TrayAction, TrayOptions};
+pub use crate::window::{
+    ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowHandle, WindowId, WindowManager,
+    WindowMode, WindowOptions, WindowPosition,
+};
 pub use backend::ApplicationBackend;
 #[cfg(all(
     target_os = "windows",
@@ -28,8 +34,6 @@ pub use context::ApplicationContext;
 pub use error::RenderError;
 pub(crate) use error::RenderErrorRegistration;
 pub use handle::{ApplicationHandle, ApplicationTask};
-#[cfg(feature = "notifications")]
-pub(crate) use notification::NotificationRegistration;
 #[cfg(any(
     all(feature = "renderer-gdi", target_os = "windows"),
     all(feature = "renderer-d2d", target_os = "windows"),
@@ -37,17 +41,13 @@ pub(crate) use notification::NotificationRegistration;
 ))]
 pub use renderer_selection::RendererKind;
 pub use renderer_selection::{GraphicsPreference, RendererProbeError};
-#[cfg(feature = "tray")]
-pub(crate) use tray::TrayRegistration;
-#[cfg(feature = "tray")]
-pub use tray::{TrayAction, TrayOptions};
+#[cfg(all(
+    feature = "tray-win32",
+    any(feature = "backend-win32", feature = "backend-winit")
+))]
+pub(crate) use tray::{dispatch_tray_action, TrayRegistration};
 pub(crate) use view::application_root_view;
 pub use view::AppView;
-pub(crate) use window::WindowCommand;
-pub use window::{
-    ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowHandle, WindowId, WindowManager,
-    WindowMode, WindowOptions, WindowPosition,
-};
 
 #[cfg(test)]
 mod tests;

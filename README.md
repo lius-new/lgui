@@ -7,7 +7,8 @@ retained host tree, event dispatch, reactive updates, windows, renderer, and fra
 The portable core provides typed component State, committed Effects, Commands, Events, Context,
 Store selectors and actions, declarative Router outlets, layout, input, and scene construction. Optional features add
 the Win32 application backend, GDI or Direct2D rendering, multiple windows, images, SVG, advanced
-rendering, clipboard, notifications, tray integration, diagnostics, and Tokio execution.
+rendering, clipboard, portable notification/tray contracts, Windows notification/tray adapters,
+diagnostics, and Tokio execution.
 
 Application resources are ordinary typed data. Asset resolvers and custom paint providers are
 provided to `Application`, while renderers own their native caches and device resources. Business

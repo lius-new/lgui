@@ -21,14 +21,15 @@ use super::{
 use super::DesktopApplication;
 #[cfg(all(feature = "renderer-skia", feature = "backend-winit"))]
 use super::GraphicsPreference;
-#[cfg(feature = "notifications")]
-use super::NotificationRegistration;
 #[cfg(any(
     all(feature = "renderer-gdi", target_os = "windows"),
     all(feature = "renderer-skia", feature = "backend-winit")
 ))]
 use super::RendererKind;
-#[cfg(feature = "tray")]
+#[cfg(all(
+    feature = "tray-win32",
+    any(feature = "backend-win32", feature = "backend-winit")
+))]
 use super::{TrayOptions, TrayRegistration};
 
 pub struct Application<B> {
@@ -119,7 +120,10 @@ impl<B> Application<B> {
         self
     }
 
-    #[cfg(feature = "tray")]
+    #[cfg(all(
+        feature = "tray-win32",
+        any(feature = "backend-win32", feature = "backend-winit")
+    ))]
     pub fn tray(
         self,
         options: TrayOptions,
@@ -133,10 +137,8 @@ impl<B> Application<B> {
     }
 
     #[cfg(feature = "notifications")]
-    pub fn notifications(self, identity: impl Into<String>) -> Self {
-        self.resources.provide(NotificationRegistration {
-            identity: identity.into(),
-        });
+    pub fn notification_service(self, service: crate::services::NotificationHandle) -> Self {
+        self.resources.provide(service);
         self
     }
 }
@@ -229,11 +231,11 @@ where
         #[cfg(feature = "clipboard")]
         if self
             .resources
-            .get::<crate::platform::ClipboardHandle>()
+            .get::<crate::services::ClipboardHandle>()
             .is_none()
         {
             self.resources
-                .provide::<crate::platform::ClipboardHandle>(crate::clipboard::system_clipboard());
+                .provide::<crate::services::ClipboardHandle>(crate::clipboard::system_clipboard());
         }
         #[cfg(feature = "open-url")]
         if self

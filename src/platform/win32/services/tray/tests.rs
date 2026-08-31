@@ -1,4 +1,5 @@
-use super::{copy_wide, is_activation_message, WM_LBUTTONUP};
+use super::{host::is_activation_message, support::copy_wide};
+use windows::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP;
 
 #[test]
 fn single_left_click_activates_the_tray_icon() {

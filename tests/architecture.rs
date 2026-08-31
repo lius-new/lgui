@@ -23,6 +23,7 @@ fn source_tree_expresses_subsystem_boundaries() {
         "store",
         "text",
         "theme",
+        "window",
         "widgets",
         "core/foundation",
         "core/view",
@@ -52,6 +53,9 @@ fn source_tree_expresses_subsystem_boundaries() {
         "platform/win32/renderer/enhanced/static_layer",
         "platform/win32/assets",
         "platform/win32/services",
+        "services/clipboard",
+        "services/notification",
+        "services/tray",
     ] {
         assert!(root.join(directory).is_dir(), "missing `{directory}`");
     }
@@ -76,6 +80,7 @@ fn source_tree_expresses_subsystem_boundaries() {
         "text/system.rs",
         "widgets/select/control.rs",
         "widgets/slider/control.rs",
+        "services/contracts.rs",
     ] {
         assert!(
             !root.join(legacy).exists(),
@@ -113,6 +118,18 @@ fn source_tree_expresses_subsystem_boundaries() {
         "platform/winit/window.rs",
         "platform/winit/renderer.rs",
         "platform/winit/input.rs",
+        "window/command.rs",
+        "window/manager.rs",
+        "window/options.rs",
+        "services/clipboard/contract.rs",
+        "services/notification/contract.rs",
+        "services/tray/contract.rs",
+        "services/tray/model.rs",
+        "platform/win32/services/notification.rs",
+        "platform/win32/services/tray/host.rs",
+        "platform/win32/services/tray/icon.rs",
+        "platform/win32/services/tray/menu.rs",
+        "platform/win32/services/tray/support.rs",
     ] {
         assert!(root.join(leaf).is_file(), "missing `{leaf}`");
     }
@@ -268,9 +285,10 @@ fn win32_backend_has_no_application_dependencies() {
 
 #[test]
 fn tray_host_owns_a_message_loop_outside_the_application_window_thread() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tray = fs::read_to_string(root.join("src/platform/win32/services/tray.rs"))
-        .expect("read Win32 tray host");
+    let tray = rust_sources("src/platform/win32/services/tray")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
     for required in [
         ".name(\"lgui-tray\".to_string())",
         "run_tray_thread(",
@@ -448,7 +466,7 @@ fn portable_input_uses_complete_shared_keyboard_and_pointer_vocabulary() {
 #[test]
 fn portable_window_options_do_not_own_win32_policy() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let window_options_source = fs::read_to_string(root.join("src/application/window/options.rs"))
+    let window_options_source = fs::read_to_string(root.join("src/window/options.rs"))
         .expect("read portable window options");
     let window_options = window_options_source
         .split_once("pub struct WindowOptions")
@@ -469,6 +487,101 @@ fn portable_window_options_do_not_own_win32_policy() {
         .map(|(_, source)| source)
         .collect::<String>();
     assert!(win32.contains("pub struct Win32WindowOptions"));
+}
+
+#[test]
+fn window_and_desktop_services_have_single_owners() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let application =
+        fs::read_to_string(root.join("src/application/mod.rs")).expect("read application facade");
+    assert!(
+        !application.contains("mod window;"),
+        "application must not reclaim the top-level window subsystem"
+    );
+
+    let platform =
+        fs::read_to_string(root.join("src/platform/mod.rs")).expect("read platform facade");
+    assert!(
+        !platform.contains("services/contracts") && !platform.contains("service_contracts"),
+        "platform must consume service contracts instead of owning them through a path alias"
+    );
+
+    let violations = rust_sources("src/services")
+        .into_iter()
+        .flat_map(|(path, source)| {
+            [
+                "crate::application",
+                "crate::platform",
+                "windows::",
+                "winit::",
+            ]
+            .into_iter()
+            .filter_map(move |needle| {
+                source
+                    .contains(needle)
+                    .then(|| format!("{} contains `{needle}`", path.display()))
+            })
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        violations.is_empty(),
+        "portable desktop-service boundary violations:\n{}",
+        violations.join("\n")
+    );
+
+    let tray = rust_sources("src/platform/win32/services/tray")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
+    for forbidden in [
+        "ApplicationContext",
+        "TrayRegistration",
+        "main_hwnd",
+        "sync_visibility",
+    ] {
+        assert!(
+            !tray.contains(forbidden),
+            "Win32 tray adapter owns application concern `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn desktop_service_features_separate_contracts_from_windows_adapters() {
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("read lgui manifest");
+    let feature = |name: &str| {
+        manifest
+            .split_once(&format!("{name} = ["))
+            .unwrap_or_else(|| panic!("missing `{name}` feature"))
+            .1
+            .split_once(']')
+            .expect("feature end")
+            .0
+            .to_owned()
+    };
+
+    for name in ["notifications", "tray"] {
+        let body = feature(name);
+        for forbidden in ["backend-win32", "windows-platform", "windows/"] {
+            assert!(
+                !body.contains(forbidden),
+                "portable `{name}` feature depends on `{forbidden}`"
+            );
+        }
+    }
+    for (adapter, contract) in [
+        ("notifications-win32", "notifications"),
+        ("tray-win32", "tray"),
+    ] {
+        let body = feature(adapter);
+        assert!(body.contains(&format!("\"{contract}\"")));
+        assert!(body.contains("\"windows-platform\""));
+        assert!(
+            !body.contains("\"backend-win32\""),
+            "`{adapter}` must not force the Win32 window backend"
+        );
+    }
 }
 
 #[test]

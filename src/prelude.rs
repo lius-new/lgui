@@ -1,7 +1,6 @@
 pub use crate::application::{
-    AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle, ClosePolicy,
-    GraphicsPreference, RenderError, RenderErrorStage, WindowCloseHandler, WindowHandle, WindowId,
-    WindowManager, WindowMode, WindowOptions, WindowPosition,
+    AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle,
+    GraphicsPreference, RenderError, RenderErrorStage,
 };
 #[cfg(any(
     all(feature = "renderer-gdi", target_os = "windows"),
@@ -9,8 +8,6 @@ pub use crate::application::{
     feature = "renderer-skia"
 ))]
 pub use crate::application::{RendererKind, RendererProbeError};
-#[cfg(feature = "tray")]
-pub use crate::application::{TrayAction, TrayOptions};
 #[cfg(feature = "svg")]
 pub use crate::assets::SvgRenderer;
 #[cfg(feature = "images")]
@@ -39,8 +36,7 @@ pub use crate::dialogs::{
 pub use crate::events::{AsyncEventHandler, Event, EventFuture, EventSubscription};
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
-    Clipboard, ClipboardError, ClipboardHandle, InputSink, Notification, NotificationError,
-    NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService, WakeHandle,
+    InputSink, WakeHandle,
 };
 pub use crate::renderer::{
     ClipRegion, FrameInfo, FrameReason, MemoryPressure, RenderStats, RendererCapabilities,
@@ -54,6 +50,12 @@ pub use crate::router::{
     RouteId, RouteMatch, RouteMatchHooks, RouteMatches, RouteSubscriptionToken, Router,
     RouterContext, RouterHooks, RouterSnapshot,
 };
+pub use crate::services::{
+    Clipboard, ClipboardError, ClipboardHandle, Notification, NotificationError,
+    NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService,
+};
+#[cfg(feature = "tray")]
+pub use crate::services::{TrayAction, TrayOptions};
 pub use crate::session::UiSession;
 #[cfg(feature = "store")]
 pub use crate::store::{
@@ -71,4 +73,8 @@ pub use crate::widgets::{
     button, checkbox, divider, faded_divider, panel, select, slider, stack, switch, text, Button,
     ButtonStyle, Checkbox, CheckboxStyle, Divider, DividerDirection, FadedDivider, Panel, Select,
     SelectOption, Slider, Stack, Switch, SwitchStyle, Text,
+};
+pub use crate::window::{
+    ClosePolicy, WindowCloseHandler, WindowHandle, WindowId, WindowManager, WindowMode,
+    WindowOptions, WindowPosition,
 };

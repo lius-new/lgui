@@ -75,6 +75,7 @@ thread_local! {
     static SVG_CACHE: RefCell<HashMap<SvgCacheKey, SvgBitmap>> = RefCell::new(HashMap::new());
 }
 
+#[cfg(feature = "backend-win32")]
 pub(crate) fn clear_svg_bitmap_cache() {
     SVG_CACHE.with(|cache| cache.borrow_mut().clear());
 }

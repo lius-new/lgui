@@ -17,10 +17,10 @@ use crate::{
     resources::Resources,
 };
 
-#[cfg(feature = "notifications")]
-use crate::platform::NotificationHandle;
 #[cfg(feature = "router")]
 use crate::router::Router;
+#[cfg(feature = "notifications")]
+use crate::services::NotificationHandle;
 #[cfg(feature = "store")]
 use crate::store::StoreRuntime;
 
@@ -203,8 +203,8 @@ impl ApplicationContext {
     }
 
     #[cfg(feature = "clipboard")]
-    pub fn clipboard(&self) -> crate::platform::ClipboardHandle {
-        (*self.resource::<crate::platform::ClipboardHandle>()).clone()
+    pub fn clipboard(&self) -> crate::services::ClipboardHandle {
+        (*self.resource::<crate::services::ClipboardHandle>()).clone()
     }
 
     #[cfg(feature = "open-url")]

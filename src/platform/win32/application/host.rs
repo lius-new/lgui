@@ -70,25 +70,22 @@ use windows::{
     },
 };
 
-#[cfg(feature = "notifications")]
-use crate::application::NotificationRegistration;
-#[cfg(feature = "tray")]
-use crate::application::TrayRegistration;
+#[cfg(feature = "tray-win32")]
+use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+
+#[cfg(feature = "tray-win32")]
+use crate::application::{dispatch_tray_action, TrayRegistration};
 #[cfg(all(
     feature = "diagnostics",
     feature = "advanced-rendering",
     feature = "renderer-gdi"
 ))]
 use crate::diagnostics::FrameBlitSourceMetrics;
-#[cfg(feature = "notifications")]
-use crate::platform::{NotificationError, NotificationHandle};
 #[cfg(feature = "renderer-gdi")]
 use crate::renderer::{RenderStats, RendererCapabilities};
 use crate::{
     application::{
-        application_root_view, AppView, ApplicationBackend, ApplicationContext, ClosePolicy,
-        RenderError, WindowCloseHandler, WindowCommand, WindowDragExclusion, WindowId, WindowMode,
-        WindowOptions, WindowPosition,
+        application_root_view, AppView, ApplicationBackend, ApplicationContext, RenderError,
     },
     core::{
         dispatch_runtime_output, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState,
@@ -98,6 +95,10 @@ use crate::{
     },
     renderer::{FrameInfo, FrameReason, RenderErrorStage, SceneRenderer},
     session::UiSession,
+    window::{
+        ClosePolicy, WindowCloseHandler, WindowCommand, WindowDragExclusion, WindowId, WindowMode,
+        WindowOptions, WindowPosition,
+    },
 };
 #[cfg(feature = "diagnostics")]
 use crate::{
@@ -109,8 +110,8 @@ use crate::{
 };
 
 use super::super::ico::create_icon_from_ico_bytes;
-#[cfg(feature = "tray")]
-use super::super::Win32TrayHost;
+#[cfg(feature = "tray-win32")]
+use super::super::services::Win32TrayHost;
 use super::super::{
     dispatcher::{DEFAULT_FRAME_INTERVAL_MS, WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
     set_scale_preference, DpiContext, Win32Dispatcher,

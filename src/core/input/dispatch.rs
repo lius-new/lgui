@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::application::{ApplicationContext, WindowId};
+use crate::{application::ApplicationContext, window::WindowId};
 
 use super::{
     HitResult, RuntimeOutput, UiDefaultAction, UiEvent, UiEventContext, UiHandlerEvent, UiRect,

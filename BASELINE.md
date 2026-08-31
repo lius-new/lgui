@@ -13,6 +13,9 @@ cargo check -p lgui --no-default-features --features backend-win32
 cargo check -p lgui --no-default-features --features renderer-gdi
 cargo check -p lgui --no-default-features --features renderer-d2d
 cargo check -p lgui --no-default-features --features backend-winit
+cargo check -p lgui --no-default-features --features notifications,tray
+cargo check -p lgui --no-default-features --features renderer-gdi,notifications-win32,tray-win32
+cargo check -p lgui --no-default-features --features backend-winit,notifications-win32,tray-win32
 cargo test -p lgui --no-default-features --quiet
 cargo test -p lgui --quiet
 cargo test -p lgui --all-features --quiet

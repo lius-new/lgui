@@ -8,18 +8,15 @@ pub mod application;
 #[cfg(feature = "images")]
 pub mod assets;
 #[cfg(feature = "clipboard")]
-#[path = "services/clipboard.rs"]
-pub mod clipboard;
+pub use services::clipboard;
 pub mod command;
 pub mod core;
 #[cfg(feature = "open-url")]
-#[path = "services/open_url.rs"]
-pub mod desktop;
+pub use services::open_url as desktop;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;
 #[cfg(feature = "dialogs")]
-#[path = "services/dialogs.rs"]
-pub mod dialogs;
+pub use services::dialogs;
 pub mod events;
 #[path = "runtime/frame/mod.rs"]
 pub mod frame;
@@ -45,3 +42,4 @@ pub mod text;
 pub mod theme;
 #[cfg(feature = "widgets")]
 pub mod widgets;
+pub mod window;

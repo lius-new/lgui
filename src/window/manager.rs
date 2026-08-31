@@ -19,7 +19,7 @@ struct WindowManagerInner {
 }
 
 impl WindowManager {
-    pub(in crate::application) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(WindowManagerInner {
                 command: RwLock::new(None),

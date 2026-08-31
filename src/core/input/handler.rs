@@ -206,8 +206,9 @@ mod tests {
     };
 
     use crate::{
-        application::{ApplicationContext, WindowId},
+        application::ApplicationContext,
         core::{UiTask, UiTaskSpawner},
+        window::WindowId,
     };
 
     use super::*;

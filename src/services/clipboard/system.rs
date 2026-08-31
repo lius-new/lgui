@@ -1,4 +1,4 @@
-use crate::platform::{Clipboard, ClipboardError, ClipboardHandle};
+use super::{Clipboard, ClipboardError, ClipboardHandle};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemClipboard;

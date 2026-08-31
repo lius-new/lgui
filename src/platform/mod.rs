@@ -1,19 +1,24 @@
 pub mod dpi;
 
 mod runtime;
-#[path = "../services/contracts.rs"]
-mod service_contracts;
 
-pub use runtime::{task_spawner, InputSink, WakeHandle};
-pub use service_contracts::{
+pub use crate::services::{
     Clipboard, ClipboardError, ClipboardHandle, Notification, NotificationError,
     NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService,
 };
+pub use runtime::{task_spawner, InputSink, WakeHandle};
 
 #[cfg(feature = "renderer-skia")]
 pub(crate) use crate::renderer::skia;
 
-#[cfg(all(feature = "backend-win32", target_os = "windows"))]
+#[cfg(all(
+    target_os = "windows",
+    any(
+        feature = "backend-win32",
+        feature = "notifications-win32",
+        feature = "tray-win32"
+    )
+))]
 #[allow(unsafe_code)]
 pub mod win32;
 

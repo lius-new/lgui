@@ -94,21 +94,9 @@ impl ApplicationBackend for WinitApplication {
                 let _ = proxy.send_event(WinitUserEvent::RequestAllFrames);
             })
         });
-        #[cfg(all(feature = "notifications", target_os = "windows"))]
-        if let Some(registration) = context.try_resource::<NotificationRegistration>() {
-            crate::platform::win32::initialize_notification_identity(&registration.identity)
-                .map_err(|error| WinitApplicationError(error.to_string()))?;
-            let service =
-                crate::platform::win32::Win32NotificationService::new(&registration.identity)
-                    .map_err(|error| WinitApplicationError(error.to_string()))?;
-            context
-                .resources()
-                .provide(NotificationHandle::new(move |notification| {
-                    service
-                        .show(&notification.title, &notification.body)
-                        .map_err(|error| NotificationError::new(error.to_string()))
-                }));
-        }
+        #[cfg(all(feature = "notifications-win32", target_os = "windows"))]
+        crate::platform::win32::services::install_notification_service(&context)
+            .map_err(|error| WinitApplicationError(error.to_string()))?;
         let font_families = context
             .try_resource::<crate::text::FontFamilies>()
             .map_or(&["Segoe UI"][..], |families| families.0);
@@ -135,7 +123,7 @@ impl ApplicationBackend for WinitApplication {
             ids: HashMap::new(),
             scale_preference: None,
             preference: self.preference,
-            #[cfg(all(feature = "tray", target_os = "windows"))]
+            #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             tray_host: None,
             exit_requested: false,
         };

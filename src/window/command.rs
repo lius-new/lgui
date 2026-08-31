@@ -1,17 +1,16 @@
 use crate::{core::InputEvent, platform::dpi::ScalePreference};
 
-use super::{WindowId, WindowMode, WindowOptions};
-use crate::application::AppView;
+use super::{WindowId, WindowMode, WindowOptions, WindowView};
 
 pub(crate) enum WindowCommand {
     Show {
         options: WindowOptions,
-        view: AppView,
+        view: WindowView,
     },
     Hide(WindowId),
     Toggle {
         options: WindowOptions,
-        view: AppView,
+        view: WindowView,
     },
     Close(WindowId),
     RequestClose(WindowId),

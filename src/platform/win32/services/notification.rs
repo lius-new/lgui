@@ -1,13 +1,35 @@
 use std::io;
 
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 use windows::{
     core::HSTRING,
     Data::Xml::Dom::{XmlDocument, XmlElement},
-    Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID,
     UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager},
 };
 
-use crate::platform::{Notification, NotificationService};
+use crate::services::{Notification, NotificationService};
+
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+use crate::{
+    application::{Application, ApplicationContext},
+    services::{NotificationError, NotificationHandle},
+};
+
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+pub(crate) struct Win32NotificationRegistration {
+    identity: String,
+}
+
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+impl<B> Application<B> {
+    /// Configures the built-in Windows toast notification adapter.
+    pub fn notifications(self, identity: impl Into<String>) -> Self {
+        self.provide(Win32NotificationRegistration {
+            identity: identity.into(),
+        })
+    }
+}
 
 pub struct Win32NotificationService {
     app_user_model_id: String,
@@ -25,9 +47,30 @@ impl Win32NotificationService {
     }
 }
 
-pub(crate) fn initialize_process_identity(app_user_model_id: &str) -> io::Result<()> {
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+fn initialize_process_identity(app_user_model_id: &str) -> io::Result<()> {
     unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(app_user_model_id)) }
         .map_err(windows_error)
+}
+
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+pub(crate) fn install_notification_service(context: &ApplicationContext) -> io::Result<()> {
+    let Some(registration) = context.try_resource::<Win32NotificationRegistration>() else {
+        return Ok(());
+    };
+    initialize_process_identity(&registration.identity)?;
+    if context.try_resource::<NotificationHandle>().is_some() {
+        return Ok(());
+    }
+    let service = Win32NotificationService::new(&registration.identity)?;
+    context
+        .resources()
+        .provide(NotificationHandle::new(move |notification| {
+            service
+                .show(&notification.title, &notification.body)
+                .map_err(|error| NotificationError::new(error.to_string()))
+        }));
+    Ok(())
 }
 
 impl NotificationService for Win32NotificationService {

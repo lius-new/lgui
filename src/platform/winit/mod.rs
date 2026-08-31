@@ -25,23 +25,17 @@ use winit::{
     },
 };
 
-#[cfg(all(feature = "tray", target_os = "windows"))]
-use crate::application::TrayRegistration;
+#[cfg(all(feature = "tray-win32", target_os = "windows"))]
+use crate::application::{dispatch_tray_action, TrayRegistration};
 #[cfg(feature = "diagnostics")]
 use crate::diagnostics::{
     DiagnosticPresentMode, DiagnosticsRegistration, FramePresentMetrics, FrameRenderMetrics,
     FrameSample,
 };
-#[cfg(all(feature = "notifications", target_os = "windows"))]
-use crate::{
-    application::NotificationRegistration,
-    platform::{NotificationError, NotificationHandle},
-};
 use crate::{
     application::{
         application_root_view, AppView, ApplicationBackend, ApplicationContext, ApplicationHandle,
-        ApplicationTask, ClosePolicy, GraphicsPreference, WindowCommand, WindowId, WindowMode,
-        WindowOptions, WindowPosition,
+        ApplicationTask, GraphicsPreference,
     },
     core::{
         dispatch_runtime_output, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState,
@@ -52,6 +46,7 @@ use crate::{
     platform::dpi::{ScaleContext, WorkArea, BASE_DPI},
     renderer::{FrameInfo, FrameReason, MemoryPressure},
     session::UiSession,
+    window::{ClosePolicy, WindowCommand, WindowId, WindowMode, WindowOptions, WindowPosition},
 };
 
 use super::skia::{SkiaSoftwareSurface, DEFAULT_CACHE_BUDGET};

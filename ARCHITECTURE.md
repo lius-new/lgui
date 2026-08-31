@@ -3,7 +3,9 @@
 ## Ownership
 
 `Application` owns one `ApplicationContext`, typed resources, Store and Router registries,
-the Command registry, Event bus, WindowManager, platform dispatcher, and all window sessions.
+the Command registry, Event bus, platform dispatcher, and all window sessions. The top-level
+`window` subsystem owns the platform-neutral `WindowManager`, handles, IDs, options, and command
+model. Application re-exports the established window types only as a compatibility facade.
 Each `UiSession` owns component identity, local State, Effects, the retained host tree, layout,
 input state, and scene commits. Platform backends own native windows, renderer devices, resource
 caches, and frame presentation.
@@ -22,13 +24,19 @@ business types.
 input, and native resource release. Auxiliary windows share the same Application Context, Store,
 Router, and Dispatcher as the main window.
 
+`services` owns platform-neutral clipboard, notification, and tray contracts. Application owns
+only service registration and application-action orchestration. Windows Toast, notification-icon,
+and tray message-loop code belongs to `platform::win32::services`; those adapters do not own an
+`ApplicationContext`, business command handler, or main-window handle.
+
 ## Dependency Direction
 
 ```text
-application root -> lgui public API -> portable runtime -> platform backend
+application root -> lgui public API -> portable runtime/contracts -> platform adapters
 ```
 
-Portable modules do not depend on Win32 or Winit. `platform::win32` does not depend on pages,
+Portable modules do not depend on Win32 or Winit. `services` does not depend on `application` or
+`platform`; platform modules implement its contracts. `platform::win32` does not depend on pages,
 business stores, network protocols, project environment variables, or Liuguang-specific paint
 keys. Business crates may provide data and resources, but they do not wrap or re-export GUI
 infrastructure.
@@ -39,16 +47,17 @@ The physical tree follows subsystem ownership:
 
 ```text
 src/
-|-- application/   # builders, context, handles, window registration
+|-- application/   # builders, context, handles, lifecycle and service registration
 |-- command/       # typed contracts, context, registry, handles
 |-- events/        # typed contracts, bus, subscriptions
 |-- router/        # hooks, matching, runtime history, declarative routes
 |-- store/         # definitions, hooks, subscriptions, runtime registry
 |-- core/          # foundation, view, component, input, layout, scene
 |-- runtime/       # session, retained host, frame invalidation
+|-- window/        # IDs, options, handles, manager and portable commands
 |-- renderer/      # portable contract/cache and portable Skia renderer
 |-- platform/      # Winit adapters and categorized Win32 implementation
-|-- services/      # clipboard, dialogs, URL opening, service contracts
+|-- services/      # portable clipboard, notification, tray, dialog and URL contracts
 |-- assets/        # image/resource system and icons
 |-- text/          # text model, layout, and text-system boundary
 |-- theme/         # theme tokens and context
@@ -73,6 +82,11 @@ platform/win32/application/host/        # contract, state, backend, window, loop
 platform/win32/renderer/enhanced/d2d/   # cache, drawing, effects, resources
 platform/win32/renderer/enhanced/gdi_renderer/
 platform/win32/renderer/enhanced/static_layer/
+services/clipboard/                     # contract and optional system adapter
+services/notification/                  # model, service contract, type-erased handle
+services/tray/                          # generic menu contract and application actions
+platform/win32/services/tray/           # icon, host loop, native menu and shared support
+window/                                 # portable window model and command transport
 ```
 
 These directories are real Rust submodules. Source assembly with `include!` is forbidden:
@@ -117,7 +131,9 @@ Feature ownership is explicit:
   path are Skia-based.
 - `renderer-skia` remains portable and does not enable Win32.
 - GL, Vulkan, and Metal features add only their Winit surface adapters and target dependencies.
-- Accessibility, notifications, tray, images, SVG, and diagnostics stay independently gated.
+- `notifications` and `tray` enable only portable APIs. `notifications-win32` and `tray-win32`
+  add the Windows adapters through `windows-platform`, without forcing the Win32 window backend.
+- Accessibility, images, SVG, and diagnostics stay independently gated.
 
 The CI matrix checks portable no-default tests, each Windows backend boundary, standalone Winit,
 default tests, and all-feature tests. Architecture tests enforce directory ownership, dependency

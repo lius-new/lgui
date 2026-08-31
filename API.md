@@ -4,8 +4,9 @@
 
 `Application::new().window_options(...).run(root)` creates the main window and mounts the root
 component. `.provide(value)` adds Application-scoped typed data. `.renderer(RendererKind)` selects
-GDI or Direct2D. Optional `.tray(...)`, `.notifications(...)`, and `.executor(...)` configure
-library-owned services.
+GDI or Direct2D. Optional `.tray(...)` and `.notifications(...)` configure the built-in Windows
+adapters when `tray-win32` and `notifications-win32` are enabled. `.notification_service(...)`
+installs a portable application-provided adapter, and `.executor(...)` configures task execution.
 
 Components access `cx.application()`, `cx.windows()`, and event-context `cx.window()` handles.
 Auxiliary windows are declared with `WindowOptions`; `.owner(id)` declares an explicit owner.

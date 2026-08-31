@@ -5,6 +5,7 @@ pub(in crate::platform) enum WinitUserEvent {
     Window(WindowCommand),
     Wake(WindowId),
     RequestAllFrames,
+    #[cfg(all(feature = "tray-win32", target_os = "windows"))]
     SetVisible(WindowId, bool),
     #[cfg(feature = "accessibility")]
     Accessibility(accesskit_winit::Event),
@@ -27,15 +28,15 @@ pub(super) struct WinitHost {
     pub(super) ids: HashMap<WindowId, WinitWindowId>,
     pub(super) scale_preference: Option<crate::ScalePreference>,
     pub(super) preference: GraphicsPreference,
-    #[cfg(all(feature = "tray", target_os = "windows"))]
-    pub(super) tray_host: Option<crate::platform::win32::Win32TrayHost>,
+    #[cfg(all(feature = "tray-win32", target_os = "windows"))]
+    pub(super) tray_host: Option<crate::platform::win32::services::Win32TrayHost>,
     pub(super) exit_requested: bool,
 }
 
 impl ApplicationHandler<WinitUserEvent> for WinitHost {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Some((options, view)) = self.initial.take() {
-            #[cfg(all(feature = "tray", target_os = "windows"))]
+            #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             let main_id = options.id.clone();
             if let Err(error) = self.create_window(event_loop, options, view) {
                 self.context
@@ -51,44 +52,39 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
                 event_loop.exit();
                 return;
             }
-            #[cfg(all(feature = "tray", target_os = "windows"))]
+            #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             if let Some(registration) = self.context.try_resource::<TrayRegistration>() {
-                let main_window = self
-                    .ids
-                    .get(&main_id)
-                    .and_then(|native| self.windows.get(native))
-                    .map(|window| Arc::clone(&window.window));
-                if let Some(main_window) = main_window {
-                    let proxy = self.proxy.clone();
-                    let visible_id = main_id.clone();
-                    match crate::platform::win32::winit_hwnd(&main_window)
-                        .map_err(WinitApplicationError)
-                        .and_then(|hwnd| {
-                            crate::platform::win32::Win32TrayHost::spawn(
-                                registration,
-                                self.context.clone(),
-                                hwnd,
-                                move |visible| {
-                                    let _ = proxy.send_event(WinitUserEvent::SetVisible(
-                                        visible_id.clone(),
-                                        visible,
-                                    ));
-                                },
-                            )
-                            .map_err(|error| WinitApplicationError(error.to_string()))
-                        }) {
-                        Ok(host) => self.tray_host = Some(host),
-                        Err(error) => {
-                            self.context
-                                .report_render_error(crate::application::RenderError::new(
-                                    main_id,
-                                    "platform-winit",
-                                    crate::renderer::RenderErrorStage::Create,
-                                    "create_tray_host",
-                                    -1,
-                                    error.to_string(),
-                                ))
-                        }
+                let proxy = self.proxy.clone();
+                let visible_id = main_id.clone();
+                let action_context = self.context.clone();
+                let action_registration = Arc::clone(&registration);
+                match crate::platform::win32::services::Win32TrayHost::spawn(
+                    registration.options.clone(),
+                    move |action| {
+                        dispatch_tray_action(
+                            &action_registration,
+                            &action_context,
+                            action,
+                            |visible| {
+                                let _ = proxy.send_event(WinitUserEvent::SetVisible(
+                                    visible_id.clone(),
+                                    visible,
+                                ));
+                            },
+                        );
+                    },
+                ) {
+                    Ok(host) => self.tray_host = Some(host),
+                    Err(error) => {
+                        self.context
+                            .report_render_error(crate::application::RenderError::new(
+                                main_id,
+                                "platform-winit",
+                                crate::renderer::RenderErrorStage::Create,
+                                "create_tray_host",
+                                -1,
+                                error.to_string(),
+                            ))
                     }
                 }
             }
@@ -111,8 +107,14 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
                     window.window.request_redraw();
                 }
             }
+            #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             WinitUserEvent::SetVisible(id, visible) => {
                 self.set_window_visibility(&id, visible);
+                if visible {
+                    if let Some(window) = self.window_by_id_mut(&id) {
+                        window.window.focus_window();
+                    }
+                }
             }
             #[cfg(feature = "accessibility")]
             WinitUserEvent::Accessibility(event) => {

@@ -4,7 +4,7 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-use crate::application::WindowMode;
+use crate::window::WindowMode;
 
 pub(crate) fn with_corner_radius(
     attributes: WindowAttributes,

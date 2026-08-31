@@ -1,6 +1,9 @@
 use std::{future::Future, sync::Arc};
 
-use crate::application::{ApplicationContext, WindowHandle, WindowId, WindowManager};
+use crate::{
+    application::ApplicationContext,
+    window::{WindowHandle, WindowId, WindowManager},
+};
 use crate::{
     command::{Command, CommandHandle},
     events::Event,
