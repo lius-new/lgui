@@ -349,6 +349,8 @@ impl ApplicationBackend for Win32Application {
             dispatcher.clone(),
         )?;
         dispatcher.attach(hwnd);
+        #[cfg(feature = "images-win32")]
+        crate::platform::win32::register_image_repaint_hwnd(hwnd);
         #[cfg(feature = "store")]
         context.stores().set_wake({
             let dispatcher = dispatcher.clone();

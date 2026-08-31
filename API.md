@@ -102,6 +102,10 @@ window references the key. `Scene` and `Session` retain longer but remain budget
 `Persistent` writes only non-sensitive compressed responses when a store is enabled. Mark
 authenticated or private content with `.sensitive(true)`.
 
+The built-in remote-image loader validates HTTPS against the operating system certificate store.
+`lgui` does not read application private-CA configuration or provide a certificate-validation
+bypass; development roots must be installed into the operating system trust store.
+
 Static raster reuse is explicit and has no disk-like mode:
 
 ```rust,ignore

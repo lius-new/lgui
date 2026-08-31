@@ -74,6 +74,9 @@ encoded and decoded bounds, and reserve large-task bytes before work begins. Sta
 raster caches use explicit policies and byte bounds; the former pseudo-disk raster map and all
 cache-specific public clear paths are removed. Reachable image bytes are pinned long enough for
 delivery even at a zero reusable-cache budget, then become eviction candidates when unreachable.
+The built-in remote-image transport uses the operating system certificate store and exposes no
+private-CA setting or certificate-validation bypass. Win32 image completion notifications
+coalesce cache keys and damage only the bounds of Scene image nodes that reference those keys.
 
 With `persistent-cache`, an application may inject a `PersistentCacheStore`. The file store keeps
 only portable compressed bytes and metadata, uses atomic replacement and SHA-256 validation, and

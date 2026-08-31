@@ -165,6 +165,21 @@ fn source_tree_uses_real_modules_instead_of_textual_includes() {
     }
 }
 
+#[test]
+fn win32_async_image_completion_is_wired_to_a_scene_repaint() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/platform/win32/application/host");
+    let backend = fs::read_to_string(root.join("backend.rs")).expect("read Win32 backend");
+    let message_loop =
+        fs::read_to_string(root.join("message_loop.rs")).expect("read Win32 message loop");
+
+    assert!(backend.contains("register_image_repaint_hwnd(hwnd)"));
+    assert!(message_loop.contains("WM_IMAGE_CACHE_INVALIDATED"));
+    assert!(message_loop.contains("take_image_cache_invalidations()"));
+    assert!(message_loop.contains("image_repaint_bounds"));
+    assert!(message_loop.contains("invalidations_mut().invalidate_rect(*bound)"));
+    assert!(message_loop.contains("clear_image_repaint_hwnd(hwnd)"));
+}
+
 fn rust_sources(relative: &str) -> Vec<(PathBuf, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
     let mut pending = vec![root];

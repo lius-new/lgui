@@ -136,7 +136,7 @@ softbuffer = { version = "0.4.8", optional = true, default-features = false, fea
 tiny-skia = { version = "0.11", optional = true }
 tokio = { version = "1", optional = true, features = ["rt"] }
 usvg = { version = "0.45", optional = true }
-ureq = { version = "2.12", optional = true, default-features = true }
+ureq = { version = "2.12", optional = true, default-features = true, features = ["native-certs"] }
 unicode-segmentation = "1.12"
 unicode-bidi = "0.3"
 winit = { version = "0.30.12", optional = true }

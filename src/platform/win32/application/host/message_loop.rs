@@ -32,6 +32,30 @@ pub(super) extern "system" fn window_proc(
             handle_frame_tick(hwnd);
             LRESULT(0)
         }
+        #[cfg(feature = "images-win32")]
+        crate::platform::win32::WM_IMAGE_CACHE_INVALIDATED => {
+            let invalidated = crate::platform::win32::take_image_cache_invalidations();
+            let repaints = STATE.with(|state| {
+                state
+                    .borrow_mut()
+                    .iter_mut()
+                    .map(|(raw, window)| {
+                        let bounds =
+                            image_repaint_bounds(window.session.tree().nodes(), &invalidated);
+                        for bound in &bounds {
+                            window.session.invalidations_mut().invalidate_rect(*bound);
+                        }
+                        (HWND(*raw as _), bounds)
+                    })
+                    .collect::<Vec<_>>()
+            });
+            for (target, bounds) in repaints {
+                for bound in bounds {
+                    request_window_repaint(target, WindowRepaint::Rect(bound));
+                }
+            }
+            LRESULT(0)
+        }
         WM_PAINT => {
             paint(hwnd);
             LRESULT(0)
@@ -336,6 +360,8 @@ pub(super) extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
+            #[cfg(feature = "images-win32")]
+            crate::platform::win32::clear_image_repaint_hwnd(hwnd);
             let (empty, dispatcher, next_window) = STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 #[cfg(feature = "images")]
@@ -352,6 +378,8 @@ pub(super) extern "system" fn window_proc(
                 dispatcher.detach(hwnd);
                 if let Some(raw) = next_window {
                     dispatcher.attach(HWND(raw as _));
+                    #[cfg(feature = "images-win32")]
+                    crate::platform::win32::register_image_repaint_hwnd(HWND(raw as _));
                 } else {
                     dispatcher.stop_frame_driver();
                 }
@@ -365,6 +393,24 @@ pub(super) extern "system" fn window_proc(
         }
         _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
     }
+}
+
+#[cfg(feature = "images-win32")]
+pub(super) fn image_repaint_bounds(
+    nodes: &[Arc<crate::core::UiNode>],
+    invalidated: &std::collections::HashSet<String>,
+) -> Vec<UiRect> {
+    let mut bounds = Vec::new();
+    for node in nodes {
+        let matches = node
+            .image_request
+            .as_ref()
+            .is_some_and(|request| invalidated.contains(&request.cache_key()));
+        if matches && !bounds.contains(&node.paint_bounds) {
+            bounds.push(node.paint_bounds);
+        }
+    }
+    bounds
 }
 
 pub(super) fn request_window_close(hwnd: HWND) {

@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 
 use windows::Win32::Foundation::RECT;
 
+#[cfg(feature = "images-win32")]
+use super::image_repaint_bounds;
+
 use super::{
     can_advance_window_animations, decode_utf16_char_unit, resize_border_hit,
     suppress_committed_ime_char, window_corner_preference, window_style, OwnerVisibility,
@@ -201,4 +204,35 @@ fn interactive_resize_does_not_emit_without_a_pending_request() {
     throttle.begin();
 
     assert!(!throttle.advance(33.0));
+}
+
+#[cfg(feature = "images-win32")]
+#[test]
+fn completed_images_repaint_only_matching_node_bounds() {
+    use std::{collections::HashSet, sync::Arc};
+
+    use crate::core::{ImageFit, ImageRequest, UiId, UiImageSource, UiNode, UiNodeKind, UiRect};
+
+    let target_request = ImageRequest::new(UiImageSource::url("https://example.test/avatar.png"));
+    let target_key = target_request.cache_key();
+    let target_bounds = UiRect::new(12.0, 18.0, 68.0, 74.0);
+    let target = Arc::new(
+        UiNode::new(UiId::new("target-avatar"), UiNodeKind::Image, target_bounds)
+            .image_request(target_request, ImageFit::Cover)
+            .paint_bounds(target_bounds),
+    );
+    let other_bounds = UiRect::new(400.0, 300.0, 456.0, 356.0);
+    let other = Arc::new(
+        UiNode::new(UiId::new("other-avatar"), UiNodeKind::Image, other_bounds)
+            .image_request(
+                ImageRequest::new(UiImageSource::url("https://example.test/other.png")),
+                ImageFit::Cover,
+            )
+            .paint_bounds(other_bounds),
+    );
+
+    assert_eq!(
+        image_repaint_bounds(&[target, other], &HashSet::from([target_key])),
+        vec![target_bounds]
+    );
 }

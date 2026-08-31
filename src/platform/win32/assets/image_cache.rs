@@ -34,6 +34,8 @@ static IMAGE_CACHE: LazyLock<Mutex<ImageCache>> =
 static IMAGE_CACHE_EPOCH: AtomicU64 = AtomicU64::new(0);
 static IMAGE_REPAINT_HWND: LazyLock<Mutex<Option<isize>>> = LazyLock::new(|| Mutex::new(None));
 static IMAGE_REPAINT_PENDING: AtomicBool = AtomicBool::new(false);
+static IMAGE_INVALIDATED_REQUEST_KEYS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 static REMOTE_IMAGE_LOADER: LazyLock<Mutex<Option<crate::assets::RemoteImageLoaderHandle>>> =
     LazyLock::new(|| Mutex::new(None));
 static IMAGE_MEMORY_GOVERNOR: LazyLock<Mutex<Option<crate::memory::MemoryGovernor>>> =
@@ -253,10 +255,13 @@ impl Drop for DecodedImage {
 }
 
 pub fn register_image_repaint_hwnd(hwnd: HWND) {
-    let mut target = IMAGE_REPAINT_HWND
-        .lock()
-        .expect("image repaint hwnd poisoned");
-    *target = Some(hwnd.0 as isize);
+    {
+        let mut target = IMAGE_REPAINT_HWND
+            .lock()
+            .expect("image repaint hwnd poisoned");
+        *target = Some(hwnd.0 as isize);
+    }
+    schedule_image_cache_repaint();
 }
 
 pub fn clear_image_repaint_hwnd(hwnd: HWND) {
@@ -265,11 +270,17 @@ pub fn clear_image_repaint_hwnd(hwnd: HWND) {
         .expect("image repaint hwnd poisoned");
     if *target == Some(hwnd.0 as isize) {
         *target = None;
+        IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
     }
 }
 
-pub fn mark_image_cache_repaint_handled() {
+pub(crate) fn take_image_cache_invalidations() -> HashSet<String> {
     IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
+    std::mem::take(
+        &mut *IMAGE_INVALIDATED_REQUEST_KEYS
+            .lock()
+            .expect("image invalidation queue poisoned"),
+    )
 }
 
 pub(crate) fn decoded_image_cache_usage() -> crate::memory::CacheUsage {
@@ -695,6 +706,7 @@ fn finish_image_load(key: String, request_key: String, bytes: Vec<u8>, epoch: u6
         return;
     };
 
+    let invalidated_request_key = request_key.clone();
     let updated = {
         let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
         if !is_current_epoch(epoch) {
@@ -720,7 +732,7 @@ fn finish_image_load(key: String, request_key: String, bytes: Vec<u8>, epoch: u6
         }
     };
     if updated {
-        notify_image_cache_invalidated();
+        notify_image_cache_invalidated(invalidated_request_key);
     }
 }
 
@@ -739,6 +751,7 @@ fn fail_image_load(key: String, request_key: String, epoch: u64) {
                 )
             },
         );
+    let invalidated_request_key = request_key.clone();
     let updated = {
         let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
         if !is_current_epoch(epoch) {
@@ -763,7 +776,7 @@ fn fail_image_load(key: String, request_key: String, epoch: u64) {
         }
     };
     if updated {
-        notify_image_cache_invalidated();
+        notify_image_cache_invalidated(invalidated_request_key);
     }
 }
 
@@ -771,7 +784,22 @@ fn is_current_epoch(epoch: u64) -> bool {
     IMAGE_CACHE_EPOCH.load(Ordering::Acquire) == epoch
 }
 
-fn notify_image_cache_invalidated() {
+fn notify_image_cache_invalidated(request_key: String) {
+    IMAGE_INVALIDATED_REQUEST_KEYS
+        .lock()
+        .expect("image invalidation queue poisoned")
+        .insert(request_key);
+    schedule_image_cache_repaint();
+}
+
+fn schedule_image_cache_repaint() {
+    if IMAGE_INVALIDATED_REQUEST_KEYS
+        .lock()
+        .expect("image invalidation queue poisoned")
+        .is_empty()
+    {
+        return;
+    }
     if IMAGE_REPAINT_PENDING.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -779,16 +807,20 @@ fn notify_image_cache_invalidated() {
     let target = *IMAGE_REPAINT_HWND
         .lock()
         .expect("image repaint hwnd poisoned");
-    if let Some(hwnd) = target {
+    let posted = if let Some(hwnd) = target {
         unsafe {
-            let _ = PostMessageW(
+            PostMessageW(
                 Some(HWND(hwnd as *mut core::ffi::c_void)),
                 WM_IMAGE_CACHE_INVALIDATED,
                 WPARAM(0),
                 LPARAM(0),
-            );
+            )
+            .is_ok()
         }
     } else {
+        false
+    };
+    if !posted {
         IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
     }
 }
