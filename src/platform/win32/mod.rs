@@ -103,7 +103,7 @@ pub use image_cache::{
 };
 #[cfg(feature = "images")]
 pub use image_cache::{ImageFit, ImageSource};
-#[cfg(feature = "notifications")]
+#[cfg(all(feature = "notifications", feature = "backend-winit"))]
 pub(crate) use notifications::initialize_process_identity as initialize_notification_identity;
 #[cfg(feature = "notifications")]
 pub use notifications::Win32NotificationService;

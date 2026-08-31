@@ -14,7 +14,12 @@ pub use resolver::{http_image_loader, HttpImageLoader};
 pub use resolver::{AssetResolver, ImageLoader, RemoteImageLoader, RemoteImageLoaderHandle};
 pub use resources::RenderResources;
 
-pub(crate) use cache::{async_image_cache, cached_image_bytes, install_image_cache};
+#[cfg(any(test, all(feature = "backend-winit", feature = "images")))]
+pub(crate) use cache::async_image_cache;
+#[cfg(feature = "renderer-skia")]
+pub(crate) use cache::cached_image_bytes;
+#[cfg(any(test, feature = "images"))]
+pub(crate) use cache::install_image_cache;
 pub(crate) use resources::{render_resources, with_render_resources};
 
 #[cfg(test)]
