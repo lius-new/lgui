@@ -7,7 +7,9 @@ use std::{
 use windows::Win32::{
     Foundation::FILETIME,
     System::{
-        ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+        ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+        },
         SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX},
         Threading::{GetCurrentProcess, GetProcessTimes, GetSystemTimes},
     },
@@ -33,7 +35,7 @@ struct CachedSystemUsage {
 #[derive(Clone, Copy)]
 struct ProcessMemory {
     working_set_bytes: usize,
-    pagefile_bytes: usize,
+    private_bytes: usize,
 }
 
 pub(crate) fn snapshot_system_usage() -> SystemUsageSnapshot {
@@ -63,13 +65,13 @@ pub(crate) fn sample_interval_ms() -> u64 {
 fn sample_now(interval: Duration) -> SystemUsageSnapshot {
     let memory = process_memory();
     SystemUsageSnapshot {
-        schema: "lgui.diagnostics.system-usage.v1",
+        schema: "lgui.diagnostics.system-usage.v2",
         sample_interval_ms: interval.as_millis() as u64,
         sample_age_ms: 0,
         process: ProcessUsageSnapshot {
             cpu_percent: process_cpu_percent(),
             working_set_mb: memory.map(|value| bytes_to_mb(value.working_set_bytes)),
-            pagefile_mb: memory.map(|value| bytes_to_mb(value.pagefile_bytes)),
+            private_mb: memory.map(|value| bytes_to_mb(value.private_bytes)),
         },
         system: system_memory(),
         gpu: GpuUsageSnapshot::default(),
@@ -151,16 +153,16 @@ fn process_and_system_times() -> Option<(u64, u64)> {
 fn process_memory() -> Option<ProcessMemory> {
     unsafe {
         let process = GetCurrentProcess();
-        let mut counters = PROCESS_MEMORY_COUNTERS::default();
+        let mut counters = PROCESS_MEMORY_COUNTERS_EX::default();
         GetProcessMemoryInfo(
             process,
-            &mut counters,
-            size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            &mut counters as *mut PROCESS_MEMORY_COUNTERS_EX as *mut PROCESS_MEMORY_COUNTERS,
+            size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
         )
         .ok()?;
         Some(ProcessMemory {
             working_set_bytes: counters.WorkingSetSize,
-            pagefile_bytes: counters.PagefileUsage,
+            private_bytes: counters.PrivateUsage,
         })
     }
 }

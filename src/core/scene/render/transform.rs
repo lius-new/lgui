@@ -94,6 +94,7 @@ pub(super) fn command_signature_part(command: &ScenePrimitive, hasher: &mut Defa
             id,
             rect,
             source,
+            request,
             fit,
             phase,
         } => {
@@ -101,6 +102,7 @@ pub(super) fn command_signature_part(command: &ScenePrimitive, hasher: &mut Defa
             id.hash(hasher);
             hash_rect(rect, hasher);
             source.hash(hasher);
+            request.hash(hasher);
             fit.hash(hasher);
             phase.hash(hasher);
         }
@@ -381,12 +383,14 @@ fn translate_command_with_policy(
             id,
             rect,
             source,
+            request,
             fit,
             phase,
         } => ScenePrimitive::Image {
             id: id.clone(),
             rect: translate_rect(*rect),
             source: source.clone(),
+            request: request.clone(),
             fit: *fit,
             phase: *phase,
         },

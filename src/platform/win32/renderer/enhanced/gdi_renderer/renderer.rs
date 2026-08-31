@@ -28,6 +28,7 @@ impl GdiRenderer {
             }
             Self::draw_command_clipped(hdc, command, clip);
         }
+        publish_gdi_compositing_usage();
     }
 
     pub fn draw_command(hdc: HDC, command: &ScenePrimitive) {
@@ -49,8 +50,15 @@ impl GdiRenderer {
                 rect, key, style, ..
             } => draw_svg_icon(hdc, key, *rect, *style),
             ScenePrimitive::Image {
-                rect, source, fit, ..
-            } => image::draw_ui_image(hdc, *rect, source, *fit),
+                rect,
+                source,
+                request,
+                fit,
+                ..
+            } => {
+                let _ = crate::assets::request_image(request);
+                image::draw_ui_image(hdc, *rect, source, *fit);
+            }
             ScenePrimitive::Overlay { rect, style, .. } => draw_overlay(hdc, *rect, style),
             ScenePrimitive::CompositingLayer {
                 id,

@@ -58,7 +58,7 @@ pub(super) fn create_window(
     }
     set_window_corner_preference(hwnd, options.corner_radius, initial_mode);
     let renderer_name = renderer_factory.name();
-    let renderer = renderer_factory.create(hwnd).map_err(|source| {
+    let mut renderer = renderer_factory.create(hwnd).map_err(|source| {
         context.report_render_error(RenderError::new(
             options.id.clone(),
             renderer_name,
@@ -69,10 +69,159 @@ pub(super) fn create_window(
         ));
         source
     })?;
+    let renderer_budget = Arc::new(AtomicUsize::new(
+        context.memory().options().budget.native_cache_soft_bytes,
+    ));
+    renderer.set_memory_budget(renderer_budget.load(Ordering::Acquire));
+    let renderer_memory = Arc::new(Mutex::new(renderer.memory_usage()));
+    let stats_memory = Arc::clone(&renderer_memory);
+    let trim_memory = Arc::clone(&renderer_memory);
+    let trim_budget = Arc::clone(&renderer_budget);
+    let set_budget = Arc::clone(&renderer_budget);
+    let trim_dispatcher = dispatcher.clone();
+    let budget_dispatcher = dispatcher.clone();
+    let raw_hwnd = hwnd.0 as isize;
+    let memory_domain = if renderer_name == "d2d" {
+        crate::memory::CacheDomain::D2d
+    } else {
+        crate::memory::CacheDomain::Gdi
+    };
+    let memory_instance = context.memory().next_instance_id();
+    let renderer_memory_registration =
+        context
+            .memory()
+            .register(crate::memory::DomainRegistration::new(
+                memory_domain,
+                memory_instance,
+                format!("window:{}", options.id.as_str()),
+                crate::memory::CacheAdapter::managed(
+                    move || *stats_memory.lock().expect("renderer memory usage poisoned"),
+                    move |request| {
+                        let before = trim_memory
+                            .lock()
+                            .expect("renderer memory usage poisoned")
+                            .resident_bytes();
+                        trim_dispatcher.post(move || {
+                            STATE.with(|state| {
+                                let mut windows = state.borrow_mut();
+                                let Some(window) = windows.get_mut(&raw_hwnd) else {
+                                    return;
+                                };
+                                if let Some(renderer) = window.renderer.as_mut() {
+                                    renderer.trim_to(request.target_bytes);
+                                    *window
+                                        .renderer_memory
+                                        .lock()
+                                        .expect("renderer memory usage poisoned") =
+                                        renderer.memory_usage();
+                                }
+                            });
+                        });
+                        crate::memory::TrimResult {
+                            before_bytes: before,
+                            after_bytes: before,
+                        }
+                    },
+                    move |budget| {
+                        set_budget.store(budget, Ordering::Release);
+                        budget_dispatcher.post(move || {
+                            STATE.with(|state| {
+                                let mut windows = state.borrow_mut();
+                                let Some(window) = windows.get_mut(&raw_hwnd) else {
+                                    return;
+                                };
+                                if let Some(renderer) = window.renderer.as_mut() {
+                                    renderer.set_memory_budget(budget);
+                                    *window
+                                        .renderer_memory
+                                        .lock()
+                                        .expect("renderer memory usage poisoned") =
+                                        renderer.memory_usage();
+                                }
+                            });
+                        });
+                    },
+                ),
+            ));
     let mut session = UiSession::new();
     if let Some(executor) = context.task_spawner() {
         session.set_task_spawner(executor);
     }
+    let (component_usage, host_scene_usage) = session.memory_usage();
+    let component_memory = Arc::new(Mutex::new(component_usage));
+    let host_scene_memory = Arc::new(Mutex::new(host_scene_usage));
+    let component_memory_registration = {
+        let usage = Arc::clone(&component_memory);
+        let trim_usage = Arc::clone(&component_memory);
+        let trim_dispatcher = dispatcher.clone();
+        context
+            .memory()
+            .register(crate::memory::DomainRegistration::new(
+                crate::memory::CacheDomain::ComponentOutput,
+                memory_instance,
+                format!("window:{}", options.id.as_str()),
+                crate::memory::CacheAdapter::new(
+                    move || *usage.lock().expect("component memory usage poisoned"),
+                    move |request| {
+                        let before = trim_usage
+                            .lock()
+                            .expect("component memory usage poisoned")
+                            .resident_bytes();
+                        trim_dispatcher.post(move || {
+                            STATE.with(|state| {
+                                let mut windows = state.borrow_mut();
+                                let Some(window) = windows.get_mut(&raw_hwnd) else {
+                                    return;
+                                };
+                                window.session.trim_component_outputs(request.target_bytes);
+                                update_session_memory_usage(window);
+                            });
+                        });
+                        crate::memory::TrimResult {
+                            before_bytes: before,
+                            after_bytes: before,
+                        }
+                    },
+                ),
+            ))
+    };
+    let host_scene_memory_registration = {
+        let usage = Arc::clone(&host_scene_memory);
+        let trim_usage = Arc::clone(&host_scene_memory);
+        let trim_dispatcher = dispatcher.clone();
+        context
+            .memory()
+            .register(crate::memory::DomainRegistration::new(
+                crate::memory::CacheDomain::HostScene,
+                memory_instance,
+                format!("window:{}", options.id.as_str()),
+                crate::memory::CacheAdapter::new(
+                    move || *usage.lock().expect("host scene memory usage poisoned"),
+                    move |request| {
+                        let before = trim_usage
+                            .lock()
+                            .expect("host scene memory usage poisoned")
+                            .resident_bytes();
+                        if should_trim_host_scene(request) {
+                            trim_dispatcher.post(move || {
+                                STATE.with(|state| {
+                                    let mut windows = state.borrow_mut();
+                                    let Some(window) = windows.get_mut(&raw_hwnd) else {
+                                        return;
+                                    };
+                                    window.session.trim_host_scene();
+                                    update_session_memory_usage(window);
+                                });
+                            });
+                        }
+                        crate::memory::TrimResult {
+                            before_bytes: before,
+                            after_bytes: before,
+                        }
+                    },
+                ),
+            ))
+    };
     #[cfg(feature = "diagnostics")]
     let diagnostics = context.try_resource::<DiagnosticsRegistration>();
     STATE.with(|state| {
@@ -84,6 +233,15 @@ pub(super) fn create_window(
                 context,
                 session,
                 renderer: Some(renderer),
+                renderer_memory,
+                renderer_budget: trim_budget,
+                #[cfg(feature = "images-win32")]
+                memory_instance,
+                _renderer_memory_registration: renderer_memory_registration,
+                component_memory,
+                host_scene_memory,
+                _component_memory_registration: component_memory_registration,
+                _host_scene_memory_registration: host_scene_memory_registration,
                 renderer_factory,
                 logical_size: options.size,
                 minimum_size: options.minimum_size,
@@ -385,10 +543,46 @@ pub(super) fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
             return false;
         }
         window.renderer.take();
+        *window
+            .renderer_memory
+            .lock()
+            .expect("renderer memory usage poisoned") = crate::memory::CacheUsage::default();
         window.session.suspend_rendering();
+        #[cfg(feature = "images")]
+        crate::assets::update_image_reachability(window.memory_instance, &[]);
         window.rendering_suspended = true;
+        update_session_memory_usage(window);
+        window
+            .context
+            .memory()
+            .notify(crate::memory::MemoryEvent::WindowHidden);
         true
     })
+}
+
+pub(super) fn update_session_memory_usage(window: &WindowState) {
+    let (component, host_scene) = window.session.memory_usage();
+    *window
+        .component_memory
+        .lock()
+        .expect("component memory usage poisoned") = component;
+    *window
+        .host_scene_memory
+        .lock()
+        .expect("host scene memory usage poisoned") = host_scene;
+}
+
+fn should_trim_host_scene(request: crate::memory::TrimRequest) -> bool {
+    request.scope == crate::memory::CacheScope::AllRebuildable
+        || matches!(
+            request.reason,
+            crate::memory::TrimReason::WindowHidden
+                | crate::memory::TrimReason::AllWindowsHidden
+                | crate::memory::TrimReason::SessionUnmounted
+                | crate::memory::TrimReason::CriticalPressure
+                | crate::memory::TrimReason::Explicit
+                | crate::memory::TrimReason::Shutdown
+        )
 }
 
 pub(super) fn resume_window_rendering(hwnd: HWND) {
@@ -408,7 +602,18 @@ pub(super) fn suspend_application_if_backgrounded() {
     for raw in windows {
         suspend_window_rendering(HWND(raw as _), true);
     }
-    super::super::super::background::release_visual_caches();
+    let context = STATE.with(|state| {
+        state
+            .borrow()
+            .values()
+            .find(|window| window.owner.is_none())
+            .map(|window| window.context.clone())
+    });
+    if let Some(context) = context {
+        context
+            .memory()
+            .notify(crate::memory::MemoryEvent::AllWindowsHidden);
+    }
     super::super::super::background::trim_process_working_set();
     schedule_background_retrim();
 }

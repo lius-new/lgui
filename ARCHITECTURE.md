@@ -2,8 +2,8 @@
 
 ## Ownership
 
-`Application` owns one `ApplicationContext`, typed resources, Store and Router registries,
-the Command registry, Event bus, platform dispatcher, and all window sessions. The top-level
+`Application` owns one `ApplicationContext`, one `MemoryGovernor`, typed resources, Store and
+Router registries, the Command registry, Event bus, platform dispatcher, and all window sessions. The top-level
 `window` subsystem owns the platform-neutral `WindowManager`, handles, IDs, options, and command
 model. Application re-exports the established window types only as a compatibility facade.
 Each `UiSession` owns component identity, local State, Effects, the retained host tree, layout,
@@ -41,6 +41,45 @@ business stores, network protocols, project environment variables, or Liuguang-s
 keys. Business crates may provide data and resources, but they do not wrap or re-export GUI
 infrastructure.
 
+## Memory Governance
+
+Memory governance is Application-scoped. `ApplicationContext` owns the only `MemoryGovernor`;
+asset runtimes, sessions, renderers, and application-owned diagnostic buffers register adapters
+under a `CacheDomain`. A registration reports `CacheUsage`, accepts an assigned share of the
+Application CPU or native soft budget, and handles bounded `TrimRequest`s. Dropping the
+registration removes that domain instance from snapshots.
+
+The Governor does not own cache entries or native handles. Portable caches may trim inline.
+Win32 adapters post work through `Win32Dispatcher`, and Winit adapters send a user event, so GDI,
+D2D, Skia, Component, Host, Scene, and other native or retained objects are released on their
+owning UI thread. A synchronous Trim result may therefore report only immediately confirmed
+bytes; a later snapshot observes releases completed by the owner thread.
+
+Usage separates live, rebuildable, cache, CPU, estimated GPU, pinned, transient-reserved, and
+persistent bytes. Low-memory, balanced, and performance profiles provide one shared CPU budget,
+one shared native budget, a transient hard limit, and a persistent quota. Domain weights divide
+the shared totals between current registrations; individual caches must not add independent
+uncoordinated totals. Soft-budget enforcement runs after frame commits and option changes. Window
+hide, all-windows-hidden, Session unmount, device loss, theme or scale changes, explicit pressure,
+and Application shutdown enter the same event and Trim path.
+
+Scene image reachability is aggregated by window instance. `ImageRequest` carries retention,
+decode, priority, namespace, version, and sensitivity metadata through Scene primitives to each
+backend. Encoded and decoded image caches coalesce in-flight work, apply failure backoff, validate
+encoded and decoded bounds, and reserve large-task bytes before work begins. Static and scroll
+raster caches use explicit policies and byte bounds; the former pseudo-disk raster map and all
+cache-specific public clear paths are removed.
+
+With `persistent-cache`, an application may inject a `PersistentCacheStore`. The file store keeps
+only portable compressed bytes and metadata, uses atomic replacement and SHA-256 validation, and
+enforces TTL, validators, namespace/version keys, and an on-disk LRU quota. Sensitive requests are
+not persisted. `lgui` never chooses an application directory or reads business settings.
+
+The Liuguang Windows client maps its version-6 settings to `MemoryOptions`, injects a cache
+subdirectory, exposes profile/quota/clear controls, and adds bounded memory history to diagnostics.
+It remains a configuration and presentation consumer; resource loading and eviction stay in
+`lgui`.
+
 ## Source Layout
 
 The physical tree follows subsystem ownership:
@@ -59,6 +98,7 @@ src/
 |-- platform/      # Winit adapters and categorized Win32 implementation
 |-- services/      # portable clipboard, notification, tray, dialog and URL contracts
 |-- assets/        # image/resource system and icons
+|-- memory/        # Application budgets, domains, reservations, Trim, stats, persistence
 |-- text/          # text model, layout, and text-system boundary
 |-- theme/         # theme tokens and context
 |-- widgets/       # controls; complex controls own subdirectories
@@ -134,6 +174,8 @@ Feature ownership is explicit:
 - `notifications` and `tray` enable only portable APIs. `notifications-win32` and `tray-win32`
   add the Windows adapters through `windows-platform`, without forcing the Win32 window backend.
 - Accessibility, images, SVG, and diagnostics stay independently gated.
+- `persistent-cache` adds the portable store contract and file-store implementation without
+  enabling a renderer or platform backend.
 
 The CI matrix checks portable no-default tests, each Windows backend boundary, standalone Winit,
 default tests, and all-feature tests. Architecture tests enforce directory ownership, dependency

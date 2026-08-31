@@ -2,10 +2,11 @@ use std::{borrow::Cow, future::Future, sync::Arc};
 
 use super::{
     async_handler, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
-    CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, InteractionRole,
-    LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec, StaticLayerSpec, TextStyle,
-    UiAction, UiAsyncContext, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
-    UiImageSource, UiInputEventHandler, UiNode, UiNodeKind, UiPath, UiRect, VisualStyle,
+    CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, ImageRequest,
+    InteractionRole, LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec,
+    StaticLayerSpec, TextStyle, UiAction, UiAsyncContext, UiEventContext, UiEventHandler,
+    UiEventKind, UiEventPayload, UiId, UiImageSource, UiInputEventHandler, UiNode, UiNodeKind,
+    UiPath, UiRect, VisualStyle,
 };
 
 #[derive(Clone)]
@@ -38,6 +39,29 @@ impl UiElement {
             children: Arc::new(Vec::new()),
             component_boundary: None,
         }
+    }
+
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub(crate) fn estimated_bytes(&self) -> usize {
+        self.node
+            .estimated_bytes()
+            .saturating_add(
+                self.children
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<UiElement>()),
+            )
+            .saturating_add(
+                self.children
+                    .iter()
+                    .map(UiElement::estimated_bytes)
+                    .sum::<usize>(),
+            )
     }
 
     pub fn group(id: UiId, rect: UiRect) -> Self {
@@ -87,6 +111,15 @@ impl UiElement {
         fit: ImageFit,
     ) -> Self {
         Self::new(id, UiNodeKind::Image, rect).image_source(UiImageSource::file(source), fit)
+    }
+
+    pub fn requested_image(
+        id: UiId,
+        rect: UiRect,
+        request: impl Into<ImageRequest>,
+        fit: ImageFit,
+    ) -> Self {
+        Self::new(id, UiNodeKind::Image, rect).image_request(request, fit)
     }
 
     pub fn icon(id: UiId, rect: UiRect, key: &'static str) -> Self {
@@ -324,6 +357,11 @@ impl UiElement {
 
     pub fn image_source(mut self, source: impl Into<UiImageSource>, fit: ImageFit) -> Self {
         self.node = self.node.image(source, fit);
+        self
+    }
+
+    pub fn image_request(mut self, request: impl Into<ImageRequest>, fit: ImageFit) -> Self {
+        self.node = self.node.image_request(request, fit);
         self
     }
 

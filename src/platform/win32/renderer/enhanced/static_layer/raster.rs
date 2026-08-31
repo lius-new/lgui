@@ -39,26 +39,6 @@ pub(super) fn render_static_layer_bitmap<B: StaticLayerDrawBackend>(
     .flatten()
 }
 
-impl From<StaticLayerRaster> for StaticLayerBitmap {
-    fn from(raster: StaticLayerRaster) -> Self {
-        Self {
-            width: raster.width,
-            height: raster.height,
-            pixels: raster.premultiplied_bgra,
-        }
-    }
-}
-
-impl From<&StaticLayerBitmap> for StaticLayerRaster {
-    fn from(bitmap: &StaticLayerBitmap) -> Self {
-        Self {
-            width: bitmap.width,
-            height: bitmap.height,
-            premultiplied_bgra: bitmap.pixels.clone(),
-        }
-    }
-}
-
 fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> ScenePrimitive {
     lgui::core::translate_scene_primitive_for_backend(command, dx, dy)
 }
@@ -114,13 +94,14 @@ pub(super) fn blit_cached_static_layer<B: StaticLayerDrawBackend>(
 pub(super) fn store_static_layer_memory(
     id: &str,
     key: String,
-    bitmap: StaticLayerBitmap,
+    bitmap: &StaticLayerBitmap,
     budget_bytes: usize,
-) {
+    policy: RasterCachePolicy,
+) -> bool {
     static_layer_cache()
         .lock()
         .expect("static layer cache poisoned")
-        .store(id, key, bitmap, budget_bytes);
+        .store(id, key, bitmap.clone(), budget_bytes, policy)
 }
 
 pub(super) fn trace_duration(label: &str, duration: Duration) {

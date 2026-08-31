@@ -25,6 +25,7 @@ pub mod host;
 #[cfg(feature = "svg")]
 #[path = "assets/icons.rs"]
 pub mod icons;
+pub mod memory;
 pub mod platform;
 pub mod prelude;
 pub mod renderer;

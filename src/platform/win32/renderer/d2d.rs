@@ -285,6 +285,23 @@ mod basic {
             })?;
             Ok(RenderStats::for_frame(frame))
         }
+
+        fn memory_usage(&self) -> crate::memory::CacheUsage {
+            let live_bytes = (self.size.width as usize)
+                .saturating_mul(self.size.height as usize)
+                .saturating_mul(4);
+            crate::memory::CacheUsage {
+                live_bytes,
+                gpu_estimated_bytes: live_bytes,
+                entries: usize::from(live_bytes > 0),
+                largest_entry_bytes: live_bytes,
+                ..Default::default()
+            }
+        }
+
+        fn reset(&mut self) {
+            self.size = D2D_SIZE_U::default();
+        }
     }
 
     fn d2d_rect(rect: UiRect) -> D2D_RECT_F {

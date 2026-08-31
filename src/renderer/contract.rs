@@ -139,6 +139,22 @@ pub trait SceneRenderer: 'static {
 
     fn trim(&mut self, _pressure: MemoryPressure) {}
 
+    fn memory_usage(&self) -> crate::memory::CacheUsage {
+        crate::memory::CacheUsage::default()
+    }
+
+    fn set_memory_budget(&mut self, _budget_bytes: usize) {}
+
+    fn trim_to(&mut self, target_bytes: usize) -> usize {
+        let before = self.memory_usage().resident_bytes();
+        self.trim(if target_bytes == 0 {
+            MemoryPressure::Critical
+        } else {
+            MemoryPressure::Moderate
+        });
+        before.saturating_sub(self.memory_usage().resident_bytes())
+    }
+
     fn reset(&mut self) {}
 }
 
@@ -211,8 +227,6 @@ mod tests {
         assert_eq!(static_layer_cache_stats(), Default::default());
         {
             let _guard = install_render_cache(RenderCacheHandle::new(
-                || {},
-                || {},
                 || StaticLayerMemoryCacheStats {
                     entry_count: 3,
                     ..Default::default()

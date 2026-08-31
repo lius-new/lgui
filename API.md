@@ -12,6 +12,76 @@ Components access `cx.application()`, `cx.windows()`, and event-context `cx.wind
 Auxiliary windows are declared with `WindowOptions`; `.owner(id)` declares an explicit owner.
 Business code never receives native handles.
 
+## Memory And Resource Lifetime
+
+The default memory profile is `Balanced`. Applications select a profile before `run`; enabling
+`persistent-cache` also allows the application to inject the storage location.
+
+```rust,ignore
+let memory = MemoryOptions::for_profile(MemoryProfile::LowMemory)
+    .persistent_cache(true)
+    .persistent_budget(128 * 1024 * 1024);
+
+Application::new()
+    .memory_options(memory)
+    .persistent_cache(lgui::memory::FileCacheStore::new(cache_root.join("lgui")))
+    .run(app)?;
+```
+
+`LowMemory`, `Balanced`, and `Performance` use CPU/native soft budgets of 64/64, 128/128,
+and 256/256 MiB. Their transient hard limits are 32, 64, and 128 MiB; default persistent quotas
+are 128 MiB, 512 MiB, and 2 GiB. Cache hard budgets are 125% of soft budgets, capped at an extra
+64 MiB. Encoded resources are limited to 32 MiB, decoded resources to 64 MiB, and large work is
+limited to one concurrent task in low-memory mode and two in the other profiles.
+
+At runtime, `ApplicationContext::memory()` returns the application Governor. Use `snapshot()` for
+domain-level diagnostics, `set_options()` when a persisted setting changes, `notify()` for a real
+lifecycle or pressure event, and `trim()` for an explicit scoped request. Do not call
+cache-specific clear functions. Native adapters may complete Trim asynchronously on the owning UI
+thread, so refresh the snapshot after the UI event has run.
+
+Framework integrations that own a cache register a `DomainRegistration` through
+`ApplicationContext::register_memory_domain`. The adapter must report bytes and stats and, for a
+managed domain, accept its assigned budget. A native adapter's Trim callback must dispatch to its
+owner thread rather than moving or dropping native objects in the Governor caller.
+
+Images that need non-default retention use `ImageRequest`:
+
+```rust,ignore
+let request = ImageRequest::new(lgui::core::UiImageSource::url(avatar_url))
+    .cache_policy(ImageCachePolicy::Persistent {
+        max_age: std::time::Duration::from_secs(7 * 24 * 60 * 60),
+        revalidate: true,
+    })
+    .decode_policy(ImageDecodePolicy::FitTarget(lgui::core::PhysicalSize::new(128, 128)))
+    .priority(CachePriority::High)
+    .namespace("avatars")
+    .version(avatar_revision);
+
+Element::requested_image(id, rect, request, lgui::core::ImageFit::Cover)
+```
+
+`NoStore` retains the completed request only for its element lifecycle; it does not redownload on
+every frame. `WhileVisible` becomes an early eviction candidate when no committed Scene in any
+window references the key. `Scene` and `Session` retain longer but remain budget-bound.
+`Persistent` writes only non-sensitive compressed responses when a store is enabled. Mark
+authenticated or private content with `.sensitive(true)`.
+
+Static raster reuse is explicit and has no disk-like mode:
+
+```rust,ignore
+StaticLayerSpec::new(StaticLayerSource::runtime())
+    .cache_policy(RasterCachePolicy::memory(
+        RetentionClass::Scene,
+        CachePriority::Normal,
+    ))
+    .revision("profile-card-v2")
+```
+
+Component State and Effects are correctness state and are never ordinary cache entries. Memory
+pressure may discard committed Component output and Host/Scene projections; the next render
+rebuilds them while preserving State and Effect ownership.
+
 ## Commands And Events
 
 Applications define typed command contracts and register their service-backed handlers on the
@@ -190,6 +260,11 @@ therefore operate on the projection change set instead of copying or scanning ev
 composition-only frame. Runtime diagnostics expose `host_visited_nodes`, `scene_compiled_nodes`,
 the individual focus/animation sync and rebuild timings, and the Host change-scan, node-patch,
 Scene-reconcile, Scene-snapshot, damage, and finalize timings.
+
+Diagnostics snapshots also include the complete `MemorySnapshot`: per-domain usage and owner,
+transient reservations, in-flight large tasks, pinned overflow, and the latest Trim. The Liuguang
+debug runtime exposes the same data through `memory.snapshot`; `memory.trim` accepts `memory`,
+`persistent`, or `all-rebuildable` scope.
 
 ## Async Work
 

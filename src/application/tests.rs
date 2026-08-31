@@ -105,6 +105,38 @@ fn application_builder_registers_commands_on_the_runtime_context() {
 }
 
 #[test]
+fn application_memory_options_are_owned_by_the_runtime_context() {
+    struct MemoryBackend(Arc<Mutex<Option<crate::memory::MemoryOptions>>>);
+
+    impl ApplicationBackend for MemoryBackend {
+        type Error = ();
+
+        fn run(
+            self,
+            _options: WindowOptions,
+            _view: AppView,
+            context: ApplicationContext,
+        ) -> Result<(), Self::Error> {
+            *self.0.lock().expect("memory options lock poisoned") =
+                Some(context.memory().options());
+            Ok(())
+        }
+    }
+
+    let captured = Arc::new(Mutex::new(None));
+    let options = crate::memory::MemoryOptions::low_memory().persistent_cache(false);
+    Application::with_backend(MemoryBackend(Arc::clone(&captured)))
+        .memory_options(options)
+        .run(|cx| crate::core::group(cx.viewport()))
+        .unwrap();
+
+    assert_eq!(
+        *captured.lock().expect("memory options lock poisoned"),
+        Some(options)
+    );
+}
+
+#[test]
 fn render_errors_are_delivered_with_structured_context() {
     let errors = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&errors);

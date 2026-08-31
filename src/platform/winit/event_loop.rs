@@ -5,6 +5,12 @@ pub(in crate::platform) enum WinitUserEvent {
     Window(WindowCommand),
     Wake(WindowId),
     RequestAllFrames,
+    MemoryTrim(
+        WindowId,
+        crate::memory::CacheDomain,
+        crate::memory::TrimRequest,
+    ),
+    MemoryBudget(WindowId, usize),
     #[cfg(all(feature = "tray-win32", target_os = "windows"))]
     SetVisible(WindowId, bool),
     #[cfg(feature = "accessibility")]
@@ -31,6 +37,7 @@ pub(super) struct WinitHost {
     #[cfg(all(feature = "tray-win32", target_os = "windows"))]
     pub(super) tray_host: Option<crate::platform::win32::services::Win32TrayHost>,
     pub(super) exit_requested: bool,
+    pub(super) backgrounded: bool,
 }
 
 impl ApplicationHandler<WinitUserEvent> for WinitHost {
@@ -107,6 +114,16 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
                     window.window.request_redraw();
                 }
             }
+            WinitUserEvent::MemoryTrim(id, domain, request) => {
+                if let Some(window) = self.window_by_id_mut(&id) {
+                    window.apply_memory_trim(domain, request);
+                }
+            }
+            WinitUserEvent::MemoryBudget(id, budget) => {
+                if let Some(window) = self.window_by_id_mut(&id) {
+                    window.set_memory_budget(budget);
+                }
+            }
             #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             WinitUserEvent::SetVisible(id, visible) => {
                 self.set_window_visibility(&id, visible);
@@ -145,6 +162,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
             return;
         };
         window.handle_event(event);
+        self.refresh_background_state();
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -169,6 +187,12 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
         if self.windows.is_empty() {
             event_loop.exit();
         }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.context
+            .memory()
+            .notify(crate::memory::MemoryEvent::ApplicationShutdown);
     }
 }
 
@@ -268,17 +292,134 @@ impl WinitHost {
             &window,
             self.proxy.clone(),
         );
+        let renderer_budget = self
+            .context
+            .memory()
+            .options()
+            .budget
+            .native_cache_soft_bytes
+            .checked_div(self.windows.len().saturating_add(1))
+            .unwrap_or(1)
+            .min(DEFAULT_CACHE_BUDGET)
+            .max(1);
         let renderer = create_renderer(
             self.preference,
             &self.soft_context,
             Arc::clone(&window),
             options.transparent,
+            renderer_budget,
         )?;
         let mut session = UiSession::new();
         if let Some(executor) = self.context.task_spawner() {
             session.set_task_spawner(executor);
         }
         let id = options.id.clone();
+        let memory_instance = self.context.memory().next_instance_id();
+        let memory_usage = Arc::new(Mutex::new(crate::memory::CacheUsage::default()));
+        let stats_usage = Arc::clone(&memory_usage);
+        let trim_usage = Arc::clone(&memory_usage);
+        let trim_proxy = self.proxy.clone();
+        let trim_id = id.clone();
+        let memory_registration =
+            self.context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::Skia,
+                    memory_instance,
+                    format!("window:{}", id.as_str()),
+                    crate::memory::CacheAdapter::managed(
+                        move || *stats_usage.lock().expect("Skia memory usage poisoned"),
+                        move |request| {
+                            let before = trim_usage
+                                .lock()
+                                .expect("Skia memory usage poisoned")
+                                .resident_bytes();
+                            let _ = trim_proxy.send_event(WinitUserEvent::MemoryTrim(
+                                trim_id.clone(),
+                                crate::memory::CacheDomain::Skia,
+                                request,
+                            ));
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        {
+                            let budget_proxy = self.proxy.clone();
+                            let budget_id = id.clone();
+                            move |budget| {
+                                let _ = budget_proxy.send_event(WinitUserEvent::MemoryBudget(
+                                    budget_id.clone(),
+                                    budget,
+                                ));
+                            }
+                        },
+                    ),
+                ));
+        let component_memory = Arc::new(Mutex::new(crate::memory::CacheUsage::default()));
+        let host_scene_memory = Arc::new(Mutex::new(crate::memory::CacheUsage::default()));
+        let component_registration = {
+            let usage = Arc::clone(&component_memory);
+            let trim_usage = Arc::clone(&component_memory);
+            let proxy = self.proxy.clone();
+            let id = id.clone();
+            self.context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::ComponentOutput,
+                    memory_instance,
+                    format!("window:{}", id.as_str()),
+                    crate::memory::CacheAdapter::new(
+                        move || *usage.lock().expect("component memory usage poisoned"),
+                        move |request| {
+                            let before = trim_usage
+                                .lock()
+                                .expect("component memory usage poisoned")
+                                .resident_bytes();
+                            let _ = proxy.send_event(WinitUserEvent::MemoryTrim(
+                                id.clone(),
+                                crate::memory::CacheDomain::ComponentOutput,
+                                request,
+                            ));
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                    ),
+                ))
+        };
+        let host_scene_registration = {
+            let usage = Arc::clone(&host_scene_memory);
+            let trim_usage = Arc::clone(&host_scene_memory);
+            let proxy = self.proxy.clone();
+            let id = id.clone();
+            self.context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::HostScene,
+                    memory_instance,
+                    format!("window:{}", id.as_str()),
+                    crate::memory::CacheAdapter::new(
+                        move || *usage.lock().expect("host scene memory usage poisoned"),
+                        move |request| {
+                            let before = trim_usage
+                                .lock()
+                                .expect("host scene memory usage poisoned")
+                                .resident_bytes();
+                            let _ = proxy.send_event(WinitUserEvent::MemoryTrim(
+                                id.clone(),
+                                crate::memory::CacheDomain::HostScene,
+                                request,
+                            ));
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                    ),
+                ))
+        };
         session.set_wake(Arc::new({
             let proxy = self.proxy.clone();
             let id = id.clone();
@@ -319,6 +460,13 @@ impl WinitHost {
                 next_frame: None,
                 full_redraw: true,
                 recovery,
+                memory_instance,
+                memory_usage,
+                _memory_registration: memory_registration,
+                component_memory,
+                host_scene_memory,
+                _component_registration: component_registration,
+                _host_scene_registration: host_scene_registration,
                 #[cfg(feature = "diagnostics")]
                 diagnostics: self.context.try_resource::<DiagnosticsRegistration>(),
                 #[cfg(feature = "diagnostics")]
@@ -350,14 +498,10 @@ impl WinitHost {
             }
             WindowCommand::Hide(id) => {
                 if let Some(window) = self.window_by_id_mut(&id) {
-                    window.visible = false;
-                    window.window.set_visible(false);
-                    if window.options.background_memory_optimization {
-                        window.renderer.trim(MemoryPressure::Critical);
-                        window.session.suspend_rendering();
-                    }
+                    window.set_desired_visibility(false);
                 }
                 self.suppress_owned_windows(&id, true);
+                self.refresh_background_state();
             }
             WindowCommand::Close(id) => {
                 if let Some(native) = self.ids.get(&id).copied() {
@@ -376,6 +520,9 @@ impl WinitHost {
             }
             WindowCommand::SetScalePreference(preference) => {
                 self.scale_preference = Some(preference);
+                self.context
+                    .memory()
+                    .notify(crate::memory::MemoryEvent::ThemeOrScaleChanged);
                 for window in self.windows.values_mut() {
                     window.options.scale_preference = preference;
                     window.update_scale();
@@ -469,11 +616,11 @@ impl WinitHost {
             ClosePolicy::Hide => {
                 let id = {
                     let window = self.windows.get_mut(&native).expect("window exists");
-                    window.visible = false;
-                    window.window.set_visible(false);
+                    window.set_desired_visibility(false);
                     window.id.clone()
                 };
                 self.suppress_owned_windows(&id, true);
+                self.refresh_background_state();
             }
             ClosePolicy::Notify => {
                 let window = self.windows.get_mut(&native).expect("window exists");
@@ -515,16 +662,10 @@ impl WinitHost {
 
     fn set_window_visibility(&mut self, id: &WindowId, visible: bool) {
         if let Some(window) = self.window_by_id_mut(id) {
-            window.visible = visible;
-            window
-                .window
-                .set_visible(visible && !window.owner_suppressed);
-            if visible && !window.owner_suppressed {
-                window.full_redraw = true;
-                window.window.request_redraw();
-            }
+            window.set_desired_visibility(visible);
         }
         self.suppress_owned_windows(id, !visible);
+        self.refresh_background_state();
     }
 
     fn suppress_owned_windows(&mut self, owner: &WindowId, suppressed: bool) {
@@ -536,14 +677,35 @@ impl WinitHost {
             .collect::<Vec<_>>();
         for child in children {
             if let Some(window) = self.window_by_id_mut(&child) {
-                window.owner_suppressed = suppressed;
-                window.window.set_visible(window.visible && !suppressed);
-                if window.visible && !suppressed {
-                    window.full_redraw = true;
-                    window.window.request_redraw();
-                }
+                window.set_owner_suppressed(suppressed);
             }
             self.suppress_owned_windows(&child, suppressed);
+        }
+    }
+
+    fn refresh_background_state(&mut self) {
+        let roots = self
+            .windows
+            .values()
+            .filter(|window| window.options.owner.is_none())
+            .collect::<Vec<_>>();
+        let backgrounded = !roots.is_empty()
+            && roots.iter().all(|window| !window.visible)
+            && roots
+                .iter()
+                .any(|window| window.options.background_memory_optimization);
+        if backgrounded {
+            for window in self.windows.values_mut() {
+                window.suspend_rendering(true);
+            }
+        }
+        if backgrounded != self.backgrounded {
+            self.context.memory().notify(if backgrounded {
+                crate::memory::MemoryEvent::AllWindowsHidden
+            } else {
+                crate::memory::MemoryEvent::WindowShown
+            });
+            self.backgrounded = backgrounded;
         }
     }
 }

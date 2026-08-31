@@ -1,12 +1,30 @@
 use super::*;
 
 thread_local! {
-    pub(super) static OVERLAY_CACHE: RefCell<HashMap<OverlayCacheKey, Vec<u8>>> = RefCell::new(HashMap::new());
+    pub(super) static OVERLAY_CACHE: RefCell<crate::memory::LruCache<OverlayCacheKey, Vec<u8>>> = RefCell::new(
+        crate::memory::LruCache::new(
+            16 * 1024 * 1024,
+            crate::memory::ResourceClass::Cache,
+            gdi_telemetry(0).clone(),
+        )
+    );
     pub(super) static GDI_BITMAP_CACHE: RefCell<GdiBitmapCache> = RefCell::new(GdiBitmapCache::default());
     pub(super) static GDI_COMPOSITING_LAYER_SCOPE: Cell<u64> = const { Cell::new(0) };
     pub(super) static GDI_COMPOSITING_LAYERS: RefCell<HashMap<GdiCompositingLayerKey, GdiCompositingLayer>> = RefCell::new(HashMap::new());
     pub(super) static GDI_FRAME_BLIT_METRICS: RefCell<GdiFrameBlitMetrics> = RefCell::new(GdiFrameBlitMetrics::default());
-    pub(super) static GDI_FONT_FAMILY_CACHE: RefCell<HashMap<(char, i32, i32), usize>> = RefCell::new(HashMap::new());
+    pub(super) static GDI_FONT_FAMILY_CACHE: RefCell<crate::memory::LruCache<(char, i32, i32), usize>> = RefCell::new(
+        crate::memory::LruCache::new(
+            256 * 1024,
+            crate::memory::ResourceClass::Cache,
+            gdi_telemetry(2).clone(),
+        )
+    );
+}
+
+fn gdi_telemetry(index: usize) -> &'static crate::memory::CacheTelemetry {
+    static TELEMETRY: std::sync::OnceLock<[crate::memory::CacheTelemetry; 4]> =
+        std::sync::OnceLock::new();
+    &TELEMETRY.get_or_init(Default::default)[index]
 }
 
 pub(super) fn raster_length(value: f32) -> i32 {
@@ -26,25 +44,67 @@ pub(super) fn pixel_rect_outward(rect: UiRect) -> PhysicalRect {
     )
 }
 
-pub fn clear_gdi_renderer_caches() {
-    OVERLAY_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-    GDI_BITMAP_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-    GDI_COMPOSITING_LAYERS.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-    GDI_FONT_FAMILY_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-}
-
 pub fn release_gdi_compositing_layer_scope(scope: u64) {
     GDI_COMPOSITING_LAYERS.with(|layers| {
         layers.borrow_mut().retain(|key, _| key.scope != scope);
     });
+    publish_gdi_compositing_usage();
+}
+
+pub(crate) fn gdi_renderer_cache_usage() -> crate::memory::CacheUsage {
+    let mut usage = crate::memory::CacheUsage::default();
+    for index in 0..4 {
+        usage.add_assign(gdi_telemetry(index).snapshot());
+    }
+    usage
+}
+
+pub(crate) fn trim_gdi_renderer_caches(target_bytes: usize) -> usize {
+    let bitmap_target = target_bytes / 2;
+    let overlay_target = target_bytes / 3;
+    let font_target = target_bytes.saturating_sub(bitmap_target + overlay_target);
+    OVERLAY_CACHE.with(|cache| cache.borrow_mut().trim_to(overlay_target))
+        + GDI_BITMAP_CACHE.with(|cache| cache.borrow_mut().trim_to(bitmap_target))
+        + GDI_FONT_FAMILY_CACHE.with(|cache| cache.borrow_mut().trim_to(font_target))
+}
+
+pub(crate) fn set_gdi_renderer_cache_budget(budget_bytes: usize) {
+    let bitmap_budget = budget_bytes / 2;
+    let overlay_budget = budget_bytes / 3;
+    let font_budget = budget_bytes.saturating_sub(bitmap_budget + overlay_budget);
+    OVERLAY_CACHE.with(|cache| cache.borrow_mut().set_budget(overlay_budget));
+    GDI_BITMAP_CACHE.with(|cache| cache.borrow_mut().set_budget(bitmap_budget));
+    GDI_FONT_FAMILY_CACHE.with(|cache| cache.borrow_mut().set_budget(font_budget));
+}
+
+pub(super) fn publish_gdi_compositing_usage() {
+    let usage = GDI_COMPOSITING_LAYERS.with(|layers| {
+        let layers = layers.borrow();
+        let bytes = layers.values().fold(0usize, |total, layer| {
+            total
+                .saturating_add(layer.output.bytes)
+                .saturating_add(layer.black.as_ref().map_or(0, |entry| entry.bytes))
+                .saturating_add(layer.white.as_ref().map_or(0, |entry| entry.bytes))
+        });
+        crate::memory::CacheUsage {
+            live_bytes: bytes,
+            cpu_bytes: bytes,
+            entries: layers.len(),
+            largest_entry_bytes: layers
+                .values()
+                .map(|layer| {
+                    layer
+                        .output
+                        .bytes
+                        .saturating_add(layer.black.as_ref().map_or(0, |entry| entry.bytes))
+                        .saturating_add(layer.white.as_ref().map_or(0, |entry| entry.bytes))
+                })
+                .max()
+                .unwrap_or(0),
+            ..Default::default()
+        }
+    });
+    gdi_telemetry(3).publish(usage);
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -163,11 +223,28 @@ pub(super) enum GdiFrameBlitSource {
 
 pub(super) const GDI_BITMAP_CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 
-#[derive(Default)]
 pub(super) struct GdiBitmapCache {
     pub(super) entries: HashMap<String, GdiBitmapEntry>,
     pub(super) bytes: usize,
     pub(super) tick: u64,
+    pub(super) budget_bytes: usize,
+    pub(super) hits: u64,
+    pub(super) misses: u64,
+    pub(super) evictions: u64,
+}
+
+impl Default for GdiBitmapCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            bytes: 0,
+            tick: 0,
+            budget_bytes: GDI_BITMAP_CACHE_BUDGET_BYTES,
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+        }
+    }
 }
 
 pub(super) struct GdiBitmapEntry {
@@ -200,12 +277,6 @@ pub(super) struct GdiCompositingLayerKey {
 }
 
 impl GdiBitmapCache {
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.bytes = 0;
-        self.tick = 0;
-    }
-
     fn next_tick(&mut self) -> u64 {
         self.tick = self.tick.saturating_add(1);
         self.tick
@@ -225,21 +296,31 @@ impl GdiBitmapCache {
             .get(key)
             .is_none_or(|entry| entry.width != width || entry.height != height);
         if needs_store {
+            self.misses = self.misses.saturating_add(1);
+        } else {
+            self.hits = self.hits.saturating_add(1);
+        }
+        if needs_store {
             if let Some(previous) = self.entries.remove(key) {
                 self.bytes = self.bytes.saturating_sub(previous.bytes);
+            }
+            if pixels.len() > self.budget_bytes {
+                self.publish();
+                return None;
             }
             let entry = GdiBitmapEntry::new(hdc, width, height, pixels, tick)?;
             self.bytes = self.bytes.saturating_add(entry.bytes);
             self.entries.insert(key.to_string(), entry);
             self.evict_to_budget();
         }
+        self.publish();
         let entry = self.entries.get_mut(key)?;
         entry.last_used = tick;
         Some(entry)
     }
 
     fn evict_to_budget(&mut self) {
-        while self.bytes > GDI_BITMAP_CACHE_BUDGET_BYTES && self.entries.len() > 1 {
+        while self.bytes > self.budget_bytes {
             let Some(oldest_key) = self
                 .entries
                 .iter()
@@ -250,8 +331,42 @@ impl GdiBitmapCache {
             };
             if let Some(entry) = self.entries.remove(&oldest_key) {
                 self.bytes = self.bytes.saturating_sub(entry.bytes);
+                self.evictions = self.evictions.saturating_add(1);
             }
         }
+        self.publish();
+    }
+
+    fn trim_to(&mut self, target_bytes: usize) -> usize {
+        let before = self.bytes;
+        let previous = self.budget_bytes;
+        self.budget_bytes = target_bytes.min(previous);
+        self.evict_to_budget();
+        self.budget_bytes = previous;
+        before.saturating_sub(self.bytes)
+    }
+
+    fn set_budget(&mut self, budget_bytes: usize) {
+        self.budget_bytes = budget_bytes.max(1);
+        self.evict_to_budget();
+    }
+
+    fn publish(&self) {
+        gdi_telemetry(1).publish(crate::memory::CacheUsage {
+            cache_bytes: self.bytes,
+            cpu_bytes: self.bytes,
+            entries: self.entries.len(),
+            hits: self.hits,
+            misses: self.misses,
+            evictions: self.evictions,
+            largest_entry_bytes: self
+                .entries
+                .values()
+                .map(|entry| entry.bytes)
+                .max()
+                .unwrap_or(0),
+            ..Default::default()
+        });
     }
 }
 

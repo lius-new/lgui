@@ -45,6 +45,60 @@ fn suspending_rendering_releases_the_host_and_preserves_component_state() {
 }
 
 #[test]
+fn trimmed_component_output_rebuilds_without_losing_state() {
+    let executions = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::new(Mutex::new(None::<State<i32>>));
+    let view: AppView = Arc::new({
+        let executions = Arc::clone(&executions);
+        let captured = Arc::clone(&captured);
+        move |_cx| {
+            component((), {
+                let executions = Arc::clone(&executions);
+                let captured = Arc::clone(&captured);
+                move |cx, _| {
+                    executions.fetch_add(1, Ordering::SeqCst);
+                    let value = cx.state(1_i32);
+                    *captured.lock().expect("captured state poisoned") = Some(value.clone());
+                    text(
+                        UiRect::new(0.0, 0.0, 120.0, 40.0),
+                        format!("value={}", value.get()),
+                        TextStyle::new(Color::WHITE, 14.0, 400),
+                    )
+                }
+            })
+        }
+    });
+    let viewport = UiRect::new(0.0, 0.0, 120.0, 40.0);
+    let mut session = UiSession::new();
+
+    session.render_view(&view, viewport, UiScale::ONE);
+    captured
+        .lock()
+        .expect("captured state poisoned")
+        .as_ref()
+        .expect("state handle missing")
+        .set(7);
+    session.apply_pending_updates();
+    session.render_view(&view, viewport, UiScale::ONE);
+    let before = session.memory_usage().0.rebuildable_bytes;
+
+    assert!(before > 0);
+    assert_eq!(session.trim_component_outputs(0), before);
+    session.render_view(&view, viewport, UiScale::ONE);
+
+    assert_eq!(executions.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        captured
+            .lock()
+            .expect("captured state poisoned")
+            .as_ref()
+            .expect("state handle missing")
+            .get(),
+        7
+    );
+}
+
+#[test]
 fn state_update_uses_host_diff_damage_instead_of_invalidating_the_component_bounds() {
     let state = Arc::new(Mutex::new(None::<State<i32>>));
     let captured = Arc::clone(&state);

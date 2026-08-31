@@ -195,7 +195,13 @@ pub(super) fn static_layer_cache_key(
     child_signature: u64,
 ) -> D2dBitmapCacheKey {
     D2dBitmapCacheKey::StaticLayer {
-        raster_key: static_layer_raster_cache::cache_key(id, spec, width, height, child_signature),
+        raster_key: super::super::static_layer::static_layer_cache_key(
+            id,
+            spec,
+            width,
+            height,
+            child_signature,
+        ),
         id: id.clone(),
         spec_signature: static_layer_spec_signature(spec),
         child_signature,

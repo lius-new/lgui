@@ -106,14 +106,16 @@ pub use gdi::GdiRenderer;
 pub use hidden_window::Win32HiddenWindow;
 #[cfg(feature = "images-win32")]
 pub use image_cache::{
-    cached_image_data, clear_cached_image_cache,
-    clear_decoded_image_cache as clear_cached_decoded_image_cache, clear_image_repaint_hwnd,
-    draw_cached_image, mark_image_cache_repaint_handled, register_image_repaint_hwnd,
-    request_cached_image, CachedImageStatus, ImageFit as CachedImageFit,
-    ImageSource as CachedImageSource, WM_IMAGE_CACHE_INVALIDATED,
+    cached_image_data, clear_image_repaint_hwnd, draw_cached_image,
+    mark_image_cache_repaint_handled, register_image_repaint_hwnd, request_cached_image,
+    CachedImageStatus, ImageFit as CachedImageFit, ImageSource as CachedImageSource,
+    WM_IMAGE_CACHE_INVALIDATED,
 };
 #[cfg(feature = "images-win32")]
-pub(crate) use image_cache::{install_remote_image_loader, portable_image_cache_handle};
+pub(crate) use image_cache::{
+    decoded_image_cache_usage, install_image_memory_governor, install_remote_image_loader,
+    portable_image_cache_handle, set_decoded_image_cache_budget, trim_decoded_image_cache,
+};
 #[cfg(feature = "images-win32")]
 pub use image_cache::{ImageFit, ImageSource};
 #[cfg(feature = "notifications-win32")]

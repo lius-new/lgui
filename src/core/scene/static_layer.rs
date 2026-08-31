@@ -30,10 +30,42 @@ impl StaticLayerSource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum StaticLayerCachePolicy {
+pub enum RasterCachePolicy {
     Disabled,
-    Memory,
-    MemoryAndDisk,
+    Memory {
+        retention: crate::memory::RetentionClass,
+        priority: crate::memory::CachePriority,
+    },
+}
+
+impl RasterCachePolicy {
+    pub const fn memory(
+        retention: crate::memory::RetentionClass,
+        priority: crate::memory::CachePriority,
+    ) -> Self {
+        Self::Memory {
+            retention,
+            priority,
+        }
+    }
+
+    pub const fn is_enabled(self) -> bool {
+        matches!(self, Self::Memory { .. })
+    }
+
+    pub const fn retention(self) -> Option<crate::memory::RetentionClass> {
+        match self {
+            Self::Disabled => None,
+            Self::Memory { retention, .. } => Some(retention),
+        }
+    }
+
+    pub const fn priority(self) -> Option<crate::memory::CachePriority> {
+        match self {
+            Self::Disabled => None,
+            Self::Memory { priority, .. } => Some(priority),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -45,7 +77,7 @@ pub enum StaticLayerBackground {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StaticLayerSpec {
     pub source: StaticLayerSource,
-    pub cache_policy: StaticLayerCachePolicy,
+    pub cache_policy: RasterCachePolicy,
     pub revision: &'static str,
     pub opacity: u8,
     pub offset_x: f32,
@@ -59,8 +91,8 @@ impl StaticLayerSpec {
         Self {
             source,
             // Bitmap caching is opt-in. Static layers may contain dynamic children, so callers
-            // must explicitly choose memory or disk caching only for stable reusable content.
-            cache_policy: StaticLayerCachePolicy::Disabled,
+            // must explicitly choose memory caching only for stable reusable content.
+            cache_policy: RasterCachePolicy::Disabled,
             revision: "v1",
             opacity: 255,
             offset_x: 0.0,
@@ -70,7 +102,7 @@ impl StaticLayerSpec {
         }
     }
 
-    pub fn cache_policy(mut self, policy: StaticLayerCachePolicy) -> Self {
+    pub fn cache_policy(mut self, policy: RasterCachePolicy) -> Self {
         self.cache_policy = policy;
         self
     }
@@ -138,7 +170,7 @@ impl Hash for StaticLayerSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StaticLayerCacheSignature {
     source: StaticLayerSource,
-    cache_policy: StaticLayerCachePolicy,
+    cache_policy: RasterCachePolicy,
     revision: &'static str,
     background: StaticLayerBackground,
 }

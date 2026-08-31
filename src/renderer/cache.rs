@@ -19,8 +19,6 @@ pub struct StaticLayerMemoryCachePrefixStats {
 
 #[derive(Clone)]
 pub struct RenderCacheHandle {
-    clear_all: Arc<dyn Fn() + Send + Sync>,
-    clear_scroll_raster: Arc<dyn Fn() + Send + Sync>,
     stats: Arc<dyn Fn() -> StaticLayerMemoryCacheStats + Send + Sync>,
     prefix_stats: Arc<dyn Fn(&str) -> StaticLayerMemoryCachePrefixStats + Send + Sync>,
     prefix_entry_ids: Arc<dyn Fn(&str) -> Vec<String> + Send + Sync>,
@@ -28,15 +26,11 @@ pub struct RenderCacheHandle {
 
 impl RenderCacheHandle {
     pub fn new(
-        clear_all: impl Fn() + Send + Sync + 'static,
-        clear_scroll_raster: impl Fn() + Send + Sync + 'static,
         stats: impl Fn() -> StaticLayerMemoryCacheStats + Send + Sync + 'static,
         prefix_stats: impl Fn(&str) -> StaticLayerMemoryCachePrefixStats + Send + Sync + 'static,
         prefix_entry_ids: impl Fn(&str) -> Vec<String> + Send + Sync + 'static,
     ) -> Self {
         Self {
-            clear_all: Arc::new(clear_all),
-            clear_scroll_raster: Arc::new(clear_scroll_raster),
             stats: Arc::new(stats),
             prefix_stats: Arc::new(prefix_stats),
             prefix_entry_ids: Arc::new(prefix_entry_ids),
@@ -66,22 +60,6 @@ impl Drop for RenderCacheGuard {
 pub(crate) fn install_render_cache(handle: RenderCacheHandle) -> RenderCacheGuard {
     let previous = RENDER_CACHE.with(|current| current.borrow_mut().replace(handle));
     RenderCacheGuard { previous }
-}
-
-pub fn clear_render_caches() {
-    RENDER_CACHE.with(|current| {
-        if let Some(cache) = current.borrow().as_ref() {
-            (cache.clear_all)();
-        }
-    });
-}
-
-pub fn clear_scroll_raster_cache() {
-    RENDER_CACHE.with(|current| {
-        if let Some(cache) = current.borrow().as_ref() {
-            (cache.clear_scroll_raster)();
-        }
-    });
 }
 
 pub fn static_layer_cache_stats() -> StaticLayerMemoryCacheStats {

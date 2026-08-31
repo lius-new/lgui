@@ -338,6 +338,10 @@ pub(super) extern "system" fn window_proc(
         WM_DESTROY => {
             let (empty, dispatcher, next_window) = STATE.with(|state| {
                 let mut state = state.borrow_mut();
+                #[cfg(feature = "images")]
+                if let Some(window) = state.get(&(hwnd.0 as isize)) {
+                    crate::assets::update_image_reachability(window.memory_instance, &[]);
+                }
                 let dispatcher = state
                     .remove(&(hwnd.0 as isize))
                     .map(|window| window.dispatcher);

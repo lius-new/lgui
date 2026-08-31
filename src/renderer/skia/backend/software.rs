@@ -54,6 +54,10 @@ impl SkiaSoftwareSurface {
         }
     }
 
+    pub(crate) fn set_cache_budget(&mut self, budget_bytes: usize) {
+        self.cache.set_budget(budget_bytes);
+    }
+
     pub(crate) fn cache_stats(&self) -> SkiaCacheStats {
         self.cache.stats()
     }

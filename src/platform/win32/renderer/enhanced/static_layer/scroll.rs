@@ -74,13 +74,34 @@ fn draw_scroll_raster_visible_tile<B: StaticLayerDrawBackend>(
     else {
         return;
     };
-    store_static_layer_memory(
+    let stored = store_static_layer_memory(
         tile_id.as_str(),
         key.clone(),
-        bitmap,
+        &bitmap,
         tile_spec.memory_budget_bytes,
+        tile_spec.cache_policy,
     );
-    let _ = blit_cached_static_layer::<B>(hdc, draw_rect, Some(viewport), &key, tile_spec.opacity);
+    if stored {
+        let _ =
+            blit_cached_static_layer::<B>(hdc, draw_rect, Some(viewport), &key, tile_spec.opacity);
+    } else if let Some(dest) = draw_rect.intersect(viewport) {
+        let source = UiRect::new(
+            dest.left - draw_rect.left,
+            dest.top - draw_rect.top,
+            dest.right - draw_rect.left,
+            dest.bottom - draw_rect.top,
+        );
+        B::blit_cached_premultiplied_bgra_region_alpha(
+            hdc,
+            &key,
+            dest,
+            source,
+            bitmap.width,
+            bitmap.height,
+            &bitmap.pixels,
+            tile_spec.opacity,
+        );
+    }
 }
 
 fn warm_scroll_raster_tile<B: StaticLayerDrawBackend>(
@@ -105,9 +126,15 @@ fn warm_scroll_raster_tile<B: StaticLayerDrawBackend>(
     else {
         return false;
     };
-    store_static_layer_memory(tile_id.as_str(), key, bitmap, tile_spec.memory_budget_bytes);
+    let stored = store_static_layer_memory(
+        tile_id.as_str(),
+        key,
+        &bitmap,
+        tile_spec.memory_budget_bytes,
+        tile_spec.cache_policy,
+    );
     trace_duration("gdi.scroll_raster.prefetch_generate", start.elapsed());
-    true
+    stored
 }
 
 fn scroll_raster_tile_rect(viewport: UiRect, spec: &ScrollRasterSpec, tile_index: usize) -> UiRect {
@@ -128,7 +155,10 @@ fn scroll_raster_tile_spec(spec: &ScrollRasterSpec, opacity: u8) -> StaticLayerS
         StaticLayerBackground::Transparent
     };
     StaticLayerSpec::new(StaticLayerSource::runtime())
-        .cache_policy(StaticLayerCachePolicy::Memory)
+        .cache_policy(RasterCachePolicy::memory(
+            crate::memory::RetentionClass::WhileVisible,
+            crate::memory::CachePriority::High,
+        ))
         .memory_budget_bytes(spec.memory_budget_bytes)
         .paint_offset(0.0, -spec.scroll_y)
         .opacity(opacity as f32 / 255.0)
@@ -157,7 +187,7 @@ fn scroll_raster_tile_cache_key(
     raster_spec: &ScrollRasterSpec,
     child_signature: u64,
 ) -> String {
-    static_layer_raster_cache::cache_key(
+    static_layer_cache_key(
         id,
         spec,
         raster_length(rect.width()),

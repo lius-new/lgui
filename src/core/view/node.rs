@@ -1,11 +1,11 @@
-use std::{borrow::Cow, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, path::PathBuf, sync::Arc, time::Duration};
 
 use super::{
     ActionId, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
-    CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, RenderPhase,
-    ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction, UiActionBinding,
-    UiActionHandler, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
-    UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, VisualStyle,
+    CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, PhysicalSize,
+    RenderPhase, ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction,
+    UiActionBinding, UiActionHandler, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload,
+    UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, VisualStyle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +85,131 @@ impl From<&'static str> for UiImageSource {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImageCachePolicy {
+    NoStore,
+    WhileVisible,
+    Scene,
+    #[default]
+    Session,
+    Persistent {
+        max_age: Duration,
+        revalidate: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImageDecodePolicy {
+    #[default]
+    Original,
+    FitTarget(PhysicalSize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ImageRequest {
+    source: UiImageSource,
+    cache_policy: ImageCachePolicy,
+    decode_policy: ImageDecodePolicy,
+    priority: crate::memory::CachePriority,
+    namespace: String,
+    version: u64,
+    sensitive: bool,
+}
+
+impl ImageRequest {
+    pub fn new(source: impl Into<UiImageSource>) -> Self {
+        Self {
+            source: source.into(),
+            cache_policy: ImageCachePolicy::Session,
+            decode_policy: ImageDecodePolicy::Original,
+            priority: crate::memory::CachePriority::Normal,
+            namespace: "images".to_owned(),
+            version: 1,
+            sensitive: false,
+        }
+    }
+
+    pub fn cache_policy(mut self, policy: ImageCachePolicy) -> Self {
+        self.cache_policy = policy;
+        self
+    }
+
+    pub fn decode_policy(mut self, policy: ImageDecodePolicy) -> Self {
+        self.decode_policy = policy;
+        self
+    }
+
+    pub fn priority(mut self, priority: crate::memory::CachePriority) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.namespace = namespace.into();
+        self
+    }
+
+    pub fn version(mut self, version: u64) -> Self {
+        self.version = version;
+        self
+    }
+
+    pub fn sensitive(mut self, sensitive: bool) -> Self {
+        self.sensitive = sensitive;
+        self
+    }
+
+    pub fn source(&self) -> &UiImageSource {
+        &self.source
+    }
+
+    pub const fn cache_policy_value(&self) -> ImageCachePolicy {
+        self.cache_policy
+    }
+
+    pub const fn decode_policy_value(&self) -> ImageDecodePolicy {
+        self.decode_policy
+    }
+
+    pub const fn priority_value(&self) -> crate::memory::CachePriority {
+        self.priority
+    }
+
+    pub fn namespace_value(&self) -> &str {
+        &self.namespace
+    }
+
+    pub const fn version_value(&self) -> u64 {
+        self.version
+    }
+
+    pub const fn is_sensitive(&self) -> bool {
+        self.sensitive
+    }
+
+    pub fn cache_key(&self) -> String {
+        let source = match &self.source {
+            UiImageSource::Static(key) => format!("asset:{key}"),
+            UiImageSource::File(path) => format!("file:{}", path.display()),
+            UiImageSource::Url(url) => format!("url:{url}"),
+            UiImageSource::Bytes { key, version, .. } => format!("bytes:{key}:{version}"),
+        };
+        format!("{}:{source}:{}", self.namespace, self.version)
+    }
+}
+
+impl From<UiImageSource> for ImageRequest {
+    fn from(source: UiImageSource) -> Self {
+        Self::new(source)
+    }
+}
+
+impl From<&'static str> for ImageRequest {
+    fn from(source: &'static str) -> Self {
+        Self::new(source)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EventPolicy {
     pub hover: bool,
@@ -135,7 +260,7 @@ pub struct UiNode {
     pub style: VisualStyle,
     pub path: Option<UiPath>,
     pub path_style: PathStyle,
-    pub image_source: Option<UiImageSource>,
+    pub image_request: Option<ImageRequest>,
     pub image_fit: ImageFit,
     pub icon_key: Option<&'static str>,
     pub icon_style: IconStyle,
@@ -184,7 +309,7 @@ impl UiNode {
             style: VisualStyle::default(),
             path: None,
             path_style: PathStyle::default(),
-            image_source: None,
+            image_request: None,
             image_fit: ImageFit::Contain,
             icon_key: None,
             icon_style: IconStyle::new(Color::WHITE),
@@ -202,6 +327,50 @@ impl UiNode {
             render_phase: RenderPhase::Content,
             children: Vec::new(),
         }
+    }
+
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub(crate) fn estimated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.id.as_str().len())
+            .saturating_add(
+                self.parent
+                    .as_ref()
+                    .map_or(0, |parent| parent.as_str().len()),
+            )
+            .saturating_add(
+                self.children
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<UiId>()),
+            )
+            .saturating_add(self.children.iter().map(|id| id.as_str().len()).sum())
+            .saturating_add(self.text.as_deref().map_or(0, str::len))
+            .saturating_add(
+                self.input_event_handlers
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<UiInputEventBinding>()),
+            )
+            .saturating_add(
+                self.action_handlers
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<UiActionBinding>()),
+            )
+            .saturating_add(
+                self.animation_bindings
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<AnimationBinding>()),
+            )
+            .saturating_add(
+                self.animation_targets
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(super::AnimProperty, bool)>()),
+            )
     }
 
     pub(crate) fn projection_eq(&self, other: &Self) -> bool {
@@ -223,7 +392,7 @@ impl UiNode {
             && self.style == other.style
             && self.path == other.path
             && self.path_style == other.path_style
-            && self.image_source == other.image_source
+            && self.image_request == other.image_request
             && self.image_fit == other.image_fit
             && self.icon_key == other.icon_key
             && self.icon_style == other.icon_style
@@ -430,7 +599,13 @@ impl UiNode {
     }
 
     pub fn image(mut self, source: impl Into<UiImageSource>, fit: ImageFit) -> Self {
-        self.image_source = Some(source.into());
+        self.image_request = Some(ImageRequest::new(source));
+        self.image_fit = fit;
+        self
+    }
+
+    pub fn image_request(mut self, request: impl Into<ImageRequest>, fit: ImageFit) -> Self {
+        self.image_request = Some(request.into());
         self.image_fit = fit;
         self
     }

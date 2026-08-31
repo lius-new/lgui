@@ -106,11 +106,20 @@ pub use layout::{
     apply_layout, apply_layout_tree, Align, Axis, LayoutCommitMetrics, LayoutInvalidation,
     LayoutRuntime, LayoutSpec,
 };
-pub use node::{EventPolicy, InteractionRole, UiImageSource, UiNode, UiNodeKind};
+pub use node::{
+    EventPolicy, ImageCachePolicy, ImageDecodePolicy, ImageRequest, InteractionRole, UiImageSource,
+    UiNode, UiNodeKind,
+};
 pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub(crate) use render::clear_scroll_raster_command_cache;
+#[cfg(any(
+    test,
+    feature = "backend-winit",
+    feature = "renderer-gdi",
+    feature = "renderer-d2d",
+    all(feature = "backend-win32", feature = "renderer-skia")
+))]
+pub(crate) use render::estimate_scene_commands_bytes;
 pub(crate) use render::patch_compositing_layer_spec;
 #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
 pub(crate) use render::translate_scene_primitive_for_backend;
@@ -119,6 +128,10 @@ pub use render::{
     scene_root_ids, scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene,
     ScenePrimitive, ScenePrimitiveKind, ScrollRasterSpec,
 };
+pub(crate) use render::{
+    scroll_raster_command_cache_usage, set_scroll_raster_command_cache_budget,
+    trim_scroll_raster_command_cache,
+};
 pub use runtime::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 pub use scope::UiScope;
 pub use semantics::{
@@ -126,7 +139,7 @@ pub use semantics::{
     SemanticUpdate, Semantics,
 };
 pub use static_layer::{
-    StaticLayerBackground, StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec,
+    RasterCachePolicy, StaticLayerBackground, StaticLayerSource, StaticLayerSpec,
 };
 pub use style::{
     BackdropBlurStyle, Color, CustomPaintStyle, IconStyle, OverlayStyle, PathStyle,

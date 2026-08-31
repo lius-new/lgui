@@ -103,6 +103,12 @@ impl LayeredBackbuffer {
         self.height
     }
 
+    pub fn byte_len(&self) -> usize {
+        (self.width.max(0) as usize)
+            .saturating_mul(self.height.max(0) as usize)
+            .saturating_mul(4)
+    }
+
     #[cfg(feature = "multi-window")]
     pub fn viewport(&self) -> PhysicalRect {
         PhysicalRect::new(0, 0, self.width, self.height)

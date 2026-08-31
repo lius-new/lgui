@@ -10,7 +10,7 @@ use crate::{
     assets::render_resources,
     core::{
         BackdropBlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
-        PhysicalRect, Scene, ScenePrimitive, StaticLayerBackground, StaticLayerCachePolicy,
+        PhysicalRect, RasterCachePolicy, Scene, ScenePrimitive, StaticLayerBackground,
         StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource, UiPath, UiPathCommand,
         UiRect, VisualStyle,
     },

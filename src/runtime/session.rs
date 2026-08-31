@@ -271,6 +271,62 @@ impl UiSession {
         self.projection_metrics
     }
 
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub(crate) fn memory_usage(&self) -> (crate::memory::CacheUsage, crate::memory::CacheUsage) {
+        let component = self.runtime.component_tree().output_memory_usage();
+        let host_scene_bytes = self
+            .tree
+            .estimated_bytes()
+            .saturating_add(self.host.estimated_bytes());
+        let host_scene = crate::memory::CacheUsage {
+            rebuildable_bytes: host_scene_bytes,
+            cpu_bytes: host_scene_bytes,
+            entries: self
+                .tree
+                .nodes()
+                .len()
+                .saturating_add(usize::from(self.has_tree())),
+            largest_entry_bytes: self.host.estimated_bytes(),
+            ..Default::default()
+        };
+        (component, host_scene)
+    }
+
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub(crate) fn trim_component_outputs(&mut self, target_bytes: usize) -> usize {
+        let released = self.runtime.component_tree().trim_outputs(target_bytes);
+        if released > 0 {
+            self.invalidations.invalidate_all();
+        }
+        released
+    }
+
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub(crate) fn trim_host_scene(&mut self) -> usize {
+        let before = self.memory_usage().1.rebuildable_bytes;
+        self.clear_host();
+        self.invalidate_all();
+        before
+    }
+
     #[cfg(feature = "diagnostics-timing")]
     pub(crate) fn render_timings(&self) -> SessionRenderTimings {
         self.render_timings
@@ -290,10 +346,17 @@ impl UiSession {
     }
 
     /// Releases retained drawing data while preserving state, hooks, effects and tasks.
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
     pub(crate) fn suspend_rendering(&mut self) {
         self.runtime.suspend_rendering();
-        self.clear_host();
-        self.invalidate_all();
+        self.trim_component_outputs(0);
+        self.trim_host_scene();
     }
 
     pub fn reset(&mut self) {

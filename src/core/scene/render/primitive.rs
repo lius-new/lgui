@@ -56,6 +56,7 @@ pub enum ScenePrimitive {
         id: UiId,
         rect: UiRect,
         source: UiImageSource,
+        request: ImageRequest,
         fit: ImageFit,
         phase: RenderPhase,
     },

@@ -116,35 +116,52 @@ pub(super) fn draw_overlay(hdc: HDC, rect: UiRect, style: &OverlayStyle) {
     };
     OVERLAY_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if !cache.contains_key(&key) {
-            cache.insert(key, rasterize_overlay(width, height, style));
-        }
-        if let Some(pixels) = cache.get(&key) {
-            let gdi_key = overlay_gdi_cache_key(&key);
-            if blit_cached_gdi_bitmap(
-                GdiFrameBlitSource::Overlay,
-                hdc,
-                &gdi_key,
-                rect,
-                UiRect::new(0.0, 0.0, width as f32, height as f32),
-                width,
-                height,
-                pixels,
-                255,
-            ) {
+        if !cache.contains_touch(&key) {
+            let pixels = rasterize_overlay(width, height, style);
+            let bytes = pixels.len();
+            if !cache.can_store(bytes) {
+                draw_overlay_pixels(hdc, rect, &key, width, height, &pixels);
                 return;
             }
-            blit_premultiplied_bgra_with_source(
-                GdiFrameBlitSource::Overlay,
-                hdc,
-                rect,
-                width,
-                height,
-                pixels,
-            );
+            cache.insert(key.clone(), pixels, bytes);
+        }
+        if let Some(pixels) = cache.get(&key) {
+            draw_overlay_pixels(hdc, rect, &key, width, height, pixels);
         }
     });
     trace_duration("gdi.draw_overlay", start.elapsed());
+}
+
+fn draw_overlay_pixels(
+    hdc: HDC,
+    rect: UiRect,
+    key: &OverlayCacheKey,
+    width: i32,
+    height: i32,
+    pixels: &[u8],
+) {
+    let gdi_key = overlay_gdi_cache_key(key);
+    if blit_cached_gdi_bitmap(
+        GdiFrameBlitSource::Overlay,
+        hdc,
+        &gdi_key,
+        rect,
+        UiRect::new(0.0, 0.0, width as f32, height as f32),
+        width,
+        height,
+        pixels,
+        255,
+    ) {
+        return;
+    }
+    blit_premultiplied_bgra_with_source(
+        GdiFrameBlitSource::Overlay,
+        hdc,
+        rect,
+        width,
+        height,
+        pixels,
+    );
 }
 
 pub(super) fn overlay_gdi_cache_key(key: &OverlayCacheKey) -> String {

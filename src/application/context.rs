@@ -1,21 +1,24 @@
 use std::{
     future::Future,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 #[cfg(feature = "router")]
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    sync::Mutex,
 };
 
 use crate::{
     command::{Command, CommandHandle, CommandRegistry},
     core::UiTaskSpawner,
     events::{Event, EventBus, EventSubscription},
+    memory::{CacheRegistration, DomainRegistration, MemoryGovernor, MemoryOptions},
     resources::Resources,
 };
+
+#[cfg(feature = "persistent-cache")]
+use crate::memory::PersistentCacheStore;
 
 #[cfg(feature = "router")]
 use crate::router::Router;
@@ -36,6 +39,8 @@ struct ApplicationContextInner {
     executor: RwLock<Option<UiTaskSpawner>>,
     commands: CommandRegistry,
     events: EventBus,
+    memory: MemoryGovernor,
+    memory_registrations: Mutex<Vec<CacheRegistration>>,
     #[cfg(feature = "store")]
     stores: Arc<StoreRuntime>,
     #[cfg(feature = "router")]
@@ -59,25 +64,94 @@ impl ApplicationContext {
         commands: CommandRegistry,
         events: EventBus,
     ) -> Self {
+        Self::new_with_memory(
+            resources,
+            executor,
+            commands,
+            events,
+            MemoryOptions::default(),
+            #[cfg(feature = "persistent-cache")]
+            None,
+        )
+    }
+
+    pub(super) fn new_with_memory(
+        resources: Resources,
+        executor: Option<UiTaskSpawner>,
+        commands: CommandRegistry,
+        events: EventBus,
+        memory_options: MemoryOptions,
+        #[cfg(feature = "persistent-cache")] persistent_cache: Option<
+            Arc<dyn PersistentCacheStore>,
+        >,
+    ) -> Self {
         #[cfg(feature = "store")]
         let stores = Arc::new(StoreRuntime::new(resources.clone()));
-        Self {
+        let memory = MemoryGovernor::with_store(
+            memory_options,
+            #[cfg(feature = "persistent-cache")]
+            persistent_cache,
+        );
+        let context = Self {
             inner: Arc::new(ApplicationContextInner {
                 resources,
                 executor: RwLock::new(executor),
                 commands,
                 events,
+                memory,
+                memory_registrations: Mutex::new(Vec::new()),
                 #[cfg(feature = "store")]
                 stores,
                 #[cfg(feature = "router")]
                 routers: Mutex::new(HashMap::new()),
                 windows: WindowManager::new(),
             }),
-        }
+        };
+        let registration = context
+            .memory()
+            .register(crate::memory::DomainRegistration::new(
+                crate::memory::CacheDomain::ScrollRaster,
+                context.memory().next_instance_id(),
+                "application:scroll-raster-commands",
+                crate::memory::CacheAdapter::managed(
+                    crate::core::scroll_raster_command_cache_usage,
+                    |request| {
+                        let before =
+                            crate::core::scroll_raster_command_cache_usage().resident_bytes();
+                        crate::core::trim_scroll_raster_command_cache(request.target_bytes);
+                        crate::memory::TrimResult {
+                            before_bytes: before,
+                            after_bytes: crate::core::scroll_raster_command_cache_usage()
+                                .resident_bytes(),
+                        }
+                    },
+                    crate::core::set_scroll_raster_command_cache_budget,
+                ),
+            ));
+        context.retain_memory_registration(registration);
+        context
     }
 
     pub fn resources(&self) -> &Resources {
         &self.inner.resources
+    }
+
+    pub fn memory(&self) -> &MemoryGovernor {
+        &self.inner.memory
+    }
+
+    /// Registers an application-owned cache adapter and retains it for this context's lifetime.
+    pub fn register_memory_domain(&self, registration: DomainRegistration) {
+        let registration = self.memory().register(registration);
+        self.retain_memory_registration(registration);
+    }
+
+    pub(crate) fn retain_memory_registration(&self, registration: CacheRegistration) {
+        self.inner
+            .memory_registrations
+            .lock()
+            .expect("memory registrations poisoned")
+            .push(registration);
     }
 
     pub fn resource<T>(&self) -> Arc<T>

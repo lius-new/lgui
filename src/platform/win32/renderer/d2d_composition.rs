@@ -147,6 +147,51 @@ impl SceneRenderer for D2dRenderer {
         result?;
         Ok(RenderStats::for_frame(frame))
     }
+
+    fn trim(&mut self, pressure: crate::renderer::MemoryPressure) {
+        if let Some(resources) = self.resources.as_mut() {
+            resources.renderer.trim_to(match pressure {
+                crate::renderer::MemoryPressure::Moderate => {
+                    resources.renderer.memory_usage().cache_bytes / 2
+                }
+                crate::renderer::MemoryPressure::Critical => 0,
+            });
+        }
+    }
+
+    fn memory_usage(&self) -> crate::memory::CacheUsage {
+        let Some(resources) = self.resources.as_ref() else {
+            return crate::memory::CacheUsage::default();
+        };
+        let mut usage = resources.renderer.memory_usage();
+        let presentation_bytes = (self.size.0.max(1) as usize)
+            .saturating_mul(self.size.1.max(1) as usize)
+            .saturating_mul(8);
+        usage.live_bytes = usage.live_bytes.saturating_add(presentation_bytes);
+        usage.gpu_estimated_bytes = usage.gpu_estimated_bytes.saturating_add(presentation_bytes);
+        usage.entries = usage.entries.saturating_add(2);
+        usage.largest_entry_bytes = usage
+            .largest_entry_bytes
+            .max(presentation_bytes.saturating_div(2));
+        usage
+    }
+
+    fn set_memory_budget(&mut self, budget_bytes: usize) {
+        if let Some(resources) = self.resources.as_mut() {
+            resources.renderer.set_memory_budget(budget_bytes);
+        }
+    }
+
+    fn trim_to(&mut self, target_bytes: usize) -> usize {
+        self.resources
+            .as_mut()
+            .map_or(0, |resources| resources.renderer.trim_to(target_bytes))
+    }
+
+    fn reset(&mut self) {
+        self.resources = None;
+        self.size = (0, 0);
+    }
 }
 
 struct CompositionResources {

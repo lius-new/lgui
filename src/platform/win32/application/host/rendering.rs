@@ -48,10 +48,15 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
             })
             .collect::<Vec<_>>();
         let scene = commit.scene.project_to_physical(dpi.scale);
+        #[cfg(feature = "images")]
+        crate::assets::update_image_reachability(state.memory_instance, &scene.image_requests());
         let physical_viewport = PhysicalRect::new(0, 0, physical.width, physical.height);
         if state.renderer.is_none() {
             match state.renderer_factory.create(hwnd) {
-                Ok(renderer) => state.renderer = Some(renderer),
+                Ok(mut renderer) => {
+                    renderer.set_memory_budget(state.renderer_budget.load(Ordering::Acquire));
+                    state.renderer = Some(renderer);
+                }
                 Err(source) => {
                     report_render_error(
                         state,
@@ -139,6 +144,17 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
         match result {
             Ok(_stats) => {
                 state.render_retry_used = false;
+                if let Some(renderer) = state.renderer.as_ref() {
+                    *state
+                        .renderer_memory
+                        .lock()
+                        .expect("renderer memory usage poisoned") = renderer.memory_usage();
+                }
+                update_session_memory_usage(state);
+                state
+                    .context
+                    .memory()
+                    .notify(crate::memory::MemoryEvent::FrameCommitted);
                 state.session.runtime().run_effects();
                 #[cfg(feature = "diagnostics")]
                 if let Some(diagnostics) = state.diagnostics.clone() {

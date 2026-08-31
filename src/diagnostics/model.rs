@@ -16,7 +16,7 @@ pub struct SystemUsageSnapshot {
 pub struct ProcessUsageSnapshot {
     pub cpu_percent: Option<f32>,
     pub working_set_mb: Option<f32>,
-    pub pagefile_mb: Option<f32>,
+    pub private_mb: Option<f32>,
 }
 
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]

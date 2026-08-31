@@ -538,11 +538,12 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
         }
     }
     if let UiNodeKind::Image = node.kind {
-        if let Some(source) = node.image_source.as_ref() {
+        if let Some(request) = node.image_request.as_ref() {
             push(ScenePrimitive::Image {
                 id: node.id.clone(),
                 rect: node.layout_rect,
-                source: source.clone(),
+                source: request.source().clone(),
+                request: request.clone(),
                 fit: node.image_fit,
                 phase: node.render_phase,
             });

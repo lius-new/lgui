@@ -5,8 +5,8 @@ use std::{
     collections::{HashMap, VecDeque},
     mem::size_of,
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc, Mutex,
     },
     time::Duration,
 };

@@ -51,6 +51,20 @@ impl GdiRenderer {
         fill_rect(target, rect, self.background);
     }
 
+    pub(crate) fn memory_usage(&self) -> crate::memory::CacheUsage {
+        let live_bytes = self
+            .backbuffer
+            .as_ref()
+            .map_or(0, LayeredBackbuffer::byte_len);
+        crate::memory::CacheUsage {
+            live_bytes,
+            cpu_bytes: live_bytes,
+            entries: usize::from(self.backbuffer.is_some()),
+            largest_entry_bytes: live_bytes,
+            ..Default::default()
+        }
+    }
+
     #[cfg(not(feature = "advanced-rendering"))]
     fn draw_commands(&self, target: HDC, commands: &[ScenePrimitive]) {
         for command in commands {

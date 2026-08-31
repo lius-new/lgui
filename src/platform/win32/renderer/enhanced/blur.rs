@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
     hash::{Hash, Hasher},
+    sync::OnceLock,
     time::Instant,
 };
 
@@ -10,22 +10,63 @@ use lgui::platform::win32::render_trace;
 
 use super::image;
 
-thread_local! {
-    static BLUR_CACHE: RefCell<HashMap<BlurCacheKey, Vec<u8>>> = RefCell::new(HashMap::new());
-    static SOURCE_RASTER_CACHE: RefCell<HashMap<SourceRasterKey, image::RasterImage>> = RefCell::new(HashMap::new());
-    static BLURRED_SOURCE_CACHE: RefCell<HashMap<BlurredSourceKey, image::RasterImage>> = RefCell::new(HashMap::new());
+const DEFAULT_BLUR_RESULT_BUDGET: usize = 12 * 1024 * 1024;
+const DEFAULT_BLUR_SOURCE_BUDGET: usize = 8 * 1024 * 1024;
+const DEFAULT_BLURRED_SOURCE_BUDGET: usize = 12 * 1024 * 1024;
+
+fn blur_telemetry(index: usize) -> &'static crate::memory::CacheTelemetry {
+    static TELEMETRY: OnceLock<[crate::memory::CacheTelemetry; 3]> = OnceLock::new();
+    &TELEMETRY.get_or_init(Default::default)[index]
 }
 
-pub fn clear_blur_caches() {
-    BLUR_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-    SOURCE_RASTER_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-    BLURRED_SOURCE_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
+thread_local! {
+    static BLUR_CACHE: RefCell<crate::memory::LruCache<BlurCacheKey, Vec<u8>>> = RefCell::new(
+        crate::memory::LruCache::new(
+            DEFAULT_BLUR_RESULT_BUDGET,
+            crate::memory::ResourceClass::Cache,
+            blur_telemetry(0).clone(),
+        )
+    );
+    static SOURCE_RASTER_CACHE: RefCell<crate::memory::LruCache<SourceRasterKey, image::RasterImage>> = RefCell::new(
+        crate::memory::LruCache::new(
+            DEFAULT_BLUR_SOURCE_BUDGET,
+            crate::memory::ResourceClass::Cache,
+            blur_telemetry(1).clone(),
+        )
+    );
+    static BLURRED_SOURCE_CACHE: RefCell<crate::memory::LruCache<BlurredSourceKey, image::RasterImage>> = RefCell::new(
+        crate::memory::LruCache::new(
+            DEFAULT_BLURRED_SOURCE_BUDGET,
+            crate::memory::ResourceClass::Cache,
+            blur_telemetry(2).clone(),
+        )
+    );
+}
+
+pub(crate) fn blur_cache_usage() -> crate::memory::CacheUsage {
+    let mut usage = crate::memory::CacheUsage::default();
+    for index in 0..3 {
+        usage.add_assign(blur_telemetry(index).snapshot());
+    }
+    usage
+}
+
+pub(crate) fn trim_blur_caches(target_bytes: usize) -> usize {
+    let result_target = target_bytes.saturating_mul(3) / 8;
+    let source_target = target_bytes / 4;
+    let blurred_target = target_bytes.saturating_sub(result_target + source_target);
+    BLUR_CACHE.with(|cache| cache.borrow_mut().trim_to(result_target))
+        + SOURCE_RASTER_CACHE.with(|cache| cache.borrow_mut().trim_to(source_target))
+        + BLURRED_SOURCE_CACHE.with(|cache| cache.borrow_mut().trim_to(blurred_target))
+}
+
+pub(crate) fn set_blur_cache_budget(budget_bytes: usize) {
+    let result_budget = budget_bytes.saturating_mul(3) / 8;
+    let source_budget = budget_bytes / 4;
+    let blurred_budget = budget_bytes.saturating_sub(result_budget + source_budget);
+    BLUR_CACHE.with(|cache| cache.borrow_mut().set_budget(result_budget));
+    SOURCE_RASTER_CACHE.with(|cache| cache.borrow_mut().set_budget(source_budget));
+    BLURRED_SOURCE_CACHE.with(|cache| cache.borrow_mut().set_budget(blurred_budget));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,7 +160,7 @@ pub fn with_backdrop_blur_bgra<T>(
 
     BLUR_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if !cache.contains_key(&key) {
+        if !cache.contains_touch(&key) {
             trace_blur_miss(rect, width, height, radius);
             let blurred =
                 with_blurred_source(style.source, source_rect, style.fit, style, |source| {
@@ -135,7 +176,13 @@ pub fn with_backdrop_blur_bgra<T>(
                     trace_duration("blur.crop", crop_start.elapsed());
                     Some(blurred)
                 })??;
-            cache.insert(key.clone(), blurred);
+            let bytes = blurred.len();
+            if !cache.can_store(bytes) {
+                let result = draw(&blurred, width, height, style.opacity.clamp(0.0, 1.0));
+                trace_duration("blur.total", total_start.elapsed());
+                return Some(result);
+            }
+            cache.insert(key.clone(), blurred, bytes);
         } else {
             trace_duration("blur.cache_hit", total_start.elapsed());
         }
@@ -163,7 +210,7 @@ fn with_blurred_source<T>(
     };
     BLURRED_SOURCE_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if !cache.contains_key(&key) {
+        if !cache.contains_touch(&key) {
             let source =
                 with_source_raster(source, source_rect, fit, |source| image::RasterImage {
                     width: source.width,
@@ -185,14 +232,16 @@ fn with_blurred_source<T>(
             }
             apply_tint(&mut blurred, style.tint, style.tint_alpha);
             trace_duration("blur.source_tint", tint_start.elapsed());
-            cache.insert(
-                key.clone(),
-                image::RasterImage {
-                    width: source.width,
-                    height: source.height,
-                    premultiplied_bgra: blurred,
-                },
-            );
+            let raster = image::RasterImage {
+                width: source.width,
+                height: source.height,
+                premultiplied_bgra: blurred,
+            };
+            let bytes = raster.premultiplied_bgra.len();
+            if !cache.can_store(bytes) {
+                return Some(read(&raster));
+            }
+            cache.insert(key.clone(), raster, bytes);
         }
         cache.get(&key).map(read)
     })
@@ -211,11 +260,15 @@ fn with_source_raster<T>(
     };
     SOURCE_RASTER_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if !cache.contains_key(&key) {
+        if !cache.contains_touch(&key) {
             let raster_start = Instant::now();
             let raster = image::rasterize_image_bgra(source, source_rect, fit)?;
             trace_duration("blur.rasterize_source", raster_start.elapsed());
-            cache.insert(key.clone(), raster);
+            let bytes = raster.premultiplied_bgra.len();
+            if !cache.can_store(bytes) {
+                return Some(read(&raster));
+            }
+            cache.insert(key.clone(), raster, bytes);
         }
         cache.get(&key).map(read)
     })

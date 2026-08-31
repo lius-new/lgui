@@ -8,6 +8,7 @@ impl ApplicationBackend for Win32Application {
             .platform_options::<Win32WindowOptions>()
             .cloned()
             .unwrap_or_default();
+        let dispatcher = Win32Dispatcher::new();
         #[cfg(feature = "images-win32")]
         let _gdiplus = super::super::super::gdiplus::GdiPlusRuntime::start()?;
         #[cfg(feature = "images-win32")]
@@ -18,8 +19,242 @@ impl ApplicationBackend for Win32Application {
                 .unwrap_or_else(crate::assets::http_image_loader),
         );
         #[cfg(feature = "images-win32")]
-        let _image_cache =
-            crate::assets::install_image_cache(super::super::super::portable_image_cache_handle());
+        let _image_memory_governor =
+            super::super::super::install_image_memory_governor(context.memory().clone());
+        #[cfg(feature = "images-win32")]
+        let image_cache_handle = super::super::super::portable_image_cache_handle();
+        #[cfg(feature = "images-win32")]
+        image_cache_handle.set_budget(
+            context
+                .memory()
+                .options()
+                .budget
+                .cpu_cache_soft_bytes
+                .min(64 * 1024 * 1024),
+        );
+        #[cfg(feature = "images-win32")]
+        let _image_cache = crate::assets::install_image_cache(image_cache_handle.clone());
+        #[cfg(feature = "images-win32")]
+        {
+            let stats_cache = image_cache_handle.clone();
+            let trim_cache = image_cache_handle.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::EncodedImage,
+                    context.memory().next_instance_id(),
+                    "application:win32-images",
+                    crate::memory::CacheAdapter::managed(
+                        move || {
+                            let stats = stats_cache.stats();
+                            crate::memory::CacheUsage {
+                                cache_bytes: stats.resident_bytes,
+                                cpu_bytes: stats.resident_bytes,
+                                entries: stats.entries,
+                                hits: stats.hits,
+                                misses: stats.misses,
+                                evictions: stats.evictions,
+                                largest_entry_bytes: stats.largest_entry_bytes,
+                                in_flight: stats.in_flight,
+                                ..Default::default()
+                            }
+                        },
+                        move |request| {
+                            let before = trim_cache.stats().resident_bytes;
+                            trim_cache.trim_to(request.target_bytes);
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: trim_cache.stats().resident_bytes,
+                            }
+                        },
+                        {
+                            let cache = image_cache_handle.clone();
+                            move |budget| cache.set_budget(budget)
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
+        }
+        #[cfg(feature = "images-win32")]
+        {
+            let trim_dispatcher = dispatcher.clone();
+            let budget_dispatcher = dispatcher.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::DecodedImage,
+                    context.memory().next_instance_id(),
+                    "application:win32-gdiplus-images",
+                    crate::memory::CacheAdapter::managed(
+                        super::super::super::decoded_image_cache_usage,
+                        move |request| {
+                            let before =
+                                super::super::super::decoded_image_cache_usage().resident_bytes();
+                            trim_dispatcher.post(move || {
+                                super::super::super::trim_decoded_image_cache(request.target_bytes);
+                            });
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        move |budget| {
+                            budget_dispatcher.post(move || {
+                                super::super::super::set_decoded_image_cache_budget(budget);
+                            });
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
+        }
+        #[cfg(feature = "renderer-d2d")]
+        {
+            let trim_dispatcher = dispatcher.clone();
+            let budget_dispatcher = dispatcher.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::DecodedImage,
+                    context.memory().next_instance_id(),
+                    "application:win32-enhanced-images",
+                    crate::memory::CacheAdapter::managed(
+                        super::super::super::enhanced::image::decoded_image_cache_usage,
+                        move |request| {
+                            let before = super::super::super::enhanced::image::decoded_image_cache_usage()
+                                .resident_bytes();
+                            trim_dispatcher.post(move || {
+                                super::super::super::enhanced::image::trim_decoded_image_cache(
+                                    request.target_bytes,
+                                );
+                            });
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        move |budget| {
+                            budget_dispatcher.post(move || {
+                                super::super::super::enhanced::image::set_decoded_image_cache_budget(
+                                    budget,
+                                );
+                            });
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
+        }
+        #[cfg(feature = "renderer-d2d")]
+        {
+            let trim_dispatcher = dispatcher.clone();
+            let budget_dispatcher = dispatcher.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::Blur,
+                    context.memory().next_instance_id(),
+                    "application:win32-blur",
+                    crate::memory::CacheAdapter::managed(
+                        super::super::super::enhanced::blur::blur_cache_usage,
+                        move |request| {
+                            let before = super::super::super::enhanced::blur::blur_cache_usage()
+                                .resident_bytes();
+                            trim_dispatcher.post(move || {
+                                super::super::super::enhanced::blur::trim_blur_caches(
+                                    request.target_bytes,
+                                );
+                            });
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        move |budget| {
+                            budget_dispatcher.post(move || {
+                                super::super::super::enhanced::blur::set_blur_cache_budget(budget);
+                            });
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
+        }
+        #[cfg(feature = "advanced-rendering")]
+        {
+            let trim_dispatcher = dispatcher.clone();
+            let budget_dispatcher = dispatcher.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::StaticLayer,
+                    context.memory().next_instance_id(),
+                    "application:win32-static-layer",
+                    crate::memory::CacheAdapter::managed(
+                        || {
+                            let stats = super::super::super::enhanced::static_layer::static_layer_memory_cache_stats();
+                            crate::memory::CacheUsage {
+                                cache_bytes: stats.bytes,
+                                cpu_bytes: stats.bytes,
+                                entries: stats.entry_count,
+                                hits: stats.hits,
+                                misses: stats.misses,
+                                evictions: stats.evictions,
+                                ..Default::default()
+                            }
+                        },
+                        move |request| {
+                            let before = super::super::super::enhanced::static_layer::static_layer_memory_cache_stats().bytes;
+                            trim_dispatcher.post(move || {
+                                super::super::super::enhanced::static_layer::trim_static_layer_memory_cache(request.target_bytes);
+                            });
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        move |budget| {
+                            budget_dispatcher.post(move || {
+                                super::super::super::enhanced::static_layer::set_static_layer_memory_cache_budget(budget);
+                            });
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
+        }
+        #[cfg(feature = "advanced-rendering")]
+        {
+            let trim_dispatcher = dispatcher.clone();
+            let budget_dispatcher = dispatcher.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::Gdi,
+                    context.memory().next_instance_id(),
+                    "application:win32-gdi-shared",
+                    crate::memory::CacheAdapter::managed(
+                        super::super::super::enhanced::gdi_renderer_cache_usage,
+                        move |request| {
+                            let before = super::super::super::enhanced::gdi_renderer_cache_usage()
+                                .resident_bytes();
+                            trim_dispatcher.post(move || {
+                                super::super::super::enhanced::trim_gdi_renderer_caches(
+                                    request.target_bytes,
+                                );
+                            });
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        move |budget| {
+                            budget_dispatcher.post(move || {
+                                super::super::super::enhanced::set_gdi_renderer_cache_budget(
+                                    budget,
+                                );
+                            });
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
+        }
         #[cfg(feature = "advanced-rendering")]
         let _render_cache = crate::renderer::install_render_cache(
             super::super::super::enhanced::portable_render_cache_handle(),
@@ -35,6 +270,40 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "svg")]
         if let Some(registration) = context.try_resource::<crate::icons::IconRegistration>() {
             let _ = super::super::super::install_svg_icon_registry((*registration.0).clone());
+        }
+        #[cfg(feature = "svg")]
+        {
+            let trim_dispatcher = dispatcher.clone();
+            let budget_dispatcher = dispatcher.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::Svg,
+                    context.memory().next_instance_id(),
+                    "application:win32-svg",
+                    crate::memory::CacheAdapter::managed(
+                        super::super::super::svg::svg_bitmap_cache_usage,
+                        move |request| {
+                            let before =
+                                super::super::super::svg::svg_bitmap_cache_usage().resident_bytes();
+                            trim_dispatcher.post(move || {
+                                super::super::super::svg::trim_svg_bitmap_cache(
+                                    request.target_bytes,
+                                );
+                            });
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: before,
+                            }
+                        },
+                        move |budget| {
+                            budget_dispatcher.post(move || {
+                                super::super::super::svg::set_svg_bitmap_cache_budget(budget);
+                            });
+                        },
+                    ),
+                ));
+            context.retain_memory_registration(registration);
         }
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -68,7 +337,6 @@ impl ApplicationBackend for Win32Application {
             icons: class_icons,
         };
 
-        let dispatcher = Win32Dispatcher::new();
         context.resources().provide(dispatcher.application_handle());
         let factory = Arc::clone(&self.renderer_factory);
         let main_id = options.id.clone();
@@ -154,6 +422,9 @@ impl ApplicationBackend for Win32Application {
         if let Some(host) = tray_host.as_mut() {
             host.shutdown();
         }
+        context
+            .memory()
+            .notify(crate::memory::MemoryEvent::ApplicationShutdown);
         STATE.with(|state| state.borrow_mut().clear());
         Ok(())
     }
@@ -233,6 +504,9 @@ pub(super) fn execute_window_command(
         }
         WindowCommand::SetScalePreference(preference) => {
             set_scale_preference(preference);
+            context
+                .memory()
+                .notify(crate::memory::MemoryEvent::ThemeOrScaleChanged);
             let windows = STATE.with(|state| {
                 state
                     .borrow()

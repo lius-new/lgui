@@ -29,9 +29,9 @@ impl GdiPlusRuntime {
 impl Drop for GdiPlusRuntime {
     fn drop(&mut self) {
         // Every cached GpImage must be disposed before the process-wide GDI+ token is released.
-        super::clear_cached_decoded_image_cache();
+        super::trim_decoded_image_cache(0);
         #[cfg(any(feature = "advanced-rendering", feature = "renderer-d2d"))]
-        super::enhanced::image::clear_decoded_image_cache();
+        super::enhanced::image::trim_decoded_image_cache(0);
         unsafe {
             GdiplusShutdown(self.token);
         }

@@ -6,6 +6,7 @@ pub struct Scene {
 }
 
 const SCROLL_RASTER_COMMAND_CACHE_LIMIT: usize = 8;
+const DEFAULT_SCROLL_RASTER_COMMAND_CACHE_BUDGET: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ScrollRasterCommandCacheKey {
@@ -23,12 +24,31 @@ struct ScrollRasterCommandSnapshot {
     commands: Vec<ScenePrimitive>,
     child_signature: u64,
     last_used: u64,
+    bytes: usize,
 }
 
-#[derive(Default)]
 struct ScrollRasterCommandCache {
     entries: HashMap<ScrollRasterCommandCacheKey, ScrollRasterCommandSnapshot>,
     tick: u64,
+    bytes: usize,
+    budget_bytes: usize,
+    hits: u64,
+    misses: u64,
+    evictions: u64,
+}
+
+impl Default for ScrollRasterCommandCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            tick: 0,
+            bytes: 0,
+            budget_bytes: DEFAULT_SCROLL_RASTER_COMMAND_CACHE_BUDGET,
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+        }
+    }
 }
 
 fn scroll_raster_command_cache() -> &'static Mutex<ScrollRasterCommandCache> {
@@ -36,11 +56,43 @@ fn scroll_raster_command_cache() -> &'static Mutex<ScrollRasterCommandCache> {
     CACHE.get_or_init(|| Mutex::new(ScrollRasterCommandCache::default()))
 }
 
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub(crate) fn clear_scroll_raster_command_cache() {
-    *scroll_raster_command_cache()
+pub(crate) fn scroll_raster_command_cache_usage() -> crate::memory::CacheUsage {
+    let cache = scroll_raster_command_cache()
         .lock()
-        .expect("scroll raster command cache poisoned") = ScrollRasterCommandCache::default();
+        .expect("scroll raster command cache poisoned");
+    crate::memory::CacheUsage {
+        rebuildable_bytes: cache.bytes,
+        cpu_bytes: cache.bytes,
+        entries: cache.entries.len(),
+        hits: cache.hits,
+        misses: cache.misses,
+        evictions: cache.evictions,
+        largest_entry_bytes: cache
+            .entries
+            .values()
+            .map(|entry| entry.bytes)
+            .max()
+            .unwrap_or(0),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn trim_scroll_raster_command_cache(target_bytes: usize) -> usize {
+    let mut cache = scroll_raster_command_cache()
+        .lock()
+        .expect("scroll raster command cache poisoned");
+    let before = cache.bytes;
+    evict_scroll_raster_commands(&mut cache, target_bytes, SCROLL_RASTER_COMMAND_CACHE_LIMIT);
+    before.saturating_sub(cache.bytes)
+}
+
+pub(crate) fn set_scroll_raster_command_cache_budget(budget_bytes: usize) {
+    let mut cache = scroll_raster_command_cache()
+        .lock()
+        .expect("scroll raster command cache poisoned");
+    cache.budget_bytes = budget_bytes.max(1);
+    let budget = cache.budget_bytes;
+    evict_scroll_raster_commands(&mut cache, budget, SCROLL_RASTER_COMMAND_CACHE_LIMIT);
 }
 
 impl Scene {
@@ -56,6 +108,16 @@ impl Scene {
 
     pub fn commands(&self) -> &[ScenePrimitive] {
         self.commands.as_slice()
+    }
+
+    pub fn image_requests(&self) -> Vec<ImageRequest> {
+        let mut requests = Vec::new();
+        collect_image_requests(self.commands(), &mut requests);
+        requests
+    }
+
+    pub fn estimated_bytes(&self) -> usize {
+        estimate_scene_commands_bytes(self.commands())
     }
 
     pub(super) fn move_popup_commands_to_end(&mut self) {
@@ -106,6 +168,22 @@ impl Scene {
                     .map(|command| project_command(command, scale))
                     .collect(),
             ),
+        }
+    }
+}
+
+fn collect_image_requests(commands: &[ScenePrimitive], requests: &mut Vec<ImageRequest>) {
+    for command in commands {
+        match command {
+            ScenePrimitive::Image { request, .. } => requests.push(request.clone()),
+            ScenePrimitive::CompositingLayer { commands, .. }
+            | ScenePrimitive::StaticLayer { commands, .. }
+            | ScenePrimitive::ScrollRaster { commands, .. }
+            | ScenePrimitive::Clip { commands, .. }
+            | ScenePrimitive::ClipPath { commands, .. } => {
+                collect_image_requests(commands, requests);
+            }
+            _ => {}
         }
     }
 }
@@ -221,12 +299,14 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
             id,
             rect,
             source,
+            request,
             fit,
             phase,
         } => ScenePrimitive::Image {
             id: id.clone(),
             rect: scale.physical_ui_rect(*rect),
             source: source.clone(),
+            request: request.clone(),
             fit: *fit,
             phase: *phase,
         },
@@ -457,7 +537,15 @@ pub(super) fn load_scroll_raster_command_snapshot(
         .expect("scroll raster command cache poisoned");
     cache.tick = cache.tick.saturating_add(1);
     let tick = cache.tick;
-    let snapshot = cache.entries.get_mut(&key)?;
+    if !cache.entries.contains_key(&key) {
+        cache.misses = cache.misses.saturating_add(1);
+        return None;
+    }
+    cache.hits = cache.hits.saturating_add(1);
+    let snapshot = cache
+        .entries
+        .get_mut(&key)
+        .expect("scroll raster command cache key vanished");
     snapshot.last_used = tick;
     Some((snapshot.commands.clone(), snapshot.child_signature))
 }
@@ -482,20 +570,38 @@ pub(super) fn store_scroll_raster_command_snapshot(
     child_signature: u64,
 ) {
     let key = scroll_raster_command_cache_key(node, spec);
+    let bytes = estimate_scene_commands_bytes(&commands);
     let mut cache = scroll_raster_command_cache()
         .lock()
         .expect("scroll raster command cache poisoned");
+    if bytes > cache.budget_bytes {
+        return;
+    }
     cache.tick = cache.tick.saturating_add(1);
     let tick = cache.tick;
+    if let Some(previous) = cache.entries.remove(&key) {
+        cache.bytes = cache.bytes.saturating_sub(previous.bytes);
+    }
+    cache.bytes = cache.bytes.saturating_add(bytes);
     cache.entries.insert(
         key,
         ScrollRasterCommandSnapshot {
             commands,
             child_signature,
             last_used: tick,
+            bytes,
         },
     );
-    while cache.entries.len() > SCROLL_RASTER_COMMAND_CACHE_LIMIT {
+    let budget = cache.budget_bytes;
+    evict_scroll_raster_commands(&mut cache, budget, SCROLL_RASTER_COMMAND_CACHE_LIMIT);
+}
+
+fn evict_scroll_raster_commands(
+    cache: &mut ScrollRasterCommandCache,
+    target_bytes: usize,
+    target_entries: usize,
+) {
+    while cache.bytes > target_bytes || cache.entries.len() > target_entries {
         let Some(oldest_key) = cache
             .entries
             .iter()
@@ -504,7 +610,41 @@ pub(super) fn store_scroll_raster_command_snapshot(
         else {
             break;
         };
-        cache.entries.remove(&oldest_key);
+        if let Some(entry) = cache.entries.remove(&oldest_key) {
+            cache.bytes = cache.bytes.saturating_sub(entry.bytes);
+            cache.evictions = cache.evictions.saturating_add(1);
+        }
+    }
+}
+
+pub(crate) fn estimate_scene_commands_bytes(commands: &[ScenePrimitive]) -> usize {
+    std::mem::size_of_val(commands).saturating_add(
+        commands
+            .iter()
+            .map(estimate_scene_primitive_dynamic_bytes)
+            .sum::<usize>(),
+    )
+}
+
+fn estimate_scene_primitive_dynamic_bytes(command: &ScenePrimitive) -> usize {
+    match command {
+        ScenePrimitive::Text { text, .. } => text.len(),
+        ScenePrimitive::Path { path, .. } | ScenePrimitive::BackdropBlurPath { path, .. } => path
+            .commands()
+            .len()
+            .saturating_mul(std::mem::size_of::<UiPathCommand>()),
+        ScenePrimitive::Image { source, .. } => match source {
+            UiImageSource::Bytes { bytes, key, .. } => bytes.len().saturating_add(key.len()),
+            UiImageSource::Url(value) => value.len(),
+            UiImageSource::File(value) => value.as_os_str().len(),
+            UiImageSource::Static(value) => value.len(),
+        },
+        ScenePrimitive::CompositingLayer { commands, .. }
+        | ScenePrimitive::StaticLayer { commands, .. }
+        | ScenePrimitive::ScrollRaster { commands, .. }
+        | ScenePrimitive::Clip { commands, .. }
+        | ScenePrimitive::ClipPath { commands, .. } => estimate_scene_commands_bytes(commands),
+        _ => 0,
     }
 }
 

@@ -101,6 +101,7 @@ fn pixel(surface: &SkiaSoftwareSurface, x: usize, y: usize) -> [u8; 4] {
 fn primitive_inventory() -> Vec<ScenePrimitive> {
     let rect = UiRect::new(4.0, 4.0, 20.0, 20.0);
     let child = vec![rect_command("child", rect, Color(0x33AAEE))];
+    let image_source = UiImageSource::bytes("test.pixel", 1, Arc::new(PIXEL_PNG.to_vec()));
     vec![
         rect_command("rect", rect, Color(0xFF0000)),
         ScenePrimitive::Ellipse {
@@ -140,7 +141,8 @@ fn primitive_inventory() -> Vec<ScenePrimitive> {
         ScenePrimitive::Image {
             id: test_id("image"),
             rect,
-            source: UiImageSource::bytes("test.pixel", 1, Arc::new(PIXEL_PNG.to_vec())),
+            source: image_source.clone(),
+            request: crate::core::ImageRequest::new(image_source),
             fit: ImageFit::Fill,
             phase: RenderPhase::Content,
         },
@@ -279,6 +281,43 @@ fn cache_is_byte_bounded() {
     cache.insert("second".to_owned(), second);
     assert!(cache.resident_bytes <= cache.budget_bytes);
     assert_eq!(cache.entries.len(), 1);
+}
+
+#[test]
+fn raster_policy_evicts_shorter_retention_then_lower_priority() {
+    let image = || layer_surface(4.0, 4.0).unwrap().image_snapshot();
+    let mut cache = SkiaCache::new(4 * 4 * 4 * 4);
+    cache.insert_with_policy(
+        "frame-high".to_owned(),
+        image(),
+        crate::memory::RetentionClass::Frame,
+        crate::memory::CachePriority::High,
+    );
+    cache.insert_with_policy(
+        "scene-low".to_owned(),
+        image(),
+        crate::memory::RetentionClass::Scene,
+        crate::memory::CachePriority::Low,
+    );
+    cache.insert_with_policy(
+        "scene-high".to_owned(),
+        image(),
+        crate::memory::RetentionClass::Scene,
+        crate::memory::CachePriority::High,
+    );
+    cache.insert_with_policy(
+        "session-low".to_owned(),
+        image(),
+        crate::memory::RetentionClass::Session,
+        crate::memory::CachePriority::Low,
+    );
+
+    cache.set_budget(2 * 4 * 4 * 4);
+
+    assert!(!cache.entries.contains_key("frame-high"));
+    assert!(!cache.entries.contains_key("scene-low"));
+    assert!(cache.entries.contains_key("scene-high"));
+    assert!(cache.entries.contains_key("session-low"));
 }
 
 #[test]

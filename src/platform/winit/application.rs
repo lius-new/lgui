@@ -79,13 +79,57 @@ impl ApplicationBackend for WinitApplication {
                 .map(|loader| (*loader).clone())
                 .unwrap_or_else(crate::assets::http_image_loader);
             let image_wake = application_handle.clone();
-            context
-                .resources()
-                .provide(crate::assets::async_image_cache(
-                    loader,
-                    move || image_wake.request_frame(),
-                    64 * 1024 * 1024,
+            let budget = context
+                .memory()
+                .options()
+                .budget
+                .cpu_cache_soft_bytes
+                .min(64 * 1024 * 1024);
+            let cache = crate::assets::async_image_cache(
+                loader,
+                move || image_wake.request_frame(),
+                budget,
+                context.memory().clone(),
+            );
+            let stats_cache = cache.clone();
+            let trim_cache = cache.clone();
+            let registration = context
+                .memory()
+                .register(crate::memory::DomainRegistration::new(
+                    crate::memory::CacheDomain::EncodedImage,
+                    context.memory().next_instance_id(),
+                    "application:winit-images",
+                    crate::memory::CacheAdapter::managed(
+                        move || {
+                            let stats = stats_cache.stats();
+                            crate::memory::CacheUsage {
+                                cache_bytes: stats.resident_bytes,
+                                cpu_bytes: stats.resident_bytes,
+                                entries: stats.entries,
+                                hits: stats.hits,
+                                misses: stats.misses,
+                                evictions: stats.evictions,
+                                largest_entry_bytes: stats.largest_entry_bytes,
+                                in_flight: stats.in_flight,
+                                ..Default::default()
+                            }
+                        },
+                        move |request| {
+                            let before = trim_cache.stats().resident_bytes;
+                            trim_cache.trim_to(request.target_bytes);
+                            crate::memory::TrimResult {
+                                before_bytes: before,
+                                after_bytes: trim_cache.stats().resident_bytes,
+                            }
+                        },
+                        {
+                            let cache = cache.clone();
+                            move |budget| cache.set_budget(budget)
+                        },
+                    ),
                 ));
+            context.retain_memory_registration(registration);
+            context.resources().provide(cache);
         }
         #[cfg(feature = "store")]
         context.stores().set_wake({
@@ -126,6 +170,7 @@ impl ApplicationBackend for WinitApplication {
             #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             tray_host: None,
             exit_requested: false,
+            backgrounded: false,
         };
         event_loop.run_app(&mut handler)?;
         Ok(())

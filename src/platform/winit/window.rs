@@ -21,6 +21,13 @@ pub(super) struct WinitWindow {
     pub(super) next_frame: Option<Instant>,
     pub(super) full_redraw: bool,
     pub(super) recovery: RendererRecoveryState,
+    pub(super) memory_instance: crate::memory::DomainInstanceId,
+    pub(super) memory_usage: Arc<Mutex<crate::memory::CacheUsage>>,
+    pub(super) _memory_registration: crate::memory::CacheRegistration,
+    pub(super) component_memory: Arc<Mutex<crate::memory::CacheUsage>>,
+    pub(super) host_scene_memory: Arc<Mutex<crate::memory::CacheUsage>>,
+    pub(super) _component_registration: crate::memory::CacheRegistration,
+    pub(super) _host_scene_registration: crate::memory::CacheRegistration,
     #[cfg(feature = "diagnostics")]
     pub(super) diagnostics: Option<Arc<DiagnosticsRegistration>>,
     #[cfg(feature = "diagnostics")]
@@ -71,8 +78,7 @@ impl WinitWindow {
                     focused,
                 )));
                 if !focused && self.options.hide_on_deactivate {
-                    self.visible = false;
-                    self.window.set_visible(false);
+                    self.set_desired_visibility(false);
                 }
             }
             WindowEvent::ThemeChanged(theme) => self.dispatch_input(InputEvent::Platform(
@@ -377,6 +383,11 @@ impl WinitWindow {
                 })
                 .collect::<Vec<_>>()
         };
+        #[cfg(feature = "images")]
+        crate::assets::update_image_reachability(
+            self.memory_instance,
+            &commit.scene.image_requests(),
+        );
         if damage.is_empty() && !self.full_redraw {
             self.schedule_next_frame();
             return;
@@ -445,6 +456,10 @@ impl WinitWindow {
             },
             _ => RendererRecoveryState::Healthy,
         };
+        self.update_memory_usage();
+        self.context
+            .memory()
+            .notify(crate::memory::MemoryEvent::FrameCommitted);
         #[cfg(feature = "diagnostics")]
         if let Some(diagnostics) = self.diagnostics.clone() {
             self.frame_index = self.frame_index.wrapping_add(1);
@@ -565,6 +580,12 @@ impl WinitWindow {
             &self.soft_context,
             Arc::clone(&self.window),
             self.options.transparent,
+            self.context
+                .memory()
+                .options()
+                .budget
+                .native_cache_soft_bytes
+                .min(DEFAULT_CACHE_BUDGET),
         ) {
             Ok(mut renderer) => {
                 if fallback_to_software {
@@ -572,6 +593,7 @@ impl WinitWindow {
                 }
                 let fallback_reason = renderer.fallback_reason();
                 self.renderer = renderer;
+                self.update_memory_usage();
                 if let Some(reason) = fallback_reason {
                     self.recovery = RendererRecoveryState::Fallback {
                         reason,
@@ -600,6 +622,126 @@ impl WinitWindow {
                 }
             }
         }
+    }
+
+    pub(super) fn set_desired_visibility(&mut self, visible: bool) {
+        self.visible = visible;
+        self.apply_visibility();
+    }
+
+    pub(super) fn set_owner_suppressed(&mut self, suppressed: bool) {
+        self.owner_suppressed = suppressed;
+        self.apply_visibility();
+    }
+
+    fn apply_visibility(&mut self) {
+        let effective = self.visible && !self.owner_suppressed;
+        self.window.set_visible(effective);
+        if effective {
+            self.full_redraw = true;
+            self.session.invalidate_all();
+            self.window.request_redraw();
+        } else {
+            self.suspend_rendering(false);
+        }
+    }
+
+    pub(super) fn suspend_rendering(&mut self, force: bool) {
+        if force || self.options.background_memory_optimization {
+            #[cfg(feature = "images")]
+            crate::assets::update_image_reachability(self.memory_instance, &[]);
+            self.renderer.trim(MemoryPressure::Critical);
+            self.session.suspend_rendering();
+            self.update_memory_usage();
+        }
+    }
+
+    pub(super) fn apply_memory_trim(
+        &mut self,
+        domain: crate::memory::CacheDomain,
+        request: crate::memory::TrimRequest,
+    ) {
+        match domain {
+            crate::memory::CacheDomain::Skia => {
+                let pressure = match request.reason {
+                    crate::memory::TrimReason::SoftBudget
+                    | crate::memory::TrimReason::ModeratePressure => MemoryPressure::Moderate,
+                    _ => MemoryPressure::Critical,
+                };
+                self.renderer.trim(pressure);
+            }
+            crate::memory::CacheDomain::ComponentOutput => {
+                self.session.trim_component_outputs(request.target_bytes);
+                self.full_redraw = true;
+                self.window.request_redraw();
+            }
+            crate::memory::CacheDomain::HostScene if should_trim_host_scene(request) => {
+                self.session.trim_host_scene();
+                self.full_redraw = true;
+                self.window.request_redraw();
+            }
+            _ => {}
+        }
+        self.update_memory_usage();
+    }
+
+    pub(super) fn set_memory_budget(&mut self, budget_bytes: usize) {
+        self.renderer.set_cache_budget(budget_bytes);
+        self.update_memory_usage();
+    }
+
+    fn update_memory_usage(&self) {
+        let stats = self.renderer.cache_stats();
+        let gpu_bytes = if self.renderer.is_gpu() {
+            stats.resident_bytes.saturating_mul(2) / 3
+        } else {
+            0
+        };
+        *self
+            .memory_usage
+            .lock()
+            .expect("Skia memory usage poisoned") = crate::memory::CacheUsage {
+            cache_bytes: stats.resident_bytes,
+            cpu_bytes: stats.resident_bytes.saturating_sub(gpu_bytes),
+            gpu_estimated_bytes: gpu_bytes,
+            entries: stats.entries.saturating_add(stats.text_entries),
+            hits: stats.hits.saturating_add(stats.text_hits),
+            misses: stats.misses.saturating_add(stats.text_misses),
+            evictions: stats.evictions.saturating_add(stats.text_evictions),
+            largest_entry_bytes: stats
+                .largest_entry_bytes
+                .max(stats.largest_text_entry_bytes),
+            ..Default::default()
+        };
+        let (component, host_scene) = self.session.memory_usage();
+        *self
+            .component_memory
+            .lock()
+            .expect("component memory usage poisoned") = component;
+        *self
+            .host_scene_memory
+            .lock()
+            .expect("host scene memory usage poisoned") = host_scene;
+    }
+}
+
+fn should_trim_host_scene(request: crate::memory::TrimRequest) -> bool {
+    request.scope == crate::memory::CacheScope::AllRebuildable
+        || matches!(
+            request.reason,
+            crate::memory::TrimReason::WindowHidden
+                | crate::memory::TrimReason::AllWindowsHidden
+                | crate::memory::TrimReason::SessionUnmounted
+                | crate::memory::TrimReason::CriticalPressure
+                | crate::memory::TrimReason::Explicit
+                | crate::memory::TrimReason::Shutdown
+        )
+}
+
+impl Drop for WinitWindow {
+    fn drop(&mut self) {
+        #[cfg(feature = "images")]
+        crate::assets::update_image_reachability(self.memory_instance, &[]);
     }
 }
 

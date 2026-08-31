@@ -8,6 +8,7 @@ pub struct D2dRenderer {
     pub(super) overlay_brush_cache: HashMap<D2dOverlayBrushCacheKey, D2dOverlayBrushSet>,
     pub(super) frame_bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
     pub(super) compositing_layers: HashMap<UiId, D2dCompositingLayer>,
+    pub(super) scene_bytes: usize,
 }
 
 pub(super) const D2D_BITMAP_CACHE_MIN_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -33,6 +34,8 @@ pub(super) struct D2dBitmapCacheEntry {
     pub(super) bitmap: ID2D1Bitmap1,
     pub(super) bytes: usize,
     pub(super) last_used: u64,
+    pub(super) retention: crate::memory::RetentionClass,
+    pub(super) priority: crate::memory::CachePriority,
 }
 
 pub(super) struct D2dBitmapCache {
@@ -40,6 +43,9 @@ pub(super) struct D2dBitmapCache {
     pub(super) bytes: usize,
     pub(super) tick: u64,
     pub(super) budget_bytes: usize,
+    pub(super) hits: u64,
+    pub(super) misses: u64,
+    pub(super) evictions: u64,
 }
 
 impl D2dBitmapCache {
@@ -49,6 +55,9 @@ impl D2dBitmapCache {
             bytes: 0,
             tick: 0,
             budget_bytes: budget_bytes.max(1),
+            hits: 0,
+            misses: 0,
+            evictions: 0,
         }
     }
 
@@ -66,12 +75,31 @@ impl D2dBitmapCache {
 
     pub(super) fn get(&mut self, key: &D2dBitmapCacheKey) -> Option<ID2D1Bitmap1> {
         self.tick = self.tick.saturating_add(1);
-        let entry = self.entries.get_mut(key)?;
+        let Some(entry) = self.entries.get_mut(key) else {
+            self.misses = self.misses.saturating_add(1);
+            return None;
+        };
+        self.hits = self.hits.saturating_add(1);
         entry.last_used = self.tick;
         Some(entry.bitmap.clone())
     }
 
     pub(super) fn insert(&mut self, key: D2dBitmapCacheKey, bitmap: ID2D1Bitmap1) {
+        self.insert_with_policy(
+            key,
+            bitmap,
+            crate::memory::RetentionClass::Session,
+            crate::memory::CachePriority::Normal,
+        );
+    }
+
+    pub(super) fn insert_with_policy(
+        &mut self,
+        key: D2dBitmapCacheKey,
+        bitmap: ID2D1Bitmap1,
+        retention: crate::memory::RetentionClass,
+        priority: crate::memory::CachePriority,
+    ) {
         self.tick = self.tick.saturating_add(1);
         let bytes = key.estimated_bytes();
         if let Some(previous) = self.entries.remove(&key) {
@@ -84,41 +112,79 @@ impl D2dBitmapCache {
                 bitmap,
                 bytes,
                 last_used: self.tick,
+                retention,
+                priority,
             },
         );
     }
 
     pub(super) fn evict_to_budget(&mut self) {
-        let evictions = bitmap_cache_eviction_plan(
-            self.entries
-                .iter()
-                .map(|(key, entry)| (key.clone(), entry.last_used, entry.bytes)),
-            self.bytes,
-            self.budget_bytes,
-        );
+        let evictions = self.eviction_plan(self.budget_bytes);
         for key in evictions {
             if let Some(entry) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(entry.bytes);
+                self.evictions = self.evictions.saturating_add(1);
             }
         }
     }
+
+    pub(super) fn set_budget(&mut self, budget_bytes: usize) {
+        self.budget_bytes = budget_bytes.max(1);
+        self.evict_to_budget();
+    }
+
+    pub(super) fn trim_to(&mut self, target_bytes: usize) -> usize {
+        let before = self.bytes;
+        let target = target_bytes.min(self.budget_bytes);
+        let evictions = self.eviction_plan(target);
+        for key in evictions {
+            if let Some(entry) = self.entries.remove(&key) {
+                self.bytes = self.bytes.saturating_sub(entry.bytes);
+                self.evictions = self.evictions.saturating_add(1);
+            }
+        }
+        before.saturating_sub(self.bytes)
+    }
+
+    fn eviction_plan(&self, target: usize) -> Vec<D2dBitmapCacheKey> {
+        let mut entries = self.entries.iter().collect::<Vec<_>>();
+        entries.sort_by_key(|(_, entry)| (entry.retention, entry.priority, entry.last_used));
+        let mut bytes = self.bytes;
+        let mut evictions = Vec::new();
+        for (key, entry) in entries {
+            if bytes <= target {
+                break;
+            }
+            bytes = bytes.saturating_sub(entry.bytes);
+            evictions.push(key.clone());
+        }
+        evictions
+    }
 }
 
+#[cfg(test)]
 pub(super) fn bitmap_cache_eviction_plan(
-    entries: impl IntoIterator<Item = (D2dBitmapCacheKey, u64, usize)>,
+    entries: impl IntoIterator<
+        Item = (
+            D2dBitmapCacheKey,
+            crate::memory::RetentionClass,
+            crate::memory::CachePriority,
+            u64,
+            usize,
+        ),
+    >,
     mut bytes: usize,
     budget_bytes: usize,
 ) -> Vec<D2dBitmapCacheKey> {
     let mut entries = entries.into_iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(_, last_used, _)| *last_used);
+    entries
+        .sort_by_key(|(_, retention, priority, last_used, _)| (*retention, *priority, *last_used));
     let mut evictions = Vec::new();
-    let mut remaining = entries.len();
-    for (key, _, entry_bytes) in entries {
-        if bytes <= budget_bytes || remaining <= 1 {
+    for (key, _, _, _, entry_bytes) in entries {
+        if bytes <= budget_bytes {
             break;
         }
         bytes = bytes.saturating_sub(entry_bytes);
-        remaining -= 1;
         evictions.push(key);
     }
     evictions

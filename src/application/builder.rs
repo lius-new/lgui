@@ -4,8 +4,12 @@ use crate::{
     command::{Command, CommandHandler, CommandRegistry},
     core::{Element, RenderCx, UiExecutor, UiTaskSpawner},
     events::EventBus,
+    memory::MemoryOptions,
     resources::Resources,
 };
+
+#[cfg(feature = "persistent-cache")]
+use crate::memory::PersistentCacheStore;
 
 use super::{
     application_root_view, AppView, ApplicationBackend, ApplicationContext, RenderError,
@@ -39,6 +43,9 @@ pub struct Application<B> {
     executor: Option<UiTaskSpawner>,
     commands: CommandRegistry,
     events: EventBus,
+    memory_options: MemoryOptions,
+    #[cfg(feature = "persistent-cache")]
+    persistent_cache: Option<Arc<dyn PersistentCacheStore>>,
 }
 
 impl<B> Application<B> {
@@ -50,6 +57,9 @@ impl<B> Application<B> {
             executor: None,
             commands: CommandRegistry::default(),
             events: EventBus::default(),
+            memory_options: MemoryOptions::default(),
+            #[cfg(feature = "persistent-cache")]
+            persistent_cache: None,
         }
     }
 
@@ -68,6 +78,17 @@ impl<B> Application<B> {
 
     pub fn executor(mut self, executor: impl UiExecutor) -> Self {
         self.executor = Some(Arc::new(executor));
+        self
+    }
+
+    pub fn memory_options(mut self, options: MemoryOptions) -> Self {
+        self.memory_options = options;
+        self
+    }
+
+    #[cfg(feature = "persistent-cache")]
+    pub fn persistent_cache(mut self, store: impl PersistentCacheStore) -> Self {
+        self.persistent_cache = Some(Arc::new(store));
         self
     }
 
@@ -254,8 +275,15 @@ where
             self.resources
                 .provide(crate::dialogs::system_file_dialogs());
         }
-        let context =
-            ApplicationContext::new(self.resources, self.executor, self.commands, self.events);
+        let context = ApplicationContext::new_with_memory(
+            self.resources,
+            self.executor,
+            self.commands,
+            self.events,
+            self.memory_options,
+            #[cfg(feature = "persistent-cache")]
+            self.persistent_cache,
+        );
         let backend_context = context.clone();
         let view: AppView = Arc::new(view);
         let root = application_root_view(context, view);

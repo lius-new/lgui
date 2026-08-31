@@ -68,7 +68,7 @@ pub(super) fn collect_bitmap_cache_keys(
                         &UiImageSource::Static(source),
                         fit,
                     ));
-                } else if spec.cache_policy == StaticLayerCachePolicy::Disabled {
+                } else if spec.cache_policy == RasterCachePolicy::Disabled {
                     collect_bitmap_cache_keys(commands, keys);
                 } else {
                     keys.insert(static_layer_cache_key(
@@ -109,7 +109,7 @@ pub(super) fn collect_overlay_brush_cache_keys(
                 keys.insert(overlay_brush_cache_key(*rect, style));
             }
             ScenePrimitive::StaticLayer { spec, commands, .. }
-                if spec.cache_policy == StaticLayerCachePolicy::Disabled =>
+                if spec.cache_policy == RasterCachePolicy::Disabled =>
             {
                 collect_overlay_brush_cache_keys(commands, keys);
             }

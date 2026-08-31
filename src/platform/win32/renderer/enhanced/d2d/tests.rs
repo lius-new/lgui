@@ -22,7 +22,7 @@ fn d2d_matrix_matches_backend_neutral_layer_transform() {
 }
 
 #[test]
-fn bitmap_cache_budget_evicts_oldest_entries_and_keeps_one_oversized_entry() {
+fn bitmap_cache_budget_evicts_oldest_entries_and_rejects_oversized_entries() {
     let first = image_cache_key(
         UiRect::new(0.0, 0.0, 10.0, 10.0),
         &UiImageSource::Static("first"),
@@ -39,21 +39,47 @@ fn bitmap_cache_budget_evicts_oldest_entries_and_keeps_one_oversized_entry() {
         ImageFit::Fill,
     );
     let entries = vec![
-        (first.clone(), 1, first.estimated_bytes()),
-        (second.clone(), 2, second.estimated_bytes()),
-        (third.clone(), 3, third.estimated_bytes()),
+        (
+            first.clone(),
+            crate::memory::RetentionClass::Frame,
+            crate::memory::CachePriority::High,
+            1,
+            first.estimated_bytes(),
+        ),
+        (
+            second.clone(),
+            crate::memory::RetentionClass::Scene,
+            crate::memory::CachePriority::Low,
+            2,
+            second.estimated_bytes(),
+        ),
+        (
+            third.clone(),
+            crate::memory::RetentionClass::Scene,
+            crate::memory::CachePriority::High,
+            3,
+            third.estimated_bytes(),
+        ),
     ];
-    let total = entries.iter().map(|(_, _, bytes)| bytes).sum();
+    let total = entries.iter().map(|(_, _, _, _, bytes)| bytes).sum();
 
     let evictions = bitmap_cache_eviction_plan(entries, total, third.estimated_bytes());
 
     assert_eq!(evictions, vec![first, second]);
-    assert!(bitmap_cache_eviction_plan(
-        vec![(third.clone(), 1, third.estimated_bytes())],
-        third.estimated_bytes(),
-        1,
-    )
-    .is_empty());
+    assert_eq!(
+        bitmap_cache_eviction_plan(
+            vec![(
+                third.clone(),
+                crate::memory::RetentionClass::Session,
+                crate::memory::CachePriority::High,
+                1,
+                third.estimated_bytes(),
+            )],
+            third.estimated_bytes(),
+            1,
+        ),
+        vec![third]
+    );
     assert_eq!(
         d2d_bitmap_cache_budget(1432, 860),
         D2D_BITMAP_CACHE_MIN_BUDGET_BYTES
@@ -125,7 +151,10 @@ fn transparent_pure_image_static_layer_reuses_the_image_cache_key() {
         Some("background"),
         ImageFit::Cover,
     ))
-    .cache_policy(StaticLayerCachePolicy::Memory)
+    .cache_policy(RasterCachePolicy::memory(
+        crate::memory::RetentionClass::Scene,
+        crate::memory::CachePriority::Normal,
+    ))
     .transparent_background();
     assert_eq!(
         pure_static_layer_image(&spec, &[]),
@@ -164,6 +193,7 @@ fn bitmap_cache_reachability_replaces_keys_from_the_previous_scene() {
         id: UiId::owned(format!("{name}-image")),
         rect: UiRect::new(0.0, 0.0, 64.0, 64.0),
         source: UiImageSource::Static(name),
+        request: crate::core::ImageRequest::new(UiImageSource::Static(name)),
         fit: ImageFit::Cover,
         phase: lgui::core::RenderPhase::Content,
     };

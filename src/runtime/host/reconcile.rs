@@ -69,7 +69,7 @@ pub(super) fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.style != next.style
         || previous.path != next.path
         || previous.path_style != next.path_style
-        || previous.image_source != next.image_source
+        || previous.image_request != next.image_request
         || previous.image_fit != next.image_fit
         || previous.icon_key != next.icon_key
         || previous.icon_style != next.icon_style

@@ -152,3 +152,38 @@ pub struct HostRuntime {
     pub(super) semantics: HashMap<UiId, SemanticNode>,
     pub(super) initialized: bool,
 }
+
+impl HostRuntime {
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub(crate) fn estimated_bytes(&self) -> usize {
+        let host_nodes = self
+            .slots
+            .iter()
+            .filter_map(|slot| slot.node.as_ref())
+            .map(|node| {
+                std::mem::size_of::<HostNode>()
+                    .saturating_add(
+                        node.children
+                            .capacity()
+                            .saturating_mul(std::mem::size_of::<HostNodeId>()),
+                    )
+                    .saturating_add(node.node.estimated_bytes())
+            })
+            .sum::<usize>();
+        let scene_nodes = self
+            .scene
+            .values()
+            .map(|node| crate::core::estimate_scene_commands_bytes(&node.commands))
+            .sum::<usize>();
+        std::mem::size_of::<Self>()
+            .saturating_add(host_nodes)
+            .saturating_add(scene_nodes)
+            .saturating_add(self.composed_scene.estimated_bytes())
+    }
+}

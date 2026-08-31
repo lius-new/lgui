@@ -318,12 +318,7 @@ fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let background = fs::read_to_string(root.join("src/platform/win32/window/background.rs"))
         .expect("read Win32 background memory lifecycle");
-    for required in [
-        "release_visual_caches",
-        "clear_cached_image_cache",
-        "clear_blur_caches",
-        "EmptyWorkingSet",
-    ] {
+    for required in ["EmptyWorkingSet"] {
         assert!(
             background.contains(required),
             "background lifecycle lost `{required}`"
@@ -339,6 +334,7 @@ fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
         "session.suspend_rendering()",
         "renderer.take()",
         "render_hidden_window_once",
+        "MemoryEvent::AllWindowsHidden",
     ] {
         assert!(
             application.contains(required),
@@ -355,7 +351,7 @@ fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
     for required in [
         "GdiplusStartup",
         "GdiplusShutdown",
-        "clear_decoded_image_cache",
+        "trim_decoded_image_cache(0)",
     ] {
         assert!(
             gdiplus.contains(required),
@@ -371,6 +367,66 @@ fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
         application.contains("GdiPlusRuntime::start()"),
         "Win32 application no longer starts its image runtime"
     );
+}
+
+#[test]
+fn memory_governance_has_no_legacy_cache_bypasses() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = rust_sources("src")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
+    for forbidden in [
+        "clear_image_caches",
+        "clear_render_caches",
+        "release_visual_caches",
+        "clear_scroll_raster_command_cache",
+        "clear_svg_bitmap_cache",
+        "MemoryAndDisk",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "legacy memory bypass `{forbidden}` remains"
+        );
+    }
+    assert!(
+        !root
+            .join("src/platform/win32/renderer/enhanced/static_layer_raster_cache.rs")
+            .exists(),
+        "the pseudo-persistent static-layer cache returned"
+    );
+
+    let memory = rust_sources("src/memory")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
+    for forbidden in ["windows::", "Win32::", "crate::backend", "crate::frontend"] {
+        assert!(
+            !memory.contains(forbidden),
+            "portable memory governance depends on `{forbidden}`"
+        );
+    }
+
+    let registrations = [
+        "EncodedImage",
+        "DecodedImage",
+        "Svg",
+        "Blur",
+        "StaticLayer",
+        "ScrollRaster",
+        "Gdi",
+        "D2d",
+        "Skia",
+        "ComponentOutput",
+        "HostScene",
+        "Diagnostics",
+    ];
+    for domain in registrations {
+        assert!(
+            source.contains(&format!("CacheDomain::{domain}")),
+            "cache domain `{domain}` has no registration or lifecycle adapter"
+        );
+    }
 }
 
 #[test]
@@ -718,7 +774,7 @@ fn win32_remote_images_are_owned_by_the_framework_asset_runtime() {
 
     let cache = fs::read_to_string(root.join("src/platform/win32/assets/image_cache.rs"))
         .expect("read Win32 image cache");
-    for required in ["lgui-image-http", "loader.load(&url)"] {
+    for required in ["lgui-image-loader", "crate::assets::load_url_image"] {
         assert!(
             cache.contains(required),
             "Win32 image cache lost remote loading behavior `{required}`"

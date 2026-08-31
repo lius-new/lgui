@@ -62,6 +62,31 @@ pub struct HostTree {
     projection_changes: ProjectionChanges,
 }
 
+impl HostTree {
+    /// Returns a conservative estimate of retained tree storage, including shared node payloads.
+    #[cfg(any(
+        test,
+        feature = "backend-winit",
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        all(feature = "backend-win32", feature = "renderer-skia")
+    ))]
+    pub fn estimated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(
+                self.nodes
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Arc<UiNode>>()),
+            )
+            .saturating_add(
+                self.nodes
+                    .iter()
+                    .map(|node| node.estimated_bytes())
+                    .sum::<usize>(),
+            )
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct ProjectionChanges {
     pub changed: std::collections::HashSet<UiId>,

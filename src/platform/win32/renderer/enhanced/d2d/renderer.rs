@@ -19,6 +19,9 @@ impl D2dRenderer {
             overlay_brush_cache: HashMap::new(),
             frame_bitmap_cache: HashMap::new(),
             compositing_layers: HashMap::new(),
+            scene_bytes: (width.max(1) as usize)
+                .saturating_mul(height.max(1) as usize)
+                .saturating_mul(4),
         })
     }
 
@@ -34,6 +37,7 @@ impl D2dRenderer {
             self.context.EndDraw(None, None)?;
         }
         self.bitmap_cache.evict_to_budget();
+        self.frame_bitmap_cache.clear();
         Ok(())
     }
 
@@ -57,7 +61,72 @@ impl D2dRenderer {
             self.context.EndDraw(None, None)?;
         }
         self.bitmap_cache.evict_to_budget();
+        self.frame_bitmap_cache.clear();
         Ok(())
+    }
+
+    pub(crate) fn memory_usage(&self) -> crate::memory::CacheUsage {
+        let compositing_bytes = self
+            .compositing_layers
+            .values()
+            .fold(0usize, |total, layer| {
+                total.saturating_add(
+                    (layer.width.max(1) as usize)
+                        .saturating_mul(layer.height.max(1) as usize)
+                        .saturating_mul(4),
+                )
+            });
+        let overlay_bytes = self
+            .overlay_brush_cache
+            .values()
+            .fold(0usize, |total, brushes| {
+                total.saturating_add(
+                    brushes
+                        .linear
+                        .len()
+                        .saturating_add(brushes.radial.len())
+                        .saturating_mul(256),
+                )
+            });
+        let live_bytes = self.scene_bytes.saturating_add(compositing_bytes);
+        crate::memory::CacheUsage {
+            live_bytes,
+            cache_bytes: self.bitmap_cache.bytes.saturating_add(overlay_bytes),
+            gpu_estimated_bytes: live_bytes
+                .saturating_add(self.bitmap_cache.bytes)
+                .saturating_add(overlay_bytes),
+            entries: 1usize
+                .saturating_add(self.compositing_layers.len())
+                .saturating_add(self.bitmap_cache.entries.len())
+                .saturating_add(self.overlay_brush_cache.len()),
+            hits: self.bitmap_cache.hits,
+            misses: self.bitmap_cache.misses,
+            evictions: self.bitmap_cache.evictions,
+            largest_entry_bytes: self
+                .bitmap_cache
+                .entries
+                .values()
+                .map(|entry| entry.bytes)
+                .max()
+                .unwrap_or(0)
+                .max(self.scene_bytes),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn set_memory_budget(&mut self, budget_bytes: usize) {
+        self.bitmap_cache
+            .set_budget(budget_bytes.saturating_mul(3) / 4);
+    }
+
+    pub(crate) fn trim_to(&mut self, target_bytes: usize) -> usize {
+        let before = self.memory_usage().resident_bytes();
+        self.frame_bitmap_cache.clear();
+        if target_bytes == 0 {
+            self.overlay_brush_cache.clear();
+        }
+        self.bitmap_cache.trim_to(target_bytes);
+        before.saturating_sub(self.memory_usage().resident_bytes())
     }
 
     fn begin_frame(&mut self, list: &Scene) {
@@ -207,26 +276,19 @@ impl D2dRenderer {
                     raster_length(rect.height()),
                     *child_signature,
                 );
-                if spec.cache_policy == StaticLayerCachePolicy::Disabled {
+                if spec.cache_policy == RasterCachePolicy::Disabled {
                     if !self.frame_bitmap_cache.contains_key(&cache_key) {
                         for command in commands {
                             self.ensure_static_layer_command(command, clip)?;
                         }
-                        let bitmap = render_static_layer_bitmap(
-                            self,
-                            *rect,
-                            spec,
-                            commands,
-                            Some(&cache_key),
-                        )?;
+                        let bitmap = render_static_layer_bitmap(self, *rect, spec, commands)?;
                         self.frame_bitmap_cache.insert(cache_key, bitmap);
                     }
                 } else if self.bitmap_cache.get(&cache_key).is_none() {
                     for command in commands {
                         self.ensure_static_layer_command(command, clip)?;
                     }
-                    let bitmap =
-                        render_static_layer_bitmap(self, *rect, spec, commands, Some(&cache_key))?;
+                    let bitmap = render_static_layer_bitmap(self, *rect, spec, commands)?;
                     self.bitmap_cache.insert(cache_key, bitmap);
                 }
             }

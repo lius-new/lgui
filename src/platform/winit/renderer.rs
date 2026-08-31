@@ -276,6 +276,22 @@ impl WinitSkiaRenderer {
         }
     }
 
+    pub(super) fn set_cache_budget(&mut self, budget_bytes: usize) {
+        match self {
+            Self::Software { renderer, .. } => renderer.set_cache_budget(budget_bytes),
+            #[cfg(feature = "renderer-skia-gl")]
+            Self::OpenGl(renderer) => renderer.set_cache_budget(budget_bytes),
+            #[cfg(all(
+                feature = "renderer-skia-vulkan",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            Self::Vulkan(renderer) => renderer.set_cache_budget(budget_bytes),
+            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
+            Self::Metal(renderer) => renderer.set_cache_budget(budget_bytes),
+            Self::Unavailable => {}
+        }
+    }
+
     pub(super) fn cache_stats(&self) -> super::skia::SkiaCacheStats {
         match self {
             Self::Software { renderer, .. } => renderer.cache_stats(),
@@ -362,6 +378,7 @@ pub(super) fn create_renderer(
     soft_context: &SoftContext<OwnedDisplayHandle>,
     window: Arc<Window>,
     transparent: bool,
+    cache_budget: usize,
 ) -> Result<WinitSkiaRenderer, WinitApplicationError> {
     #[allow(unused_mut)]
     let mut fallback_reason = None;
@@ -379,7 +396,7 @@ pub(super) fn create_renderer(
     ) {
         match super::winit_skia_metal::WinitMetalRenderer::new(
             Arc::clone(&window),
-            DEFAULT_CACHE_BUDGET,
+            cache_budget,
             transparent,
         ) {
             Ok(renderer) => return Ok(WinitSkiaRenderer::Metal(renderer)),
@@ -402,7 +419,7 @@ pub(super) fn create_renderer(
     {
         match super::winit_skia_vulkan::WinitVulkanRenderer::new(
             Arc::clone(&window),
-            DEFAULT_CACHE_BUDGET,
+            cache_budget,
             transparent,
         ) {
             Ok(renderer) => return Ok(WinitSkiaRenderer::Vulkan(renderer)),
@@ -423,7 +440,7 @@ pub(super) fn create_renderer(
     ) {
         match super::winit_skia_gl::WinitOpenGlRenderer::new(
             Arc::clone(&window),
-            DEFAULT_CACHE_BUDGET,
+            cache_budget,
             transparent,
         ) {
             Ok(renderer) => return Ok(WinitSkiaRenderer::OpenGl(renderer)),
@@ -450,7 +467,7 @@ pub(super) fn create_renderer(
         .map_err(|error| WinitApplicationError(format!("create software surface: {error}")))?;
     Ok(WinitSkiaRenderer::Software {
         surface,
-        renderer: SkiaSoftwareSurface::new(DEFAULT_CACHE_BUDGET),
+        renderer: SkiaSoftwareSurface::new(cache_budget),
         fallback_reason: fallback_reason.or_else(|| {
             (preference == GraphicsPreference::Auto).then_some("gpu-driver-unavailable")
         }),

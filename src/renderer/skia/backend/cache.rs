@@ -4,6 +4,8 @@ pub(super) struct CachedImage {
     image: Image,
     bytes: usize,
     used: u64,
+    retention: crate::memory::RetentionClass,
+    priority: crate::memory::CachePriority,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -19,6 +21,8 @@ pub(super) struct CachedParagraph {
     paragraph: Paragraph,
     bytes: usize,
     used: u64,
+    retention: crate::memory::RetentionClass,
+    priority: crate::memory::CachePriority,
 }
 
 pub(crate) struct SkiaCache {
@@ -108,6 +112,8 @@ impl SkiaCache {
                 paragraph,
                 bytes,
                 used: self.generation,
+                retention: crate::memory::RetentionClass::Session,
+                priority: crate::memory::CachePriority::Normal,
             },
         );
         self.evict_to_budget();
@@ -124,6 +130,21 @@ impl SkiaCache {
     }
 
     pub(super) fn insert(&mut self, key: String, image: Image) -> Image {
+        self.insert_with_policy(
+            key,
+            image,
+            crate::memory::RetentionClass::Session,
+            crate::memory::CachePriority::Normal,
+        )
+    }
+
+    pub(super) fn insert_with_policy(
+        &mut self,
+        key: String,
+        image: Image,
+        retention: crate::memory::RetentionClass,
+        priority: crate::memory::CachePriority,
+    ) -> Image {
         let bytes = image.width().max(0) as usize * image.height().max(0) as usize * 4;
         if let Some(previous) = self.entries.remove(&key) {
             self.resident_bytes = self.resident_bytes.saturating_sub(previous.bytes);
@@ -135,6 +156,8 @@ impl SkiaCache {
                 image: image.clone(),
                 bytes,
                 used: self.generation,
+                retention,
+                priority,
             },
         );
         self.evict_to_budget();
@@ -145,25 +168,30 @@ impl SkiaCache {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    pub(crate) fn set_budget(&mut self, budget_bytes: usize) {
+        self.budget_bytes = budget_bytes.max(1);
+        self.evict_to_budget();
+    }
+
     fn evict_to_budget(&mut self) {
         while self.resident_bytes > self.budget_bytes {
             let image = self
                 .entries
                 .iter()
-                .min_by_key(|(_, entry)| entry.used)
-                .map(|(key, entry)| (key.clone(), entry.used));
+                .min_by_key(|(_, entry)| (entry.retention, entry.priority, entry.used))
+                .map(|(key, entry)| (key.clone(), (entry.retention, entry.priority, entry.used)));
             let paragraph = self
                 .paragraphs
                 .iter()
-                .min_by_key(|(_, entry)| entry.used)
-                .map(|(key, entry)| (key.clone(), entry.used));
+                .min_by_key(|(_, entry)| (entry.retention, entry.priority, entry.used))
+                .map(|(key, entry)| (key.clone(), (entry.retention, entry.priority, entry.used)));
             if image.is_none() && paragraph.is_none() {
                 break;
             }
-            if paragraph.as_ref().is_some_and(|(_, paragraph_used)| {
+            if paragraph.as_ref().is_some_and(|(_, paragraph_order)| {
                 image
                     .as_ref()
-                    .is_none_or(|(_, image_used)| paragraph_used <= image_used)
+                    .is_none_or(|(_, image_order)| paragraph_order <= image_order)
             }) {
                 if let Some((key, _)) = paragraph {
                     if let Some(entry) = self.paragraphs.remove(&key) {

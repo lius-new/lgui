@@ -154,4 +154,8 @@ impl SceneRenderer for GdiRenderer {
         presented?;
         Ok(RenderStats::for_frame(frame))
     }
+
+    fn memory_usage(&self) -> crate::memory::CacheUsage {
+        GdiRenderer::memory_usage(self)
+    }
 }

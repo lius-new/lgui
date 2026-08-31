@@ -96,8 +96,9 @@ pub(super) fn gdi_text_runs(hdc: HDC, text: &str, height: i32, weight: i32) -> V
 pub(super) fn gdi_font_family_for_char(hdc: HDC, ch: char, height: i32, weight: i32) -> usize {
     GDI_FONT_FAMILY_CACHE.with(|cache| {
         let key = (ch, height, weight);
-        if let Some(family_index) = cache.borrow().get(&key).copied() {
-            return family_index;
+        let mut cache = cache.borrow_mut();
+        if cache.contains_touch(&key) {
+            return cache.get(&key).copied().unwrap_or(0);
         }
         let family_index = unsafe {
             (0..ui_font_family_count())
@@ -106,7 +107,7 @@ pub(super) fn gdi_font_family_for_char(hdc: HDC, ch: char, height: i32, weight: 
                 })
                 .unwrap_or(0)
         };
-        cache.borrow_mut().insert(key, family_index);
+        cache.insert(key, family_index, 64);
         family_index
     })
 }

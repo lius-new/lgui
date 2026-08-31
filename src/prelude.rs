@@ -19,8 +19,9 @@ pub use crate::assets::{
 pub use crate::command::{Command, CommandContext, CommandFuture, CommandHandle, CommandHandler};
 pub use crate::core::{
     async_handler, async_handler_with, component, context_provider, group, Align, Axis, Color,
-    EdgeInsets, Element, ElementKey, RenderCx, RootComponent, Size, State, StateSetter, Stroke,
-    TextAlign, TextStyle, UiAsyncContext, UiEventContext, UiRect, VisualStyle,
+    EdgeInsets, Element, ElementKey, ImageCachePolicy, ImageDecodePolicy, ImageRequest, RenderCx,
+    RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiAsyncContext,
+    UiEventContext, UiRect, VisualStyle,
 };
 #[cfg(feature = "open-url")]
 pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};
@@ -34,6 +35,10 @@ pub use crate::dialogs::{
     FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
 };
 pub use crate::events::{AsyncEventHandler, Event, EventFuture, EventSubscription};
+pub use crate::memory::{
+    CacheDomain, CachePriority, MemoryOptions, MemoryProfile, MemorySnapshot, RetentionClass,
+    TrimReason,
+};
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
     InputSink, WakeHandle,

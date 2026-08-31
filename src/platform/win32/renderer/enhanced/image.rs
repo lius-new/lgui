@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, time::Duration, time::Instant};
+use std::{cell::RefCell, sync::OnceLock, time::Duration, time::Instant};
 
 use windows::Win32::{
     Graphics::{
@@ -23,8 +23,21 @@ use crate::{
     platform::win32::{self as cached_image, render_trace},
 };
 
+const DEFAULT_DECODED_IMAGE_CACHE_BUDGET: usize = 32 * 1024 * 1024;
+
+fn decoded_image_telemetry() -> &'static crate::memory::CacheTelemetry {
+    static TELEMETRY: OnceLock<crate::memory::CacheTelemetry> = OnceLock::new();
+    TELEMETRY.get_or_init(Default::default)
+}
+
 thread_local! {
-    static DECODED_IMAGE_CACHE: RefCell<HashMap<String, DecodedImage>> = RefCell::new(HashMap::new());
+    static DECODED_IMAGE_CACHE: RefCell<crate::memory::LruCache<String, DecodedImage>> = RefCell::new(
+        crate::memory::LruCache::new(
+            DEFAULT_DECODED_IMAGE_CACHE_BUDGET,
+            crate::memory::ResourceClass::Cache,
+            decoded_image_telemetry().clone(),
+        )
+    );
 }
 
 fn raster_length(value: f32) -> i32 {
@@ -47,10 +60,42 @@ impl Drop for DecodedImage {
     }
 }
 
-pub fn clear_decoded_image_cache() {
+pub(crate) fn decoded_image_cache_usage() -> crate::memory::CacheUsage {
+    decoded_image_telemetry().snapshot()
+}
+
+pub(crate) fn trim_decoded_image_cache(target_bytes: usize) -> usize {
+    DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().trim_to(target_bytes))
+}
+
+pub(crate) fn set_decoded_image_cache_budget(budget_bytes: usize) {
+    DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
+}
+
+fn with_cached_decoded<T>(
+    key: String,
+    create: impl FnOnce() -> Option<DecodedImage>,
+    read: impl FnOnce(&DecodedImage) -> T,
+) -> Option<T> {
     DECODED_IMAGE_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
+        let mut cache = cache.borrow_mut();
+        if !cache.contains_touch(&key) {
+            let image = create()?;
+            let bytes = decoded_image_bytes(&image)?;
+            if !cache.can_store(bytes) {
+                return Some(read(&image));
+            }
+            cache.insert(key.clone(), image, bytes);
+        }
+        cache.get(&key).map(read)
+    })
+}
+
+fn decoded_image_bytes(image: &DecodedImage) -> Option<usize> {
+    usize::try_from(image.width)
+        .ok()?
+        .checked_mul(usize::try_from(image.height).ok()?)?
+        .checked_mul(4)
 }
 
 pub fn draw_image(hdc: HDC, rect: UiRect, source: &'static str, fit: ImageFit) {
@@ -60,19 +105,11 @@ pub fn draw_image(hdc: HDC, rect: UiRect, source: &'static str, fit: ImageFit) {
         trace_duration("gdi.draw_image", start.elapsed());
         return;
     }
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(source) {
-            let Some(image) = decode_image(source) else {
-                return;
-            };
-            cache.insert(source.to_string(), image);
-        }
-        let Some(image) = cache.get(source) else {
-            return;
-        };
-        draw_decoded_image(hdc, rect, image, fit);
-    });
+    let _ = with_cached_decoded(
+        source.to_string(),
+        || decode_image(source),
+        |image| draw_decoded_image(hdc, rect, image, fit),
+    );
     trace_duration("gdi.draw_image", start.elapsed());
 }
 
@@ -95,19 +132,11 @@ pub fn draw_ui_image(hdc: HDC, rect: UiRect, source: &UiImageSource, fit: ImageF
 
 fn draw_bytes_image(hdc: HDC, rect: UiRect, key: &str, version: u64, bytes: &[u8], fit: ImageFit) {
     let cache_key = format!("bytes:{key}:{version}");
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(cache_key.as_str()) {
-            let Some(image) = decode_image_bytes(bytes, 0, 0) else {
-                return;
-            };
-            cache.insert(cache_key.clone(), image);
-        }
-        let Some(image) = cache.get(cache_key.as_str()) else {
-            return;
-        };
-        draw_decoded_image(hdc, rect, image, fit);
-    });
+    let _ = with_cached_decoded(
+        cache_key,
+        || decode_image_bytes(bytes, 0, 0),
+        |image| draw_decoded_image(hdc, rect, image, fit),
+    );
 }
 
 fn draw_cached_source(hdc: HDC, rect: UiRect, source: &cached_image::ImageSource, fit: ImageFit) {
@@ -119,40 +148,23 @@ fn draw_cached_source(hdc: HDC, rect: UiRect, source: &cached_image::ImageSource
         cached_image::ImageSource::File(path) => format!("file:{}", path.display()),
         cached_image::ImageSource::Asset { key, .. } => format!("asset:{key}"),
     };
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(key.as_str()) {
-            let Some(image) = decode_image_bytes(&bytes, width, height) else {
-                return;
-            };
-            cache.insert(key.clone(), image);
-        }
-        let Some(image) = cache.get(key.as_str()) else {
-            return;
-        };
-        draw_decoded_image(hdc, rect, image, fit);
-    });
+    let _ = with_cached_decoded(
+        key,
+        || decode_image_bytes(&bytes, width, height),
+        |image| draw_decoded_image(hdc, rect, image, fit),
+    );
 }
 
 fn draw_remote_image(hdc: HDC, rect: UiRect, source: &'static str, fit: ImageFit) {
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(source) {
+    let _ = with_cached_decoded(
+        source.to_string(),
+        || {
             let cached_source = cached_image::ImageSource::url(source);
-            let Some((bytes, width, height)) = cached_image::cached_image_data(&cached_source)
-            else {
-                return;
-            };
-            let Some(image) = decode_image_bytes(&bytes, width, height) else {
-                return;
-            };
-            cache.insert(source.to_string(), image);
-        }
-        let Some(image) = cache.get(source) else {
-            return;
-        };
-        draw_decoded_image(hdc, rect, image, fit);
-    });
+            let (bytes, width, height) = cached_image::cached_image_data(&cached_source)?;
+            decode_image_bytes(&bytes, width, height)
+        },
+        |image| draw_decoded_image(hdc, rect, image, fit),
+    );
 }
 
 fn is_remote_url(source: &str) -> bool {
@@ -176,15 +188,11 @@ pub fn rasterize_image_bgra(
     if is_remote_url(source) {
         return rasterize_remote_image_bgra(source, width, height, fit);
     }
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(source) {
-            let image = decode_image(source)?;
-            cache.insert(source.to_string(), image);
-        }
-        let image = cache.get(source)?;
-        rasterize_decoded_image(image, width, height, fit)
-    })
+    with_cached_decoded(
+        source.to_string(),
+        || decode_image(source),
+        |image| rasterize_decoded_image(image, width, height, fit),
+    )?
 }
 
 pub fn rasterize_ui_image_bgra(
@@ -226,16 +234,14 @@ fn rasterize_cached_image_bgra(
         cached_image::ImageSource::File(path) => format!("file:{}", path.display()),
         cached_image::ImageSource::Asset { key, .. } => format!("asset:{key}"),
     };
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(key.as_str()) {
+    with_cached_decoded(
+        key,
+        || {
             let (bytes, image_width, image_height) = cached_image::cached_image_data(source)?;
-            let image = decode_image_bytes(&bytes, image_width, image_height)?;
-            cache.insert(key.clone(), image);
-        }
-        let image = cache.get(key.as_str())?;
-        rasterize_decoded_image(image, width, height, fit)
-    })
+            decode_image_bytes(&bytes, image_width, image_height)
+        },
+        |image| rasterize_decoded_image(image, width, height, fit),
+    )?
 }
 
 fn rasterize_remote_image_bgra(
@@ -244,18 +250,16 @@ fn rasterize_remote_image_bgra(
     height: i32,
     fit: ImageFit,
 ) -> Option<RasterImage> {
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(source) {
+    with_cached_decoded(
+        source.to_string(),
+        || {
             let cached_source = cached_image::ImageSource::url(source);
             let (bytes, image_width, image_height) =
                 cached_image::cached_image_data(&cached_source)?;
-            let image = decode_image_bytes(&bytes, image_width, image_height)?;
-            cache.insert(source.to_string(), image);
-        }
-        let image = cache.get(source)?;
-        rasterize_decoded_image(image, width, height, fit)
-    })
+            decode_image_bytes(&bytes, image_width, image_height)
+        },
+        |image| rasterize_decoded_image(image, width, height, fit),
+    )?
 }
 
 fn decode_image(source: &'static str) -> Option<DecodedImage> {

@@ -1,11 +1,12 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
+    io::Cursor,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, LazyLock, Mutex,
+        Arc, LazyLock, Mutex, OnceLock,
     },
 };
 
@@ -26,6 +27,8 @@ use windows::Win32::{
 };
 
 pub const WM_IMAGE_CACHE_INVALIDATED: u32 = WM_APP + 42;
+const DEFAULT_IMAGE_CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+const MAX_IMAGE_CACHE_ENTRIES: usize = 4096;
 
 static IMAGE_CACHE: LazyLock<Mutex<ImageCache>> =
     LazyLock::new(|| Mutex::new(ImageCache::default()));
@@ -34,13 +37,55 @@ static IMAGE_REPAINT_HWND: LazyLock<Mutex<Option<isize>>> = LazyLock::new(|| Mut
 static IMAGE_REPAINT_PENDING: AtomicBool = AtomicBool::new(false);
 static REMOTE_IMAGE_LOADER: LazyLock<Mutex<Option<crate::assets::RemoteImageLoaderHandle>>> =
     LazyLock::new(|| Mutex::new(None));
+static IMAGE_MEMORY_GOVERNOR: LazyLock<Mutex<Option<crate::memory::MemoryGovernor>>> =
+    LazyLock::new(|| Mutex::new(None));
+static IMAGE_REQUESTS: LazyLock<Mutex<HashMap<String, crate::core::ImageRequest>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static IMAGE_REACHABILITY: LazyLock<
+    Mutex<HashMap<crate::memory::DomainInstanceId, HashSet<String>>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const DEFAULT_DECODED_IMAGE_CACHE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+
+fn decoded_image_telemetry() -> &'static crate::memory::CacheTelemetry {
+    static TELEMETRY: OnceLock<crate::memory::CacheTelemetry> = OnceLock::new();
+    TELEMETRY.get_or_init(Default::default)
+}
 
 thread_local! {
-    static DECODED_IMAGE_CACHE: RefCell<HashMap<String, DecodedImage>> = RefCell::new(HashMap::new());
+    static DECODED_IMAGE_CACHE: RefCell<crate::memory::LruCache<String, DecodedImage>> = RefCell::new(
+        crate::memory::LruCache::new(
+            DEFAULT_DECODED_IMAGE_CACHE_BUDGET_BYTES,
+            crate::memory::ResourceClass::Cache,
+            decoded_image_telemetry().clone(),
+        )
+    );
 }
 
 pub(crate) struct RemoteImageLoaderGuard {
     previous: Option<crate::assets::RemoteImageLoaderHandle>,
+}
+
+pub(crate) struct ImageMemoryGovernorGuard {
+    previous: Option<crate::memory::MemoryGovernor>,
+}
+
+impl Drop for ImageMemoryGovernorGuard {
+    fn drop(&mut self) {
+        *IMAGE_MEMORY_GOVERNOR
+            .lock()
+            .expect("image memory governor poisoned") = self.previous.take();
+    }
+}
+
+pub(crate) fn install_image_memory_governor(
+    governor: crate::memory::MemoryGovernor,
+) -> ImageMemoryGovernorGuard {
+    let previous = IMAGE_MEMORY_GOVERNOR
+        .lock()
+        .expect("image memory governor poisoned")
+        .replace(governor);
+    ImageMemoryGovernorGuard { previous }
 }
 
 impl Drop for RemoteImageLoaderGuard {
@@ -110,9 +155,14 @@ impl ImageSource {
     }
 }
 
-#[derive(Default)]
 struct ImageCache {
     entries: HashMap<String, CachedImage>,
+    resident_bytes: usize,
+    budget_bytes: usize,
+    tick: u64,
+    hits: u64,
+    misses: u64,
+    evictions: u64,
 }
 
 struct CachedImage {
@@ -120,6 +170,61 @@ struct CachedImage {
     bytes: Option<Vec<u8>>,
     width: i32,
     height: i32,
+    resident_bytes: usize,
+    last_used: u64,
+    request_key: String,
+    policy: crate::core::ImageCachePolicy,
+    priority: crate::memory::CachePriority,
+    reachable: bool,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            resident_bytes: 0,
+            budget_bytes: DEFAULT_IMAGE_CACHE_BUDGET_BYTES,
+            tick: 0,
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+        }
+    }
+}
+
+impl ImageCache {
+    fn next_tick(&mut self) -> u64 {
+        self.tick = self.tick.wrapping_add(1);
+        self.tick
+    }
+
+    fn insert(&mut self, key: String, mut entry: CachedImage) {
+        if let Some(previous) = self.entries.remove(&key) {
+            self.resident_bytes = self.resident_bytes.saturating_sub(previous.resident_bytes);
+        }
+        entry.last_used = self.next_tick();
+        self.resident_bytes = self.resident_bytes.saturating_add(entry.resident_bytes);
+        self.entries.insert(key, entry);
+        self.evict_to(self.budget_bytes, MAX_IMAGE_CACHE_ENTRIES);
+    }
+
+    fn evict_to(&mut self, target_bytes: usize, max_entries: usize) {
+        while self.resident_bytes > target_bytes || self.entries.len() > max_entries {
+            let Some(key) = self
+                .entries
+                .iter()
+                .filter(|(_, entry)| entry.status != CachedImageStatus::Loading)
+                .min_by_key(|(_, entry)| (entry.reachable, entry.priority, entry.last_used))
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&key) {
+                self.resident_bytes = self.resident_bytes.saturating_sub(entry.resident_bytes);
+                self.evictions = self.evictions.saturating_add(1);
+            }
+        }
+    }
 }
 
 struct DecodedImage {
@@ -158,38 +263,76 @@ pub fn mark_image_cache_repaint_handled() {
     IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
 }
 
-pub fn clear_decoded_image_cache() {
-    DECODED_IMAGE_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
+pub(crate) fn decoded_image_cache_usage() -> crate::memory::CacheUsage {
+    decoded_image_telemetry().snapshot()
 }
 
-pub fn clear_cached_image_cache() {
-    IMAGE_CACHE_EPOCH.fetch_add(1, Ordering::AcqRel);
-    IMAGE_CACHE
-        .lock()
-        .expect("image cache poisoned")
-        .entries
-        .clear();
-    IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
+pub(crate) fn trim_decoded_image_cache(target_bytes: usize) -> usize {
+    DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().trim_to(target_bytes))
+}
+
+pub(crate) fn set_decoded_image_cache_budget(budget_bytes: usize) {
+    DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
 }
 
 pub fn request_cached_image(source: &ImageSource) -> CachedImageStatus {
     let key = source.key();
+    let request_key = IMAGE_REQUESTS
+        .lock()
+        .expect("image request registry poisoned")
+        .get(&key)
+        .map_or_else(|| key.clone(), crate::core::ImageRequest::cache_key);
+    let (policy, priority) = IMAGE_REQUESTS
+        .lock()
+        .expect("image request registry poisoned")
+        .get(&key)
+        .map_or(
+            (
+                crate::core::ImageCachePolicy::Session,
+                crate::memory::CachePriority::Normal,
+            ),
+            |request| (request.cache_policy_value(), request.priority_value()),
+        );
     let epoch = IMAGE_CACHE_EPOCH.load(Ordering::Acquire);
     let mut should_start = false;
     let status = {
         let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
-        match cache.entries.get(&key) {
-            Some(entry) => entry.status,
+        let tick = cache.next_tick();
+        if cache
+            .entries
+            .get(&key)
+            .is_some_and(|entry| entry.request_key != request_key)
+        {
+            if let Some(entry) = cache.entries.remove(&key) {
+                cache.resident_bytes = cache.resident_bytes.saturating_sub(entry.resident_bytes);
+                cache.evictions = cache.evictions.saturating_add(1);
+            }
+        }
+        match cache.entries.get_mut(&key) {
+            Some(entry) => {
+                entry.last_used = tick;
+                entry.policy = policy;
+                entry.priority = priority;
+                entry.reachable = true;
+                let status = entry.status;
+                cache.hits = cache.hits.saturating_add(1);
+                status
+            }
             None => {
-                cache.entries.insert(
+                cache.misses = cache.misses.saturating_add(1);
+                cache.insert(
                     key.clone(),
                     CachedImage {
                         status: CachedImageStatus::Loading,
                         bytes: None,
                         width: 0,
                         height: 0,
+                        resident_bytes: 0,
+                        last_used: tick,
+                        request_key: request_key.clone(),
+                        policy,
+                        priority,
+                        reachable: true,
                     },
                 );
                 should_start = true;
@@ -199,27 +342,31 @@ pub fn request_cached_image(source: &ImageSource) -> CachedImageStatus {
     };
 
     if should_start {
-        start_image_load(key, source.clone(), epoch);
+        start_image_load(key, source.clone(), request_key, epoch);
     }
 
     status
 }
 
 pub(crate) fn portable_image_cache_handle() -> crate::assets::ImageCacheHandle {
-    crate::assets::ImageCacheHandle::new(
-        |source| match source {
-            crate::core::UiImageSource::Url(url) => {
-                portable_status(request_cached_image(&ImageSource::url(url)))
-            }
-            crate::core::UiImageSource::File(path) => {
-                portable_status(request_cached_image(&ImageSource::file(path)))
-            }
-            crate::core::UiImageSource::Static(_) | crate::core::UiImageSource::Bytes { .. } => {
-                crate::assets::ImageStatus::Ready
-            }
+    crate::assets::ImageCacheHandle::new_managed(
+        |request| {
+            let source = match request.source() {
+                crate::core::UiImageSource::Url(url) => ImageSource::url(url),
+                crate::core::UiImageSource::File(path) => ImageSource::file(path),
+                crate::core::UiImageSource::Static(_)
+                | crate::core::UiImageSource::Bytes { .. } => {
+                    return crate::assets::ImageStatus::Ready
+                }
+            };
+            IMAGE_REQUESTS
+                .lock()
+                .expect("image request registry poisoned")
+                .insert(source.key(), request.clone());
+            portable_status(request_cached_image(&source))
         },
-        |source| {
-            let source = match source {
+        |request| {
+            let source = match request.source() {
                 crate::core::UiImageSource::Url(url) => ImageSource::url(url),
                 crate::core::UiImageSource::File(path) => ImageSource::file(path),
                 crate::core::UiImageSource::Static(_)
@@ -228,12 +375,118 @@ pub(crate) fn portable_image_cache_handle() -> crate::assets::ImageCacheHandle {
             cached_image_data(&source).map(|(bytes, _, _)| Arc::<[u8]>::from(bytes))
         },
         || {
-            clear_cached_image_cache();
-            clear_decoded_image_cache();
-            #[cfg(feature = "advanced-rendering")]
-            super::enhanced::image::clear_decoded_image_cache();
+            let cache = IMAGE_CACHE.lock().expect("image cache poisoned");
+            crate::assets::ImageCacheStats {
+                entries: cache.entries.len(),
+                resident_bytes: cache.resident_bytes,
+                budget_bytes: cache.budget_bytes,
+                hits: cache.hits,
+                misses: cache.misses,
+                evictions: cache.evictions,
+                largest_entry_bytes: cache
+                    .entries
+                    .values()
+                    .map(|entry| entry.resident_bytes)
+                    .max()
+                    .unwrap_or(0),
+                in_flight: cache
+                    .entries
+                    .values()
+                    .filter(|entry| entry.status == CachedImageStatus::Loading)
+                    .count(),
+            }
+        },
+        trim_cached_image_cache,
+        |budget| {
+            let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
+            cache.budget_bytes = budget.max(1);
+            let target = cache.budget_bytes;
+            cache.evict_to(target, MAX_IMAGE_CACHE_ENTRIES);
+        },
+        |owner, requests| {
+            let mut active = HashSet::new();
+            let mut registry = IMAGE_REQUESTS
+                .lock()
+                .expect("image request registry poisoned");
+            for request in requests {
+                let source_key = match request.source() {
+                    crate::core::UiImageSource::Url(url) => ImageSource::url(url).key(),
+                    crate::core::UiImageSource::File(path) => ImageSource::file(path).key(),
+                    crate::core::UiImageSource::Static(_)
+                    | crate::core::UiImageSource::Bytes { .. } => continue,
+                };
+                active.insert(source_key.clone());
+                registry.insert(source_key, request.clone());
+            }
+            drop(registry);
+
+            let reachable = {
+                let mut owners = IMAGE_REACHABILITY
+                    .lock()
+                    .expect("image reachability poisoned");
+                if active.is_empty() {
+                    owners.remove(&owner);
+                } else {
+                    owners.insert(owner, active);
+                }
+                owners.values().flatten().cloned().collect::<HashSet<_>>()
+            };
+
+            let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
+            let evict = cache
+                .entries
+                .iter_mut()
+                .filter_map(|(key, entry)| {
+                    entry.reachable = reachable.contains(key);
+                    (!entry.reachable
+                        && matches!(
+                            entry.policy,
+                            crate::core::ImageCachePolicy::NoStore
+                                | crate::core::ImageCachePolicy::WhileVisible
+                        ))
+                    .then(|| key.clone())
+                })
+                .collect::<Vec<_>>();
+            for key in evict {
+                if let Some(entry) = cache.entries.remove(&key) {
+                    cache.resident_bytes =
+                        cache.resident_bytes.saturating_sub(entry.resident_bytes);
+                    cache.evictions = cache.evictions.saturating_add(1);
+                }
+            }
+            let retained = cache.entries.keys().cloned().collect::<HashSet<_>>();
+            drop(cache);
+            IMAGE_REQUESTS
+                .lock()
+                .expect("image request registry poisoned")
+                .retain(|key, _| retained.contains(key) || reachable.contains(key));
         },
     )
+}
+
+fn trim_cached_image_cache(target_bytes: usize) -> usize {
+    if target_bytes == 0 {
+        IMAGE_CACHE_EPOCH.fetch_add(1, Ordering::AcqRel);
+    }
+    let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
+    let before = cache.resident_bytes;
+    cache.evict_to(target_bytes, usize::MAX);
+    let released = before.saturating_sub(cache.resident_bytes);
+    if target_bytes == 0 {
+        cache.entries.clear();
+        cache.resident_bytes = 0;
+        drop(cache);
+        IMAGE_REACHABILITY
+            .lock()
+            .expect("image reachability poisoned")
+            .clear();
+        IMAGE_REQUESTS
+            .lock()
+            .expect("image request registry poisoned")
+            .clear();
+        IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
+    }
+    released
 }
 
 fn portable_status(status: CachedImageStatus) -> crate::assets::ImageStatus {
@@ -247,8 +500,9 @@ fn portable_status(status: CachedImageStatus) -> crate::assets::ImageStatus {
 pub fn cached_image_data(source: &ImageSource) -> Option<(Vec<u8>, i32, i32)> {
     let key = source.key();
     let entry = {
-        let cache = IMAGE_CACHE.lock().expect("image cache poisoned");
-        let Some(entry) = cache.entries.get(&key) else {
+        let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
+        let tick = cache.next_tick();
+        let Some(entry) = cache.entries.get_mut(&key) else {
             drop(cache);
             let _ = request_cached_image(source);
             return None;
@@ -259,16 +513,38 @@ pub fn cached_image_data(source: &ImageSource) -> Option<(Vec<u8>, i32, i32)> {
         let Some(bytes) = entry.bytes.as_ref() else {
             return None;
         };
+        entry.last_used = tick;
         (bytes.clone(), entry.width, entry.height)
     };
-    Some(entry)
+    let request = IMAGE_REQUESTS
+        .lock()
+        .expect("image request registry poisoned")
+        .get(&key)
+        .cloned();
+    let governor = IMAGE_MEMORY_GOVERNOR
+        .lock()
+        .expect("image memory governor poisoned")
+        .clone();
+    let (Some(request), Some(governor)) = (request, governor) else {
+        return Some(entry);
+    };
+    let budget = governor.options().budget;
+    let _reservation = governor.try_reserve_task(
+        budget
+            .max_decoded_resource_bytes
+            .min(budget.transient_hard_bytes),
+    )?;
+    let bytes = crate::assets::prepare_image_bytes(Arc::from(entry.0), &request, budget).ok()?;
+    let (width, height) = image_dimensions(bytes.as_ref())?;
+    Some((bytes.to_vec(), width, height))
 }
 
 pub fn draw_cached_image(hdc: HDC, rect: RECT, source: &ImageSource, fit: ImageFit) -> bool {
     let key = source.key();
     let entry = {
-        let cache = IMAGE_CACHE.lock().expect("image cache poisoned");
-        let Some(entry) = cache.entries.get(&key) else {
+        let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
+        let tick = cache.next_tick();
+        let Some(entry) = cache.entries.get_mut(&key) else {
             drop(cache);
             let _ = request_cached_image(source);
             return false;
@@ -279,60 +555,113 @@ pub fn draw_cached_image(hdc: HDC, rect: RECT, source: &ImageSource, fit: ImageF
         let Some(bytes) = entry.bytes.as_ref() else {
             return false;
         };
+        entry.last_used = tick;
         (bytes.clone(), entry.width, entry.height)
     };
 
     draw_image_bytes(hdc, rect, &key, &entry.0, entry.1, entry.2, fit)
 }
 
-fn start_image_load(key: String, source: ImageSource, epoch: u64) {
-    match source {
-        ImageSource::Asset { bytes, .. } => {
-            finish_image_load(key, bytes.to_vec(), epoch);
-        }
-        ImageSource::File(path) => {
-            let failure_key = key.clone();
-            if std::thread::Builder::new()
-                .name("lgui-image-file".to_string())
-                .spawn(move || match fs::read(path) {
-                    Ok(bytes) => finish_image_load(key, bytes, epoch),
-                    Err(_) => fail_image_load(key, epoch),
-                })
-                .is_err()
-            {
-                fail_image_load(failure_key, epoch);
-            }
-        }
-        ImageSource::Url(url) => {
-            let Some(loader) = REMOTE_IMAGE_LOADER
-                .lock()
-                .expect("remote image loader lock poisoned")
-                .clone()
-            else {
-                fail_image_load(key, epoch);
+fn start_image_load(key: String, source: ImageSource, request_key: String, epoch: u64) {
+    if let ImageSource::Asset { bytes, .. } = &source {
+        finish_image_load(key, request_key, bytes.to_vec(), epoch);
+        return;
+    }
+    let request = IMAGE_REQUESTS
+        .lock()
+        .expect("image request registry poisoned")
+        .get(&key)
+        .cloned();
+    let governor = IMAGE_MEMORY_GOVERNOR
+        .lock()
+        .expect("image memory governor poisoned")
+        .clone();
+    let limit = governor
+        .as_ref()
+        .map_or(DEFAULT_IMAGE_CACHE_BUDGET_BYTES, |value| {
+            value.options().budget.max_encoded_resource_bytes
+        });
+    let task_reservation = match governor.as_ref() {
+        Some(governor) => match governor.try_reserve_task(limit) {
+            Some(reservation) => Some(reservation),
+            None => {
+                fail_image_load(key, request_key, epoch);
                 return;
-            };
-            let failure_key = key.clone();
-            if std::thread::Builder::new()
-                .name("lgui-image-http".to_owned())
-                .spawn(move || match loader.load(&url) {
-                    Ok(bytes) => finish_image_load(key, bytes.to_vec(), epoch),
-                    Err(_) => fail_image_load(key, epoch),
-                })
-                .is_err()
-            {
-                fail_image_load(failure_key, epoch);
             }
-        }
+        },
+        None => None,
+    };
+    let loader = REMOTE_IMAGE_LOADER
+        .lock()
+        .expect("remote image loader lock poisoned")
+        .clone();
+    let failure_key = key.clone();
+    let failure_request_key = request_key.clone();
+    if std::thread::Builder::new()
+        .name("lgui-image-loader".to_owned())
+        .spawn(move || {
+            let _task_reservation = task_reservation;
+            let result = match source {
+                ImageSource::File(path) => fs::read(path)
+                    .map(Arc::<[u8]>::from)
+                    .map_err(|error| crate::assets::AssetError::NotFound(error.to_string()))
+                    .and_then(|bytes| crate::assets::validate_encoded_bytes(bytes, limit)),
+                ImageSource::Url(url) => match (loader, governor, request) {
+                    (Some(loader), Some(governor), Some(request)) => {
+                        crate::assets::load_url_image(&loader, &governor, &request, &url)
+                    }
+                    (Some(loader), _, _) => loader
+                        .load(&url)
+                        .and_then(|bytes| crate::assets::validate_encoded_bytes(bytes, limit)),
+                    (None, _, _) => Err(crate::assets::AssetError::Unsupported(
+                        "remote image loader is unavailable".to_owned(),
+                    )),
+                },
+                ImageSource::Asset { .. } => unreachable!(),
+            };
+            match result {
+                Ok(bytes) => finish_image_load(key, request_key, bytes.to_vec(), epoch),
+                Err(_) => fail_image_load(key, request_key, epoch),
+            }
+        })
+        .is_err()
+    {
+        fail_image_load(failure_key, failure_request_key, epoch);
     }
 }
 
-fn finish_image_load(key: String, bytes: Vec<u8>, epoch: u64) {
+fn finish_image_load(key: String, request_key: String, bytes: Vec<u8>, epoch: u64) {
     if !is_current_epoch(epoch) {
         return;
     }
+    let request = IMAGE_REQUESTS
+        .lock()
+        .expect("image request registry poisoned")
+        .get(&key)
+        .cloned();
+    let governor = IMAGE_MEMORY_GOVERNOR
+        .lock()
+        .expect("image memory governor poisoned")
+        .clone();
+    let budget = governor.as_ref().map_or_else(
+        || crate::memory::MemoryBudget::for_profile(crate::memory::MemoryProfile::Balanced),
+        |governor| governor.options().budget,
+    );
+    let request = request.unwrap_or_else(|| match &key[..] {
+        value if value.starts_with("url:") => crate::core::ImageRequest::new(
+            crate::core::UiImageSource::url(value.trim_start_matches("url:")),
+        ),
+        _ => crate::core::ImageRequest::new(crate::core::UiImageSource::file(&key)),
+    });
+    let bytes = match crate::assets::prepare_image_bytes(Arc::from(bytes), &request, budget) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => {
+            fail_image_load(key, request_key, epoch);
+            return;
+        }
+    };
     let Some((width, height)) = image_dimensions(&bytes) else {
-        fail_image_load(key, epoch);
+        fail_image_load(key, request_key, epoch);
         return;
     };
 
@@ -341,13 +670,20 @@ fn finish_image_load(key: String, bytes: Vec<u8>, epoch: u64) {
         if !is_current_epoch(epoch) {
             false
         } else {
-            cache.entries.insert(
+            let resident_bytes = bytes.len();
+            cache.insert(
                 key,
                 CachedImage {
                     status: CachedImageStatus::Ready,
                     bytes: Some(bytes),
                     width,
                     height,
+                    resident_bytes,
+                    last_used: 0,
+                    request_key,
+                    policy: request.cache_policy_value(),
+                    priority: request.priority_value(),
+                    reachable: true,
                 },
             );
             true
@@ -358,19 +694,36 @@ fn finish_image_load(key: String, bytes: Vec<u8>, epoch: u64) {
     }
 }
 
-fn fail_image_load(key: String, epoch: u64) {
+fn fail_image_load(key: String, request_key: String, epoch: u64) {
+    let (policy, priority) = IMAGE_REQUESTS
+        .lock()
+        .expect("image request registry poisoned")
+        .get(&key)
+        .map_or(
+            (
+                crate::core::ImageCachePolicy::Session,
+                crate::memory::CachePriority::Normal,
+            ),
+            |request| (request.cache_policy_value(), request.priority_value()),
+        );
     let updated = {
         let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
         if !is_current_epoch(epoch) {
             false
         } else {
-            cache.entries.insert(
+            cache.insert(
                 key,
                 CachedImage {
                     status: CachedImageStatus::Failed,
                     bytes: None,
                     width: 0,
                     height: 0,
+                    resident_bytes: 0,
+                    last_used: 0,
+                    request_key,
+                    policy,
+                    priority,
+                    reachable: true,
                 },
             );
             true
@@ -408,10 +761,11 @@ fn notify_image_cache_invalidated() {
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(i32, i32)> {
-    let image = decode_image(bytes)?;
-    let dimensions = (image.width, image.height);
-    drop(image);
-    Some(dimensions)
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let (width, height) = reader.into_dimensions().ok()?;
+    Some((i32::try_from(width).ok()?, i32::try_from(height).ok()?))
 }
 
 fn draw_image_bytes(
@@ -423,12 +777,54 @@ fn draw_image_bytes(
     source_height: i32,
     fit: ImageFit,
 ) -> bool {
-    let box_width = (rect.right - rect.left).max(1);
-    let box_height = (rect.bottom - rect.top).max(1);
     if source_width <= 0 || source_height <= 0 {
         return false;
     }
 
+    DECODED_IMAGE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let key = key.to_string();
+        if !cache.contains_touch(&key) {
+            let Some(image) = decode_image(bytes) else {
+                return false;
+            };
+            let Some(image_bytes) = decoded_image_bytes(&image) else {
+                return false;
+            };
+            if !cache.can_store(image_bytes) {
+                return draw_decoded_image(hdc, rect, &image, source_width, source_height, fit);
+            }
+            cache.insert(key.clone(), image, image_bytes);
+        }
+
+        let Some(image) = cache.get(&key) else {
+            return false;
+        };
+        if image.width != source_width || image.height != source_height || image.image.is_null() {
+            return false;
+        }
+
+        draw_decoded_image(hdc, rect, image, source_width, source_height, fit)
+    })
+}
+
+fn decoded_image_bytes(image: &DecodedImage) -> Option<usize> {
+    usize::try_from(image.width)
+        .ok()?
+        .checked_mul(usize::try_from(image.height).ok()?)?
+        .checked_mul(4)
+}
+
+fn draw_decoded_image(
+    hdc: HDC,
+    rect: RECT,
+    image: &DecodedImage,
+    source_width: i32,
+    source_height: i32,
+    fit: ImageFit,
+) -> bool {
+    let box_width = (rect.right - rect.left).max(1);
+    let box_height = (rect.bottom - rect.top).max(1);
     let scale = match fit {
         ImageFit::Cover => f32::max(
             box_width as f32 / source_width as f32,
@@ -443,50 +839,30 @@ fn draw_image_bytes(
     let draw_height = ((source_height as f32 * scale).round() as i32).max(1);
     let left = rect.left + (box_width - draw_width) / 2;
     let top = rect.top + (box_height - draw_height) / 2;
-
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(key) {
-            let Some(image) = decode_image(bytes) else {
-                return false;
-            };
-            cache.insert(key.to_string(), image);
-        }
-
-        let Some(image) = cache.get(key) else {
-            return false;
-        };
-        if image.width != source_width || image.height != source_height || image.image.is_null() {
+    unsafe {
+        let mut graphics: *mut GpGraphics = std::ptr::null_mut();
+        if GdipCreateFromHDC(hdc, &mut graphics) != GpOk || graphics.is_null() {
             return false;
         }
-
-        unsafe {
-            let mut graphics: *mut GpGraphics = std::ptr::null_mut();
-            if GdipCreateFromHDC(hdc, &mut graphics) != GpOk || graphics.is_null() {
-                return false;
-            }
-
-            let status = GdipDrawImageRectRectI(
-                graphics,
-                image.image,
-                left,
-                top,
-                draw_width,
-                draw_height,
-                0,
-                0,
-                source_width,
-                source_height,
-                UnitPixel,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null_mut(),
-            );
-
-            let _ = GdipDeleteGraphics(graphics);
-            status == GpOk
-        }
-    })
+        let status = GdipDrawImageRectRectI(
+            graphics,
+            image.image,
+            left,
+            top,
+            draw_width,
+            draw_height,
+            0,
+            0,
+            source_width,
+            source_height,
+            UnitPixel,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+        let _ = GdipDeleteGraphics(graphics);
+        status == GpOk
+    }
 }
 
 fn decode_image(bytes: &[u8]) -> Option<DecodedImage> {
@@ -539,7 +915,7 @@ mod tests {
     fn remote_loader_populates_the_win32_image_cache() {
         let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start()
             .expect("start GDI+ for image cache test");
-        clear_cached_image_cache();
+        trim_cached_image_cache(0);
         let _loader = install_remote_image_loader(crate::assets::RemoteImageLoaderHandle::new(
             TestRemoteLoader,
         ));
@@ -556,6 +932,6 @@ mod tests {
         assert_eq!(request_cached_image(&source), CachedImageStatus::Ready);
         let (_, width, height) = cached_image_data(&source).expect("cached remote image");
         assert_eq!((width, height), (1, 1));
-        clear_cached_image_cache();
+        trim_cached_image_cache(0);
     }
 }

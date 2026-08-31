@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt,
     num::NonZeroU32,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 

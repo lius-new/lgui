@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use crate::core::{CustomPaintStyle, PhysicalSize, ScenePrimitive, UiRect};
+#[cfg(feature = "svg")]
+use crate::core::PhysicalSize;
+use crate::core::{CustomPaintStyle, ScenePrimitive, UiRect};
 
-use super::{AssetError, ImageData};
+use super::AssetError;
+#[cfg(feature = "svg")]
+use super::ImageData;
 
 pub trait CustomPaintProvider: Send + Sync + 'static {
     fn record(

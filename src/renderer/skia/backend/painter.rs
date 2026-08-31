@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::ImageRequest;
 
 pub(super) struct SkiaPainter<'a> {
     pub(super) cache: &'a mut SkiaCache,
@@ -34,9 +35,9 @@ impl SkiaPainter<'_> {
             }
             ScenePrimitive::Path { path, style, .. } => draw_path(canvas, path, *style),
             ScenePrimitive::Image {
-                rect, source, fit, ..
+                rect, request, fit, ..
             } => {
-                if let Some(image) = self.image(source)? {
+                if let Some(image) = self.image(request)? {
                     draw_image(canvas, &image, *rect, *fit, None);
                 }
             }
@@ -98,7 +99,7 @@ impl SkiaPainter<'_> {
                 child_signature,
                 ..
             } => {
-                let cacheable = spec.cache_policy != StaticLayerCachePolicy::Disabled;
+                let cacheable = spec.cache_policy != RasterCachePolicy::Disabled;
                 let key = format!(
                     "static:{}:{}:{}:{}x{}",
                     id.as_str(),
@@ -128,7 +129,9 @@ impl SkiaPainter<'_> {
                             fit,
                         } = spec.source
                         {
-                            if let Some(base) = self.image(&UiImageSource::Static(key))? {
+                            if let Some(base) =
+                                self.image(&ImageRequest::new(UiImageSource::Static(key)))?
+                            {
                                 draw_image(
                                     layer_canvas,
                                     &base,
@@ -144,7 +147,12 @@ impl SkiaPainter<'_> {
                         layer_canvas.restore();
                         let image = surface.image_snapshot();
                         if cacheable {
-                            self.cache.insert(key, image)
+                            self.cache.insert_with_policy(
+                                key,
+                                image,
+                                spec.cache_policy.retention().unwrap_or_default(),
+                                spec.cache_policy.priority().unwrap_or_default(),
+                            )
                         } else {
                             image
                         }
@@ -207,7 +215,8 @@ impl SkiaPainter<'_> {
         Ok(surface.image_snapshot())
     }
 
-    fn image(&mut self, source: &UiImageSource) -> Result<Option<Image>, String> {
+    fn image(&mut self, request: &ImageRequest) -> Result<Option<Image>, String> {
+        let source = request.source();
         let key = image_key(source);
         if let Some(image) = self.cache.get(&key) {
             return Ok(Some(image));
@@ -218,8 +227,8 @@ impl SkiaPainter<'_> {
                 None => return Ok(None),
             },
             UiImageSource::File(_) | UiImageSource::Url(_) => {
-                let Some(bytes) = crate::assets::cached_image_bytes(source) else {
-                    let _ = crate::assets::request_image(source);
+                let Some(bytes) = crate::assets::cached_image_bytes(request) else {
+                    let _ = crate::assets::request_image(request);
                     return Ok(None);
                 };
                 bytes
@@ -272,7 +281,8 @@ impl SkiaPainter<'_> {
         path: Option<&UiPath>,
         style: BackdropBlurStyle,
     ) -> Result<(), String> {
-        let Some(image) = self.image(&UiImageSource::Static(style.source))? else {
+        let Some(image) = self.image(&ImageRequest::new(UiImageSource::Static(style.source)))?
+        else {
             return Ok(());
         };
         canvas.save();

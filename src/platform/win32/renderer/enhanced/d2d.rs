@@ -42,11 +42,11 @@ use windows::{
     },
 };
 
-use super::{blur::with_backdrop_blur_bgra, image, static_layer_raster_cache};
+use super::{blur::with_backdrop_blur_bgra, image};
 use lgui::core::{
     compositing_layer_damage, Color, CompositingLayerBackground, IconStyle, ImageFit,
-    LayerTransform, OverlayStyle, PathStyle, Scene, ScenePrimitive, StaticLayerBackground,
-    StaticLayerCachePolicy, StaticLayerSource, StaticLayerSpec, Stroke, TextAlign, UiId,
+    LayerTransform, OverlayStyle, PathStyle, RasterCachePolicy, Scene, ScenePrimitive,
+    StaticLayerBackground, StaticLayerSource, StaticLayerSpec, Stroke, TextAlign, UiId,
     UiImageSource, UiPath, UiPathCommand, UiRect, VisualStyle,
 };
 use lgui::platform::win32::render_trace::{self as trace, TraceCategory};

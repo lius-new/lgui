@@ -67,9 +67,12 @@ mod primitives;
 mod renderer;
 mod text;
 
+pub(crate) use cache::{
+    gdi_renderer_cache_usage, set_gdi_renderer_cache_budget, trim_gdi_renderer_caches,
+};
 pub use cache::{
-    clear_gdi_renderer_caches, release_gdi_compositing_layer_scope, reset_gdi_frame_blit_metrics,
-    take_gdi_frame_blit_metrics, GdiFrameBlitMetrics, GdiFrameBlitSourceMetrics,
+    release_gdi_compositing_layer_scope, reset_gdi_frame_blit_metrics, take_gdi_frame_blit_metrics,
+    GdiFrameBlitMetrics, GdiFrameBlitSourceMetrics,
 };
 pub use renderer::GdiRenderer;
 

@@ -1,7 +1,6 @@
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::HashMap,
     ffi::c_void,
     ptr::null_mut,
     sync::{Arc, OnceLock},
@@ -23,6 +22,12 @@ use crate::{
 static SVG_REGISTRY: OnceLock<SvgIconRegistry> = OnceLock::new();
 static SVG_FONT_REGISTRY: OnceLock<SvgFontRegistry> = OnceLock::new();
 static SVG_FONTDB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
+const DEFAULT_SVG_CACHE_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+
+fn svg_telemetry() -> &'static crate::memory::CacheTelemetry {
+    static TELEMETRY: OnceLock<crate::memory::CacheTelemetry> = OnceLock::new();
+    TELEMETRY.get_or_init(Default::default)
+}
 
 #[derive(Default)]
 pub struct SvgFontRegistry {
@@ -65,6 +70,7 @@ struct SvgCacheKey {
     alpha: u8,
 }
 
+#[derive(Clone)]
 pub struct SvgBitmap {
     pub width: i32,
     pub height: i32,
@@ -72,12 +78,49 @@ pub struct SvgBitmap {
 }
 
 thread_local! {
-    static SVG_CACHE: RefCell<HashMap<SvgCacheKey, SvgBitmap>> = RefCell::new(HashMap::new());
+    static SVG_CACHE: RefCell<crate::memory::LruCache<SvgCacheKey, SvgBitmap>> = RefCell::new(
+        crate::memory::LruCache::new(
+            DEFAULT_SVG_CACHE_BUDGET_BYTES,
+            crate::memory::ResourceClass::Cache,
+            svg_telemetry().clone(),
+        )
+    );
 }
 
-#[cfg(feature = "backend-win32")]
-pub(crate) fn clear_svg_bitmap_cache() {
-    SVG_CACHE.with(|cache| cache.borrow_mut().clear());
+#[cfg(all(
+    feature = "backend-win32",
+    any(
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        feature = "renderer-skia"
+    )
+))]
+pub(crate) fn svg_bitmap_cache_usage() -> crate::memory::CacheUsage {
+    svg_telemetry().snapshot()
+}
+
+#[cfg(all(
+    feature = "backend-win32",
+    any(
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        feature = "renderer-skia"
+    )
+))]
+pub(crate) fn trim_svg_bitmap_cache(target_bytes: usize) -> usize {
+    SVG_CACHE.with(|cache| cache.borrow_mut().trim_to(target_bytes))
+}
+
+#[cfg(all(
+    feature = "backend-win32",
+    any(
+        feature = "renderer-gdi",
+        feature = "renderer-d2d",
+        feature = "renderer-skia"
+    )
+))]
+pub(crate) fn set_svg_bitmap_cache_budget(budget_bytes: usize) {
+    SVG_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
 }
 
 pub fn draw_svg_icon(hdc: HDC, key: &'static str, rect: UiRect, style: IconStyle) {
@@ -102,17 +145,16 @@ pub fn rasterize_svg_icon_bgra(
     };
     SVG_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if !cache.contains_key(&cache_key) {
+        if !cache.contains_touch(&cache_key) {
             let Some(bitmap) = rasterize_icon(cache_key) else {
                 return None;
             };
-            cache.insert(cache_key, bitmap);
+            let bytes = bitmap.premultiplied_bgra.len();
+            if !cache.insert(cache_key, bitmap, bytes) {
+                return rasterize_icon(cache_key);
+            }
         }
-        cache.get(&cache_key).map(|bitmap| SvgBitmap {
-            width: bitmap.width,
-            height: bitmap.height,
-            premultiplied_bgra: bitmap.premultiplied_bgra.clone(),
-        })
+        cache.get(&cache_key).cloned()
     })
 }
 

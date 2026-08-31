@@ -23,8 +23,15 @@ pub(super) fn draw_command_d2d(
         } => draw_line(&resources.context, *start, *end, *stroke),
         ScenePrimitive::Path { path, style, .. } => draw_path(&resources.context, path, *style),
         ScenePrimitive::Image {
-            rect, source, fit, ..
-        } => draw_image(resources, *rect, source, *fit),
+            rect,
+            source,
+            request,
+            fit,
+            ..
+        } => {
+            let _ = crate::assets::request_image(request);
+            draw_image(resources, *rect, source, *fit)
+        }
         ScenePrimitive::Icon {
             rect, key, style, ..
         } => draw_icon(resources, *rect, key, *style),
@@ -509,11 +516,11 @@ pub(super) fn draw_static_layer(
         return Ok(());
     }
     let cache_key = static_layer_cache_key(id, spec, width, height, child_signature);
-    if spec.cache_policy == StaticLayerCachePolicy::Disabled {
+    if spec.cache_policy == RasterCachePolicy::Disabled {
         let bitmap = if let Some(bitmap) = resources.frame_bitmap_cache.get(&cache_key) {
             bitmap.clone()
         } else {
-            let bitmap = render_static_layer_bitmap(resources, rect, spec, commands, None)?;
+            let bitmap = render_static_layer_bitmap(resources, rect, spec, commands)?;
             resources
                 .frame_bitmap_cache
                 .insert(cache_key, bitmap.clone());
@@ -528,8 +535,13 @@ pub(super) fn draw_static_layer(
     let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&cache_key) {
         bitmap
     } else {
-        let bitmap = render_static_layer_bitmap(resources, rect, spec, commands, Some(&cache_key))?;
-        resources.bitmap_cache.insert(cache_key, bitmap.clone());
+        let bitmap = render_static_layer_bitmap(resources, rect, spec, commands)?;
+        resources.bitmap_cache.insert_with_policy(
+            cache_key,
+            bitmap.clone(),
+            spec.cache_policy.retention().unwrap_or_default(),
+            spec.cache_policy.priority().unwrap_or_default(),
+        );
         unsafe {
             resources.context.SetTarget(&resources.scene_bitmap);
         }
@@ -544,23 +556,8 @@ pub(super) fn render_static_layer_bitmap(
     rect: UiRect,
     spec: &StaticLayerSpec,
     commands: &[ScenePrimitive],
-    cache_key: Option<&D2dBitmapCacheKey>,
 ) -> Result<ID2D1Bitmap1> {
     let start = Instant::now();
-    if spec.cache_policy == StaticLayerCachePolicy::MemoryAndDisk {
-        if let Some(D2dBitmapCacheKey::StaticLayer { raster_key, .. }) = cache_key {
-            if let Some(cached) = static_layer_raster_cache::load(raster_key) {
-                trace_duration("d2d.static_layer.raster_hit", start.elapsed());
-                return create_bgra_bitmap(
-                    &resources.context,
-                    cached.width,
-                    cached.height,
-                    &cached.premultiplied_bgra,
-                );
-            }
-        }
-    }
-
     let (width, height) = raster_size(rect);
     let bitmap = create_scene_bitmap(&resources.context, width, height)?;
     unsafe {
