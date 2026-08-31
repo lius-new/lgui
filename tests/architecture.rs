@@ -5,6 +5,106 @@ use std::{
 
 use lgui::core::ScenePrimitiveKind;
 
+#[test]
+fn source_tree_expresses_subsystem_boundaries() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for directory in [
+        "application",
+        "assets",
+        "command",
+        "core",
+        "diagnostics",
+        "events",
+        "platform",
+        "renderer",
+        "router",
+        "runtime",
+        "services",
+        "store",
+        "text",
+        "theme",
+        "widgets",
+        "core/foundation",
+        "core/view",
+        "core/component",
+        "core/input",
+        "core/layout",
+        "core/scene",
+        "core/component/runtime",
+        "core/scene/render",
+        "router/matcher",
+        "router/runtime",
+        "router/declarative",
+        "store/runtime",
+        "runtime/host",
+        "runtime/frame",
+        "renderer/skia/backend",
+        "platform/winit",
+        "platform/winit/surface",
+        "platform/win32/application",
+        "platform/win32/application/host",
+        "platform/win32/window",
+        "platform/win32/renderer",
+        "platform/win32/renderer/enhanced/gdi_renderer",
+        "platform/win32/renderer/enhanced/d2d",
+        "platform/win32/assets",
+        "platform/win32/services",
+    ] {
+        assert!(root.join(directory).is_dir(), "missing `{directory}`");
+    }
+
+    for legacy in [
+        "application.rs",
+        "assets.rs",
+        "diagnostics.rs",
+        "renderer.rs",
+        "session.rs",
+        "text.rs",
+        "theme.rs",
+        "frame",
+        "host",
+        "platform/skia",
+        "router/table.rs",
+        "router/runtime.rs",
+        "core/scene/render.rs",
+        "core/component/runtime.rs",
+        "runtime/host/engine.rs",
+        "assets/system.rs",
+        "text/system.rs",
+        "widgets/select/control.rs",
+        "widgets/slider/control.rs",
+    ] {
+        assert!(
+            !root.join(legacy).exists(),
+            "legacy path `{legacy}` remains"
+        );
+    }
+
+    for leaf in [
+        "router/runtime/history.rs",
+        "router/runtime/snapshot.rs",
+        "router/runtime/subscription.rs",
+        "router/declarative/route.rs",
+        "router/declarative/builder.rs",
+        "router/declarative/outlet.rs",
+        "router/declarative/redirect.rs",
+        "runtime/host/commit.rs",
+        "runtime/host/reconcile.rs",
+        "runtime/host/scene.rs",
+        "runtime/host/damage.rs",
+        "assets/resolver.rs",
+        "assets/cache.rs",
+        "text/layout.rs",
+        "text/service.rs",
+        "platform/winit/event_loop.rs",
+        "platform/winit/window.rs",
+        "platform/winit/renderer.rs",
+        "platform/winit/input.rs",
+    ] {
+        assert!(root.join(leaf).is_file(), "missing `{leaf}`");
+    }
+}
+
 fn rust_sources(relative: &str) -> Vec<(PathBuf, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
     let mut pending = vec![root];
@@ -25,7 +125,7 @@ fn rust_sources(relative: &str) -> Vec<(PathBuf, String)> {
 #[test]
 fn runtime_has_no_application_platform_or_backend_dependencies() {
     let win32_backend = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/platform/win32");
-    let winit_windows = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/platform/winit_windows.rs");
+    let winit_windows = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/platform/winit/windows.rs");
     let forbidden = [
         "crate::frontend",
         "native::windows",
@@ -126,8 +226,8 @@ fn win32_backend_has_no_application_dependencies() {
 #[test]
 fn tray_host_owns_a_message_loop_outside_the_application_window_thread() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tray =
-        fs::read_to_string(root.join("src/platform/win32/tray.rs")).expect("read Win32 tray host");
+    let tray = fs::read_to_string(root.join("src/platform/win32/services/tray.rs"))
+        .expect("read Win32 tray host");
     for required in [
         ".name(\"lgui-tray\".to_string())",
         "run_tray_thread(",
@@ -140,8 +240,10 @@ fn tray_host_owns_a_message_loop_outside_the_application_window_thread() {
         );
     }
 
-    let application = fs::read_to_string(root.join("src/platform/win32/application.rs"))
-        .expect("read Win32 application host");
+    let application = rust_sources("src/platform/win32/application")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
     for forbidden in ["handle_tray_message", "show_tray_menu", "TRAY_MESSAGE_ID"] {
         assert!(
             !application.contains(forbidden),
@@ -153,7 +255,7 @@ fn tray_host_owns_a_message_loop_outside_the_application_window_thread() {
 #[test]
 fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let background = fs::read_to_string(root.join("src/platform/win32/background.rs"))
+    let background = fs::read_to_string(root.join("src/platform/win32/window/background.rs"))
         .expect("read Win32 background memory lifecycle");
     for required in [
         "release_visual_caches",
@@ -167,8 +269,10 @@ fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
         );
     }
 
-    let application = fs::read_to_string(root.join("src/platform/win32/application.rs"))
-        .expect("read Win32 application host");
+    let application = rust_sources("src/platform/win32/application")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
     for required in [
         "suspend_application_if_backgrounded",
         "session.suspend_rendering()",
@@ -185,7 +289,7 @@ fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
 #[test]
 fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let gdiplus = fs::read_to_string(root.join("src/platform/win32/gdiplus.rs"))
+    let gdiplus = fs::read_to_string(root.join("src/platform/win32/assets/gdiplus.rs"))
         .expect("read Win32 GDI+ lifecycle");
     for required in [
         "GdiplusStartup",
@@ -198,8 +302,10 @@ fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
         );
     }
 
-    let application = fs::read_to_string(root.join("src/platform/win32/application.rs"))
-        .expect("read Win32 application host");
+    let application = rust_sources("src/platform/win32/application")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
     assert!(
         application.contains("GdiPlusRuntime::start()"),
         "Win32 application no longer starts its image runtime"
@@ -209,8 +315,8 @@ fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
 #[test]
 fn portable_renderer_contract_has_no_platform_or_graphics_api_types() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let renderer =
-        fs::read_to_string(root.join("src/renderer.rs")).expect("read portable renderer contract");
+    let renderer = fs::read_to_string(root.join("src/renderer/contract.rs"))
+        .expect("read portable renderer contract");
 
     for required in [
         "pub trait SceneRenderer",
@@ -249,14 +355,15 @@ fn portable_renderer_contract_has_no_platform_or_graphics_api_types() {
 
 #[test]
 fn portable_asset_and_text_services_have_no_platform_dependencies() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for module in ["assets.rs", "icons.rs", "text.rs"] {
-        let source = fs::read_to_string(root.join("src").join(module))
-            .unwrap_or_else(|error| panic!("read portable {module}: {error}"));
+    for (module, source) in ["src/assets", "src/text"]
+        .into_iter()
+        .flat_map(rust_sources)
+    {
         for forbidden in ["crate::platform", "windows::", "winit::", "skia_safe"] {
             assert!(
                 !source.contains(forbidden),
-                "portable {module} contains `{forbidden}`"
+                "portable {} contains `{forbidden}`",
+                module.display()
             );
         }
     }
@@ -265,7 +372,8 @@ fn portable_asset_and_text_services_have_no_platform_dependencies() {
 #[test]
 fn portable_input_uses_complete_shared_keyboard_and_pointer_vocabulary() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let events = fs::read_to_string(root.join("src/core/event.rs")).expect("read input model");
+    let events =
+        fs::read_to_string(root.join("src/core/input/event.rs")).expect("read input model");
 
     for required in [
         "pub use keyboard_types",
@@ -297,9 +405,9 @@ fn portable_input_uses_complete_shared_keyboard_and_pointer_vocabulary() {
 #[test]
 fn portable_window_options_do_not_own_win32_policy() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let application =
-        fs::read_to_string(root.join("src/application.rs")).expect("read application model");
-    let window_options = application
+    let window_options_source = fs::read_to_string(root.join("src/application/window/options.rs"))
+        .expect("read portable window options");
+    let window_options = window_options_source
         .split_once("pub struct WindowOptions")
         .expect("WindowOptions declaration")
         .1
@@ -313,8 +421,10 @@ fn portable_window_options_do_not_own_win32_policy() {
         );
     }
 
-    let win32 = fs::read_to_string(root.join("src/platform/win32/application.rs"))
-        .expect("read Win32 window options");
+    let win32 = rust_sources("src/platform/win32/application")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
     assert!(win32.contains("pub struct Win32WindowOptions"));
 }
 
@@ -339,7 +449,7 @@ fn skia_design_assigns_every_scene_primitive() {
 #[test]
 fn portable_skia_contains_no_window_system_adapter_code() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let sources = rust_sources("src/platform/skia");
+    let sources = rust_sources("src/renderer/skia");
     let forbidden = [
         "windows::",
         "Win32::",
@@ -367,7 +477,7 @@ fn portable_skia_contains_no_window_system_adapter_code() {
         violations.join("\n")
     );
 
-    let surface_adapter = root.join("src/platform/winit_skia_gl.rs");
+    let surface_adapter = root.join("src/platform/winit/surface/gl.rs");
     assert!(
         surface_adapter.is_file(),
         "winit OpenGL Skia surface adapter is missing"

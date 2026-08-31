@@ -3,43 +3,62 @@
     feature = "renderer-d2d",
     feature = "renderer-skia"
 ))]
+#[path = "application/mod.rs"]
 mod application;
 #[cfg(any(feature = "multi-window", feature = "renderer-gdi"))]
+#[path = "renderer/backbuffer.rs"]
 mod backbuffer;
 #[cfg(any(
     feature = "renderer-gdi",
     feature = "renderer-d2d",
     feature = "renderer-skia"
 ))]
+#[path = "window/background.rs"]
 mod background;
 #[cfg(feature = "renderer-d2d")]
+#[path = "renderer/d2d.rs"]
 mod d2d;
+#[path = "application/dispatcher.rs"]
 mod dispatcher;
+#[path = "window/dpi.rs"]
 mod dpi;
 #[cfg(any(feature = "advanced-rendering", feature = "renderer-d2d"))]
+#[path = "renderer/enhanced/mod.rs"]
 pub mod enhanced;
 #[cfg(feature = "backend-win32")]
+#[path = "assets/fonts.rs"]
 mod fonts;
 #[cfg(feature = "renderer-gdi")]
+#[path = "renderer/gdi.rs"]
 mod gdi;
 #[cfg(feature = "images")]
+#[path = "assets/gdiplus.rs"]
 mod gdiplus;
 #[cfg(feature = "multi-window")]
+#[path = "window/hidden_window.rs"]
 mod hidden_window;
+#[path = "assets/ico.rs"]
 mod ico;
 #[cfg(feature = "images")]
+#[path = "assets/image_cache.rs"]
 mod image_cache;
 #[cfg(feature = "notifications")]
+#[path = "services/notifications.rs"]
 mod notifications;
 #[cfg(feature = "diagnostics")]
+#[path = "renderer/render_trace.rs"]
 pub mod render_trace;
 #[cfg(feature = "svg")]
+#[path = "assets/svg.rs"]
 mod svg;
 #[cfg(feature = "system-diagnostics")]
+#[path = "services/system_usage.rs"]
 mod system_usage;
 #[cfg(feature = "tray")]
+#[path = "services/tray.rs"]
 mod tray;
 #[cfg(feature = "backend-winit")]
+#[path = "window/winit_adapter.rs"]
 mod winit_adapter;
 
 #[cfg(feature = "renderer-skia")]

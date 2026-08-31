@@ -40,6 +40,56 @@ The portable modules do not depend on Win32. `platform::win32` does not depend o
 pages, routes, stores, themes, network code, or project environment variables. Business crates
 may provide data and resource providers, but they do not wrap or re-export GUI infrastructure.
 
+## Source Layout
+
+The physical source tree follows subsystem ownership rather than implementation technology:
+
+```text
+src/
+├─ application/                 # builder, context, handles, desktop/window registration
+├─ command/                     # typed contracts, context, registry, handles
+├─ events/                      # typed contracts, bus, subscriptions
+├─ router/                      # context/hooks, matcher, runtime, declarative router
+├─ store/                       # definitions/hooks/subscriptions and runtime registry
+├─ core/                        # foundation, view, component, input, layout, scene
+├─ runtime/                     # session, retained host, frame invalidation
+├─ renderer/                    # portable contract/cache and platform-neutral Skia backend
+├─ platform/                    # Winit adapters and categorized Win32 implementation
+├─ services/                    # clipboard, dialogs, URL opening and service facade
+├─ assets/                      # image/resource system and icons
+├─ text/                        # text model, layout and text-system boundary
+├─ theme/                       # theme tokens and context
+├─ widgets/                     # controls; complex controls own subdirectories
+└─ diagnostics/                 # model, collection, providers and timing
+```
+
+`runtime` is the physical owner of Session/Host/Frame implementation. The existing
+`lgui::session`, `lgui::host`, and `lgui::frame` paths remain compatibility entry points, while
+`lgui::runtime` provides the consolidated namespace. Core's physical responsibility directories
+also retain the established flat `lgui::core::*` exports. Cargo Feature names and their meaning do
+not depend on the physical file layout.
+
+Winit code is grouped into application, accessibility, Windows integration, and surface adapters.
+Win32 code is grouped into application, window, renderer, assets, and services. The portable Skia
+scene implementation belongs to `renderer/skia`, not to either window backend.
+
+Large runtime implementations are split one level further by responsibility:
+
+```text
+core/component/runtime/          # state, input, action, animation, focus
+core/scene/render/               # primitives, scene, compiler, transform, phase, damage
+runtime/host/                    # model, storage, reconcile, commit, scene, semantics, damage
+renderer/skia/backend/           # support, text, cache, software surface, painter, primitives
+platform/winit/                  # application, event loop, window, input, renderer, surface
+platform/win32/application/host/ # contract, state, backend, window, message loop, rendering, input
+platform/win32/renderer/enhanced/d2d/
+platform/win32/renderer/enhanced/gdi_renderer/
+```
+
+The Win32 and Skia leaf files are included into their owning backend module. This keeps native
+resource state and private helper visibility in the same Rust module while making physical
+ownership discoverable; it does not introduce a second renderer, message loop, or cache owner.
+
 The GDI and Direct2D factories implement the same Win32 Application renderer contract. With
 `advanced-rendering`, both consume the complete Scene model including paths, images, SVG icons,
 custom paint, overlays, backdrop blur, static layers, and scroll rasters. Direct2D owns its

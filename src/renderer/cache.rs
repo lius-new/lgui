@@ -1,0 +1,113 @@
+use std::{cell::RefCell, sync::Arc};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StaticLayerMemoryCacheStats {
+    pub entry_count: usize,
+    pub bytes: usize,
+    pub budget_bytes: usize,
+    pub hits: u64,
+    pub misses: u64,
+    pub stores: u64,
+    pub evictions: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StaticLayerMemoryCachePrefixStats {
+    pub entry_count: usize,
+    pub bytes: usize,
+}
+
+#[derive(Clone)]
+pub struct RenderCacheHandle {
+    clear_all: Arc<dyn Fn() + Send + Sync>,
+    clear_scroll_raster: Arc<dyn Fn() + Send + Sync>,
+    stats: Arc<dyn Fn() -> StaticLayerMemoryCacheStats + Send + Sync>,
+    prefix_stats: Arc<dyn Fn(&str) -> StaticLayerMemoryCachePrefixStats + Send + Sync>,
+    prefix_entry_ids: Arc<dyn Fn(&str) -> Vec<String> + Send + Sync>,
+}
+
+impl RenderCacheHandle {
+    pub fn new(
+        clear_all: impl Fn() + Send + Sync + 'static,
+        clear_scroll_raster: impl Fn() + Send + Sync + 'static,
+        stats: impl Fn() -> StaticLayerMemoryCacheStats + Send + Sync + 'static,
+        prefix_stats: impl Fn(&str) -> StaticLayerMemoryCachePrefixStats + Send + Sync + 'static,
+        prefix_entry_ids: impl Fn(&str) -> Vec<String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            clear_all: Arc::new(clear_all),
+            clear_scroll_raster: Arc::new(clear_scroll_raster),
+            stats: Arc::new(stats),
+            prefix_stats: Arc::new(prefix_stats),
+            prefix_entry_ids: Arc::new(prefix_entry_ids),
+        }
+    }
+}
+
+thread_local! {
+    static RENDER_CACHE: RefCell<Option<RenderCacheHandle>> = const { RefCell::new(None) };
+}
+
+pub(crate) struct RenderCacheGuard {
+    previous: Option<RenderCacheHandle>,
+}
+
+impl Drop for RenderCacheGuard {
+    fn drop(&mut self) {
+        RENDER_CACHE.with(|current| {
+            *current.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+pub(crate) fn install_render_cache(handle: RenderCacheHandle) -> RenderCacheGuard {
+    let previous = RENDER_CACHE.with(|current| current.borrow_mut().replace(handle));
+    RenderCacheGuard { previous }
+}
+
+pub fn clear_render_caches() {
+    RENDER_CACHE.with(|current| {
+        if let Some(cache) = current.borrow().as_ref() {
+            (cache.clear_all)();
+        }
+    });
+}
+
+pub fn clear_scroll_raster_cache() {
+    RENDER_CACHE.with(|current| {
+        if let Some(cache) = current.borrow().as_ref() {
+            (cache.clear_scroll_raster)();
+        }
+    });
+}
+
+pub fn static_layer_cache_stats() -> StaticLayerMemoryCacheStats {
+    RENDER_CACHE.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .map_or_else(StaticLayerMemoryCacheStats::default, |cache| {
+                (cache.stats)()
+            })
+    })
+}
+
+pub fn static_layer_cache_stats_for_prefix(prefix: &str) -> StaticLayerMemoryCachePrefixStats {
+    RENDER_CACHE.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .map_or_else(StaticLayerMemoryCachePrefixStats::default, |cache| {
+                (cache.prefix_stats)(prefix)
+            })
+    })
+}
+
+pub fn static_layer_cache_entry_ids_for_prefix(prefix: &str) -> Vec<String> {
+    RENDER_CACHE.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .map_or_else(Vec::new, |cache| (cache.prefix_entry_ids)(prefix))
+    })
+}

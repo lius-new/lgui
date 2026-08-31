@@ -1,0 +1,31 @@
+use std::sync::Arc;
+
+use crate::core::{HostTree, UiRect};
+
+use super::{DiagnosticsQuery, FrameDiagnosticsSnapshot, FrameSample};
+
+pub trait DiagnosticsProvider: Send + Sync {
+    fn snapshot(&self) -> FrameDiagnosticsSnapshot;
+    fn query(&self, query: DiagnosticsQuery) -> Vec<FrameSample>;
+}
+
+pub trait DiagnosticsSink: Send + Sync {
+    fn record(&self, sample: FrameSample, tree: &HostTree, viewport: UiRect);
+}
+
+#[derive(Clone)]
+pub(crate) struct DiagnosticsRegistration {
+    sink: Arc<dyn DiagnosticsSink>,
+}
+
+impl DiagnosticsRegistration {
+    pub(crate) fn new(sink: impl DiagnosticsSink + 'static) -> Self {
+        Self {
+            sink: Arc::new(sink),
+        }
+    }
+
+    pub(crate) fn record(&self, sample: FrameSample, tree: &HostTree, viewport: UiRect) {
+        self.sink.record(sample, tree, viewport);
+    }
+}

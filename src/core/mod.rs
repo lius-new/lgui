@@ -1,35 +1,61 @@
-#![allow(dead_code, unused_imports)]
-
+#[path = "input/action.rs"]
 mod action;
 mod animation;
+#[path = "view/builder.rs"]
 mod builder;
+#[path = "component/component_state.rs"]
 mod component_state;
+#[path = "component/component_tree.rs"]
 mod component_tree;
+#[path = "scene/compositing_layer.rs"]
 mod compositing_layer;
+#[path = "component/context.rs"]
 mod context;
+#[path = "component/context_value.rs"]
 mod context_value;
+#[path = "view/declarative.rs"]
 mod declarative;
+#[path = "layout/dirty.rs"]
 mod dirty;
+#[path = "input/dispatch.rs"]
 mod dispatch;
+#[path = "component/effect.rs"]
 mod effect;
+#[path = "view/element.rs"]
 mod element;
+#[path = "input/event.rs"]
 mod event;
+#[path = "input/event_context.rs"]
 mod event_context;
+#[path = "foundation/geometry.rs"]
 mod geometry;
+#[path = "input/handler.rs"]
 mod handler;
+#[path = "component/hook_state.rs"]
 mod hook_state;
+#[path = "foundation/id.rs"]
 mod id;
+#[path = "layout/layout.rs"]
 mod layout;
+#[path = "view/node.rs"]
 mod node;
+#[path = "component/observable.rs"]
 mod observable;
+#[path = "component/reactor.rs"]
 mod reactor;
+#[path = "scene/render/mod.rs"]
 mod render;
+#[path = "component/runtime/mod.rs"]
 mod runtime;
+#[path = "component/scope.rs"]
 mod scope;
 mod semantics;
+#[path = "scene/static_layer.rs"]
 mod static_layer;
+#[path = "foundation/style.rs"]
 mod style;
 mod task;
+#[path = "view/tree.rs"]
 mod tree;
 
 #[cfg(feature = "router")]
