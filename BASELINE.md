@@ -23,11 +23,11 @@ cargo test -p lgui --no-default-features --features renderer-skia --quiet
 cargo test -p lgui --no-default-features --features backend-winit --quiet
 cargo test -p lgui --quiet
 cargo test -p lgui --all-features --quiet
-cargo check -p liugc --bin liugc
+cargo check -p liugc --bin liugc --features diagnostics-runtime
 cargo test -p liugc --bin liugc frontend:: --quiet
 cargo test -p liugc --bin liugc backend::settings::storage::tests:: --quiet
 cargo check -p lgui-showcase --all-features
-cargo fmt -p lgui -- --check
+cargo fmt --all -- --check
 git diff --check
 ```
 
@@ -39,11 +39,15 @@ Memory acceptance uses the same fixed inputs across GDI, D2D, and Skia. Exercise
 avatar loading, the Store list, route round trips, dialogs, theme/scale changes, simultaneous
 windows, hide/restore, and device recovery. Capture `MemorySnapshot`, working set, private bytes,
 and available GPU memory after warm-up, at the operation peak, after leaving the page, after all
-windows are hidden, and after restore. Repeated churn must settle below the selected profile's
-soft budgets after owner-thread Trim work drains; visible pinned bytes may exceed a cache share but
-must be reported as pinned overflow rather than silently discarded.
+windows are hidden, and after restore. Repeated churn must settle below the application's configured
+policy after owner-thread Trim work drains; visible pinned bytes may exceed a cache share but must
+be reported as pinned overflow rather than silently discarded.
 
-Release acceptance also verifies that the Windows settings page restores version-6 memory
-settings, profile changes rebalance existing domains, memory and persistent clear actions report
-results, `memory.snapshot`/`memory.trim` work with diagnostics enabled, and no native resource is
-dropped outside its owning UI thread.
+Release acceptance also verifies that the embedded Windows `client.toml` requires a fixed memory
+profile, persistent-cache choice, and disk quota; startup applies that configuration without adding
+memory controls to user Settings. `memory.snapshot`/`memory.trim` must work with diagnostics enabled,
+and no native resource may be dropped outside its owning UI thread. Architecture tests must reject
+framework-owned profiles, implicit `MemoryOptions` defaults, domain weights, and any application path
+that reaches `run` without explicit memory options. Focused tests must preserve exact application
+domain budgets, including zero, and prove that lifecycle and default-image policy come from the
+application.

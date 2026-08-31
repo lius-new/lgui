@@ -15,7 +15,7 @@ fn application_integration_maps_tray_commands_and_visibility() {
                 .push(command.to_owned());
         }),
     };
-    let context = ApplicationContext::empty();
+    let context = ApplicationContext::empty(crate::memory::test_memory_options());
     let visible = Arc::new(Mutex::new(None));
     let captured_visibility = Arc::clone(&visible);
 

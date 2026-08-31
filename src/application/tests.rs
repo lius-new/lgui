@@ -94,6 +94,7 @@ fn application_builder_registers_commands_on_the_runtime_context() {
     let result = Arc::new(Mutex::new(None));
 
     Application::with_backend(InvokingBackend(Arc::clone(&result)))
+        .memory_options(crate::memory::test_memory_options())
         .command::<BuilderCommand>(|_, value| async move { Ok(value + 1) })
         .run(|cx| crate::core::group(cx.viewport()))
         .expect("invoking backend should run");
@@ -124,7 +125,7 @@ fn application_memory_options_are_owned_by_the_runtime_context() {
     }
 
     let captured = Arc::new(Mutex::new(None));
-    let options = crate::memory::MemoryOptions::low_memory().persistent_cache(false);
+    let options = crate::memory::test_memory_options();
     Application::with_backend(MemoryBackend(Arc::clone(&captured)))
         .memory_options(options)
         .run(|cx| crate::core::group(cx.viewport()))
@@ -142,6 +143,7 @@ fn render_errors_are_delivered_with_structured_context() {
     let captured = Arc::clone(&errors);
 
     Application::with_backend(ReportingBackend)
+        .memory_options(crate::memory::test_memory_options())
         .on_render_error(move |error| {
             captured
                 .lock()
@@ -171,6 +173,7 @@ fn application_passes_window_options_to_the_backend() {
         .resizable(false);
 
     Application::with_backend(RecordingBackend(Arc::clone(&recorded)))
+        .memory_options(crate::memory::test_memory_options())
         .window_options(options.clone())
         .run(|_| crate::core::group(UiRect::new(0.0, 0.0, 1.0, 1.0)))
         .expect("mock backend should run");
@@ -243,6 +246,7 @@ fn application_run_mounts_and_renders_the_root_component() {
     let executions = Arc::clone(&root_executions);
 
     Application::with_backend(RenderingBackend(Arc::clone(&backend_frames)))
+        .memory_options(crate::memory::test_memory_options())
         .run(move |cx| {
             let _application = cx.application();
             executions.fetch_add(1, Ordering::SeqCst);
@@ -309,6 +313,7 @@ mod store_lifecycle {
             None,
             CommandRegistry::default(),
             EventBus::default(),
+            crate::memory::test_memory_options(),
         )
     }
 
@@ -325,8 +330,8 @@ mod store_lifecycle {
 
     #[test]
     fn store_instances_are_isolated_per_application() {
-        let first = ApplicationContext::empty();
-        let second = ApplicationContext::empty();
+        let first = ApplicationContext::empty(crate::memory::test_memory_options());
+        let second = ApplicationContext::empty(crate::memory::test_memory_options());
 
         first.update_store::<ValueStore, _>("first", |store| store.0 = 7);
 
@@ -336,7 +341,7 @@ mod store_lifecycle {
 
     #[test]
     fn store_updates_wake_the_owning_application() {
-        let application = ApplicationContext::empty();
+        let application = ApplicationContext::empty(crate::memory::test_memory_options());
         let wakes = Arc::new(AtomicUsize::new(0));
         application.stores().set_wake({
             let wakes = Arc::clone(&wakes);

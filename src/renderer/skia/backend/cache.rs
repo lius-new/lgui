@@ -169,7 +169,7 @@ impl SkiaCache {
     }
 
     pub(crate) fn set_budget(&mut self, budget_bytes: usize) {
-        self.budget_bytes = budget_bytes.max(1);
+        self.budget_bytes = budget_bytes;
         self.evict_to_budget();
     }
 

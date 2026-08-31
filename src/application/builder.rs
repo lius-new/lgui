@@ -36,19 +36,23 @@ use super::RendererKind;
 ))]
 use super::{TrayOptions, TrayRegistration};
 
-pub struct Application<B> {
+pub struct MemoryOptionsMissing;
+
+pub struct MemoryOptionsConfigured(MemoryOptions);
+
+pub struct Application<B, M = MemoryOptionsMissing> {
     backend: B,
     window: WindowOptions,
     resources: Resources,
     executor: Option<UiTaskSpawner>,
     commands: CommandRegistry,
     events: EventBus,
-    memory_options: MemoryOptions,
+    memory_options: M,
     #[cfg(feature = "persistent-cache")]
     persistent_cache: Option<Arc<dyn PersistentCacheStore>>,
 }
 
-impl<B> Application<B> {
+impl<B> Application<B, MemoryOptionsMissing> {
     pub fn with_backend(backend: B) -> Self {
         Self {
             backend,
@@ -57,12 +61,31 @@ impl<B> Application<B> {
             executor: None,
             commands: CommandRegistry::default(),
             events: EventBus::default(),
-            memory_options: MemoryOptions::default(),
+            memory_options: MemoryOptionsMissing,
             #[cfg(feature = "persistent-cache")]
             persistent_cache: None,
         }
     }
 
+    pub fn memory_options(self, options: MemoryOptions) -> Application<B, MemoryOptionsConfigured> {
+        options
+            .validate()
+            .expect("invalid application memory policy");
+        Application {
+            backend: self.backend,
+            window: self.window,
+            resources: self.resources,
+            executor: self.executor,
+            commands: self.commands,
+            events: self.events,
+            memory_options: MemoryOptionsConfigured(options),
+            #[cfg(feature = "persistent-cache")]
+            persistent_cache: self.persistent_cache,
+        }
+    }
+}
+
+impl<B, M> Application<B, M> {
     pub fn window_options(mut self, options: WindowOptions) -> Self {
         self.window = options;
         self
@@ -78,11 +101,6 @@ impl<B> Application<B> {
 
     pub fn executor(mut self, executor: impl UiExecutor) -> Self {
         self.executor = Some(Arc::new(executor));
-        self
-    }
-
-    pub fn memory_options(mut self, options: MemoryOptions) -> Self {
-        self.memory_options = options;
         self
     }
 
@@ -169,12 +187,19 @@ impl<B> Application<B> {
     target_os = "windows",
     not(all(feature = "backend-winit", feature = "renderer-skia"))
 ))]
-impl Application<crate::platform::win32::Win32Application> {
+impl Application<crate::platform::win32::Win32Application, MemoryOptionsMissing> {
     pub fn new() -> Self {
         Self::with_backend(crate::platform::win32::Win32Application::default())
             .provide(RendererKind::Gdi)
     }
+}
 
+#[cfg(all(
+    feature = "renderer-gdi",
+    target_os = "windows",
+    not(all(feature = "backend-winit", feature = "renderer-skia"))
+))]
+impl<M> Application<crate::platform::win32::Win32Application, M> {
     pub fn renderer(mut self, renderer: RendererKind) -> Self {
         self.resources.provide(renderer);
         self.backend = match renderer {
@@ -200,14 +225,22 @@ impl Application<crate::platform::win32::Win32Application> {
     feature = "backend-winit",
     feature = "renderer-skia"
 ))]
-impl Application<DesktopApplication> {
+impl Application<DesktopApplication, MemoryOptionsMissing> {
     pub fn new() -> Self {
         Self::with_backend(DesktopApplication::Win32(
             crate::platform::win32::Win32Application::default(),
         ))
         .provide(RendererKind::Gdi)
     }
+}
 
+#[cfg(all(
+    target_os = "windows",
+    feature = "renderer-gdi",
+    feature = "backend-winit",
+    feature = "renderer-skia"
+))]
+impl<M> Application<DesktopApplication, M> {
     pub fn renderer(mut self, renderer: RendererKind) -> Self {
         self.resources.provide(renderer);
         self.backend = match renderer {
@@ -231,14 +264,14 @@ impl Application<DesktopApplication> {
 }
 
 #[cfg(all(feature = "renderer-skia", feature = "backend-winit"))]
-impl Application<crate::platform::WinitApplication> {
+impl Application<crate::platform::WinitApplication, MemoryOptionsMissing> {
     pub fn new_skia(preference: GraphicsPreference) -> Self {
         Self::with_backend(crate::platform::WinitApplication::new(preference))
             .provide(RendererKind::Skia(preference))
     }
 }
 
-impl<B> Application<B>
+impl<B> Application<B, MemoryOptionsConfigured>
 where
     B: ApplicationBackend,
 {
@@ -280,7 +313,7 @@ where
             self.executor,
             self.commands,
             self.events,
-            self.memory_options,
+            self.memory_options.0,
             #[cfg(feature = "persistent-cache")]
             self.persistent_cache,
         );

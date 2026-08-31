@@ -22,7 +22,6 @@ use crate::{
 static SVG_REGISTRY: OnceLock<SvgIconRegistry> = OnceLock::new();
 static SVG_FONT_REGISTRY: OnceLock<SvgFontRegistry> = OnceLock::new();
 static SVG_FONTDB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
-const DEFAULT_SVG_CACHE_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 
 fn svg_telemetry() -> &'static crate::memory::CacheTelemetry {
     static TELEMETRY: OnceLock<crate::memory::CacheTelemetry> = OnceLock::new();
@@ -80,7 +79,7 @@ pub struct SvgBitmap {
 thread_local! {
     static SVG_CACHE: RefCell<crate::memory::LruCache<SvgCacheKey, SvgBitmap>> = RefCell::new(
         crate::memory::LruCache::new(
-            DEFAULT_SVG_CACHE_BUDGET_BYTES,
+            0,
             crate::memory::ResourceClass::Cache,
             svg_telemetry().clone(),
         )

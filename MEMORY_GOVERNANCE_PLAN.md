@@ -9,7 +9,7 @@
 - 建立日期：2026-08-31
 - 代码基线：`319f146`
 - 主要范围：`native/lgui`
-- 集成范围：`native/windows` 只负责提供应用级配置、持久缓存目录和设置界面
+- 集成范围：`native/windows` 只负责提供应用级配置、持久缓存目录和诊断入口
 - 重构单位：继续保留单个 `lgui` crate
 - 核心目标：让所有可重建资源有界、可观测、可回收，并允许调用方声明资源保留策略
 
@@ -51,6 +51,9 @@ Component、Host 和 Scene 等多种复用机制，但它们由不同模块独�
 10. 业务 backend 不负责 GUI 图片下载、解码、渲染缓存或淘汰。
 11. `lgui` 不读取 Liuguang 业务配置，也不选择应用专属缓存目录。
 12. 新增缓存不得以降低正确性、产生旧资源或隐藏更新为代价。
+13. `lgui` 只提供计量、注册、预算下发、预留和安全回收机制，不定义应用内存档位或数值。
+14. 应用必须在 `run` 前显式注入完整策略，并自行决定生命周期事件的动作与默认缓存策略。
+15. 零域预算必须原样生效；框架不得静默抬高预算或选择隐式“均衡”回退。
 
 ## 4. 范围与非目标
 
@@ -63,7 +66,7 @@ Component、Host 和 Scene 等多种复用机制，但它们由不同模块独�
 - 统一预算、回收、统计、压力处理和诊断。
 - 图片和栅格资源的逐资源保留策略。
 - 可选的压缩资源磁盘缓存。
-- Windows 客户端的内存档位、磁盘配额和清理入口。
+- Windows 客户端由嵌入式 `client.toml` 固定的内存档位、持久缓存选择和磁盘配额。
 
 ### 4.2 非目标
 
@@ -120,7 +123,7 @@ Component、Host 和 Scene 等多种复用机制，但它们由不同模块独�
 | Scroll Raster Tile | Windows `scroll_area.rs` | 默认 32 MiB 配置 | 页面级预算可能与其他域叠加 | 使用共享预算和可见 Tile Pin |
 | GDI Bitmap | GDI Renderer | 64 MiB LRU | Overlay、字体和部分 Surface 未统一计量 | GDI 域统一统计和回收 |
 | D2D Bitmap | D2D Renderer | 至少 32 MiB，按视口扩展并保留可达 Key | Frame Cache、Brush、Layer 未统一展示 | CPU/GPU 分离统计，总预算协调 |
-| Skia Image/Text | Skia Renderer | 默认 96 MiB，CPU/GPU 分配 | 与其他 `lgui` 缓存没有总账 | 接入同一 Profile 和诊断快照 |
+| Skia Image/Text | Skia Renderer | 默认 96 MiB，CPU/GPU 分配 | 与其他 `lgui` 缓存没有总账 | 接入应用提供的 Skia 域预算和诊断快照 |
 | Component 输出 | ComponentTree | props/依赖相等时保留 | 没有容量估算；非活动树释放规则不统一 | 区分 State 与可重建输出 |
 | Host/Scene | UiSession/Host | 结构共享和增量保留 | 没有驻留量和非活动窗口统计 | 生命周期计量，不作为普通 LRU 误删 |
 | 系统诊断采样 | Win32 Diagnostics | 默认 1 秒采样缓存 | 占用很小但未登记 | 登记为低成本固定缓存 |
@@ -132,7 +135,7 @@ Component、Host 和 Scene 等多种复用机制，但它们由不同模块独�
 
 ```text
 Application
-  ├─ MemoryOptions / MemoryProfile
+  ├─ application-provided MemoryOptions
   ├─ MemoryGovernor
   │    ├─ global soft/hard budgets
   │    ├─ temporary allocation reservations
@@ -161,14 +164,14 @@ UiSession / Renderer / Asset Runtime
 - `UiSession` 报告活动窗口、当前帧和组件/Scene 生命周期。
 - 平台 Renderer 报告 CPU 和 GPU 估算，并在正确线程执行回收。
 - 应用可以提供持久缓存目录或 `PersistentCacheStore`；未提供时 `lgui` 只使用内存。
-- Windows backend 可以提供路径和用户设置，但不得接管资源下载和渲染缓存。
+- Windows 应用可以提供路径和固定配置，但不得把业务配置交给 `lgui`，也不得接管资源下载和渲染缓存。
 
 ### 7.2 计划中的源码结构
 
 ```text
 src/memory/
 ├─ mod.rs
-├─ options.rs       # MemoryOptions、MemoryProfile 和预算解析
+├─ options.rs       # 应用提供的 MemoryOptions、域预算和事件动作
 ├─ policy.rs        # 内部保留级别、优先级和资源限制
 ├─ governor.rs      # 总预算、预留、Trim 和压力决策
 ├─ registry.rs      # CacheDomain 注册与生命周期
@@ -215,7 +218,7 @@ pub enum CachePriority {
 - 图片使用 `ImageCachePolicy` 和 `ImageDecodePolicy`。
 - 静态/滚动栅格使用 `RasterCachePolicy`。
 - Component 使用保留式执行语义，不提供 `cache_ele(bool)`。
-- 文本、SVG、Blur 和 native renderer 默认由框架自动管理，只在高级 API 中开放覆盖。
+- 文本、SVG、Blur 和 native renderer 由框架执行计量与回收，但预算和生命周期动作始终由应用提供。
 
 计划中的图片 API：
 
@@ -264,33 +267,33 @@ StaticLayerSpec::new(StaticLayerSource::runtime())
 需要缓存组件的像素时使用 Static/Compositing/Raster Layer，而不是隐藏在通用
 `cache_ele(element, true)` 中。
 
-## 9. 总预算与内存档位
+## 9. 应用策略契约与 Windows 当前档位
 
-Governor 同时维护软预算和硬预算：
+Governor 只执行应用注入的数值，不推导档位或比例：
 
-- 软预算：超过后在帧尾按优先级和 LRU 回收，不阻塞当前绘制。
-- 硬预算：新建可重建缓存前必须预留；预留失败则降级、淘汰或不保存。
-- 当前可见资源可以形成明确的 `pinned_overflow_bytes`，但必须在诊断中单独报告。
+- `cache_soft_bytes` / `cache_hard_bytes` 是可重建状态与普通缓存的应用总约束；仅当应用为事件选择
+  `MemoryAction::EnforceBudget` 时执行分级回收。
+- `transient_hard_bytes`、单个编码/解码资源上限和并行大任务数约束处理峰值分配。
+- `MemoryDomainBudgets` 为每个域给出精确总额；只在同域多个实例之间平分，实例退出后重新平衡。
+- 零域预算表示应用关闭该域的缓存保留，框架必须原样下发。
+- 当前必需窗口表面不计入缓存预算，作为 `live_bytes` 单独显示；可见超额进入
+  `pinned_overflow_bytes`。
 - 单个超大资源不得依赖“缓存至少保留一个超限条目”的旧规则。
 
-初始候选档位如下，阶段 0 可以基于固定场景测量调整一次；阶段 1 冻结后不得无记录改变：
+`lgui` 没有 LowMemory、Balanced 或 Performance，也没有任何默认数值。下面仅记录
+Liuguang Windows 应用在 `windows/src/memory_policy.rs` 中定义的当前策略：
 
-| 档位 | CPU 可重建缓存软预算 | GPU/native 缓存软预算 | 临时分配上限 | 磁盘默认配额 |
-| --- | ---: | ---: | ---: | ---: |
-| LowMemory | 64 MiB | 64 MiB | 32 MiB | 128 MiB |
-| Balanced | 128 MiB | 128 MiB | 64 MiB | 512 MiB |
-| Performance | 256 MiB | 256 MiB | 128 MiB | 2 GiB |
+| Windows 档位 | 缓存软限额 | 缓存硬限额 | 临时硬限额 | 活跃域合计 | 默认图片策略 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| LowMemory | 32 MiB | 48 MiB | 16 MiB | 约 30 MiB | WhileVisible |
+| Balanced | 48 MiB | 64 MiB | 24 MiB | 约 47 MiB | Scene |
+| Performance | 64 MiB | 96 MiB | 32 MiB | 64 MiB | Session |
 
-硬预算初始为软预算的 125%，但最多额外增加 64 MiB。当前必需窗口表面不计入缓存预算，
-必须作为 `live_bytes` 单独显示。
-
-默认单资源限制候选值：
-
-- 网络编码资源：32 MiB。
-- 解码像素：64 MiB 或 16,777,216 像素，以先达到者为准。
-- SVG 输出：不超过目标 Surface 尺寸和当前档位单项上限。
-- 并行大资源解码：LowMemory 为 1，Balanced/Performance 为 2。
-- 未提供目标尺寸的大图必须在解码前读取尺寸并执行拒绝或降采样策略。
+其中 GDI、D2D、Skia 域是互斥渲染器选项，不同时计入活跃域合计。三档的编码资源上限分别为
+8/12/16 MiB，解码资源上限为 16/24/32 MiB，并行大任务数为 1/1/2。磁盘缓存由应用单独
+开关，当前固定配额为 512 MiB；它不计入内存驻留限额。这些值由 Windows 构建时嵌入的
+`client.toml` 选择，不是用户设置。其他 `lgui` 使用者可以选择完全不同的数值、档位名称，
+或者直接构造不带档位概念的策略。
 
 ## 10. 缓存条目与淘汰规则
 
@@ -385,7 +388,8 @@ pub trait PersistentCacheStore: Send + Sync + 'static {
 
 ## 13. 内存压力与生命周期事件
 
-Governor 接受以下事件：
+Governor 接受以下事件，但不为事件内置应用行为。应用通过 `MemoryEventPolicy` 为每个事件选择
+`None`、`EnforceBudget` 或带作用域和目标字节数的 `Trim`：
 
 - `FrameCommitted`
 - `WindowHidden` / `WindowShown`
@@ -393,22 +397,23 @@ Governor 接受以下事件：
 - `SessionUnmounted`
 - `RendererDeviceLost`
 - `ThemeOrScaleChanged`
-- `MemoryPressure::{Moderate, Critical}`
+- `ModeratePressure` / `CriticalPressure`
 - `ExplicitTrim`
 - `ApplicationShutdown`
 
-建议行为：
+下表是 Liuguang Windows 应用当前选择，不是 `lgui` 默认值：
 
 | 事件 | 行为 |
 | --- | --- |
-| 帧提交 | 更新 Reachability，超过软预算时渐进淘汰 |
-| 单窗口隐藏 | 释放该窗口 native Surface 和低优先级 Scene 缓存 |
-| 全部窗口隐藏 | 清理 WhileVisible、临时缓存和可重建 native 资源，保留最小热数据 |
-| Session 卸载 | 释放该 Session Pin、组件输出和 Scene 投影 |
-| 设备丢失 | 丢弃全部设备相关缓存，保留受预算约束的便携源 |
-| Moderate | 回收到软预算的 75% |
-| Critical | 只保留当前可见 Pin 和正确性状态 |
-| 显式清理 | 按域或全部清理，并返回清理前后统计 |
+| 帧提交 | `EnforceBudget` |
+| 单窗口隐藏 | `Trim(Memory, soft / 2)` |
+| 窗口显示 | `None` |
+| 全部窗口隐藏 | `Trim(AllRebuildable, 0)` |
+| Session 卸载 | `Trim(AllRebuildable, 0)` |
+| 设备丢失 | `Trim(Memory, 0)` |
+| Theme/Scale 变化 | `Trim(Memory, 0)` |
+| Moderate | `Trim(Memory, soft * 3 / 4)` |
+| Critical / 显式清理 / 退出 | `Trim(AllRebuildable, 0)` |
 
 现有 `background_memory_optimization(true)` 迁移为向 Governor 发送生命周期事件，不再手工
 枚举多个 `clear_*_cache()`。
@@ -442,7 +447,7 @@ clear_all_rebuildable()
 公开诊断快照至少包含：
 
 ```text
-profile / global soft and hard budgets
+application policy name / global soft and hard budgets
 live_bytes / rebuildable_bytes / cache_bytes / transient_reserved_bytes
 cpu_bytes / gpu_estimated_bytes / persistent_bytes
 pinned_bytes / pinned_overflow_bytes
@@ -468,27 +473,26 @@ last trim reason, duration and released bytes
 
 任何未进入上述分类的大额增长都视为缺陷，而不是“统计不到”。
 
-## 16. 应用和用户设置
+## 16. 应用固定配置
 
 Application API：
 
 ```rust,ignore
 Application::new()
-    .memory_options(MemoryOptions::balanced())
-    .persistent_cache(FileCacheStore::new(cache_dir))
+    .memory_options(crate::memory_policy::options(&APP_CONFIG.memory))
+    .persistent_cache(FileCacheStore::new(cache_dir)) // 仅在配置启用时注入
 ```
 
-Windows 设置页面最终提供：
+`Application` 初始处于 `MemoryOptionsMissing` 状态，只有调用 `.memory_options(...)` 后才获得
+`run`。`MemoryOptions::unbounded(default_image_policy, persistent_cache_enabled)` 只是应用显式
+放弃内存限额的选择；持久缓存是否开启仍由应用明确传入，框架绝不自动选用。
 
-- 内存模式：低内存、平衡、性能。
-- 是否启用磁盘资源缓存。
-- 磁盘缓存配额。
-- 清理内存缓存。
-- 清理磁盘缓存。
-- 当前缓存占用摘要。
-
-用户设置控制总体资源使用，不暴露每个头像或图标的业务级开关。逐资源策略由组件作者声明。
-没有显式设置时使用 `Balanced`，低可用内存设备可以在启动时自动降级，但必须在诊断中显示。
+Liuguang Windows 的 `client.toml` 必须显式提供 `[memory]`，其中包含 `profile`、
+`persistent_cache_enabled` 和 `persistent_cache_limit_mib`。该文件在构建时嵌入应用，属于软件
+发布配置，不写入 `settings.toml`，也不在设置页面提供覆盖入口。当前发布配置选择
+`low-memory`；若软件维护者需要其他档位或关闭持久缓存，应修改 `client.toml` 后重新构建。
+逐资源策略仍由组件作者声明。是否依据设备状态动态改变策略也只能由应用代码明确实现，
+`lgui` 不检测后替应用改写策略。
 
 ## 17. 分阶段实施计划
 
@@ -504,14 +508,14 @@ Windows 设置页面最终提供：
 - 固定场景：冷启动登录、快速登录头像、主页面、商店长列表、主题切换、Dialog、路由往返、
   多窗口隐藏/恢复、大图、唯一 SVG/Blur 压力。
 - 采集稳定 30 秒、操作峰值、页面退出、全窗口隐藏和重新显示后的指标。
-- 确认初始三档预算；任何调整写回第 9 节。
+- 确认 Windows 应用的初始三档预算；任何调整写回第 9 节和应用策略模块。
 
 验收门槛：
 
 - 所有已知缓存均在总账中。
 - 能解释基线进程内存的主要组成。
 - 测试脚本可重复，结果包含内部与 OS 指标。
-- 预算数值冻结，阶段 1 可以据此定义 API。
+- Windows 应用预算数值冻结；框架 API 只定义注入契约，不固化这些数值。
 
 ### 阶段 1：建立内存契约、配置与 Registry
 
@@ -520,7 +524,7 @@ Windows 设置页面最终提供：
 工作内容：
 
 - 创建 `memory/` 模块。
-- 定义 Domain、Profile、Options、Retention、Priority、Usage 和 TrimReason。
+- 定义 Domain、Options、Retention、Priority、Usage、事件动作和 TrimReason，不定义 Profile。
 - Application 持有 Governor 和 Registry。
 - 定义缓存注册、线程内 Trim 回调和统一统计契约。
 - 保留现有行为，仅将已有统计接入总账。
@@ -620,7 +624,7 @@ Windows 设置页面最终提供：
 - 实现原子写入、Hash 校验、TTL、ETag、Last-Modified 和磁盘 LRU。
 - Persistent 图片只持久化允许的压缩响应。
 - 恢复明确的持久策略，删除旧 `MemoryAndDisk`。
-- 添加 Windows 设置和清理命令。
+- 添加 Windows 持久缓存目录注入和诊断清理命令。
 
 验收门槛：
 
@@ -640,7 +644,7 @@ Windows 设置页面最终提供：
 - 明确路由卸载、隐藏窗口、辅助窗口关闭和 Session 销毁行为。
 - Host/Scene 共享快照记录活跃引用，不长期保留已卸载分支。
 - Compositing Layer、Backbuffer 和设备资源响应窗口及设备生命周期。
-- `background_memory_optimization` 改为 Governor Profile/Event Facade。
+- `background_memory_optimization` 改为向 Governor 报告事件，由应用事件策略决定动作。
 
 验收门槛：
 
@@ -649,23 +653,22 @@ Windows 设置页面最终提供：
 - 全部窗口隐藏后可重建内存降至定义的后台目标。
 - 状态恢复、Effect cleanup 和多窗口共享 Store 行为不回归。
 
-### 阶段 8：设置、压力适配和用户可见诊断
+### 阶段 8：应用配置、压力适配和诊断
 
 状态：已完成
 
 工作内容：
 
-- 接入 LowMemory/Balanced/Performance。
+- 在 Windows 应用层接入 LowMemory/Balanced/Performance，由嵌入式 `client.toml` 选择并转换为完整 `MemoryOptions`。
 - 支持平台内存压力和显式 Trim。
-- 设置页面提供档位、磁盘缓存、配额和清理。
 - Diagnostics 提供域明细、最大条目和最近 Trim。
-- 记录设置变更后的即时预算收缩与异步清理行为。
+- 验证应用策略更新后的即时预算收缩与异步清理行为。
 
 验收门槛：
 
-- 切换到低内存模式会在有界时间内收缩到新软预算。
-- 用户可以清理内存和磁盘缓存并看到结果。
-- 设置持久化不属于 `lgui`，但 Application 配置能正确恢复。
+- 应用切换到低内存策略会在有界时间内收缩到新软预算。
+- Diagnostics 可以显式清理并观察内存和磁盘缓存结果。
+- 应用配置不属于 `lgui`；Windows 能从嵌入式 `client.toml` 正确恢复固定策略。
 - 生产构建的诊断不会本身形成显著内存负担。
 
 ### 阶段 9：收口、兼容删除与长期文档
@@ -738,7 +741,7 @@ Windows 设置页面最终提供：
 - `MemoryAndDisk` 和伪磁盘 raster cache 不存在。
 - Portable `memory` 不依赖 Win32、Winit、业务 backend 或页面。
 - Win32/D2D/GDI/Skia 只实现适配器，不拥有第二个 Governor。
-- Application 设置目录可以注入，但 `lgui` 不读取 `client.toml`。
+- Application 缓存目录可以注入，但 `lgui` 不读取 `client.toml`。
 - 业务 backend 不包含 GUI 图片下载或 Renderer 缓存逻辑。
 - Feature 关闭时不编译无关平台或持久缓存实现。
 
@@ -762,10 +765,10 @@ Windows 设置页面最终提供：
 - 同一资源的并发加载、解码或栅格化会合并。
 - 单资源和临时并发限制可以阻止大资源造成无界峰值。
 - 伪 `MemoryAndDisk` 实现已删除；真实磁盘缓存有配额、校验、TTL 和隐私规则。
-- 窗口隐藏、Session 卸载、设备丢失和应用退出都有自动回收测试。
-- LowMemory/Balanced/Performance 在 GDI、D2D 和 Skia 下行为一致。
+- 窗口隐藏、Session 卸载、设备丢失和应用退出都按应用事件策略执行并有回收测试。
+- Windows 的 LowMemory/Balanced/Performance 在 GDI、D2D 和 Skia 下行为一致。
 - 压力测试中的可重建内存形成平台线，没有持续正斜率。
-- 用户可以查看摘要、切换档位并清理内存/磁盘缓存。
+- 应用固定配置可验证，Diagnostics 可以查看摘要并显式清理内存/磁盘缓存。
 - 本轮迁移标记搜索结果为零。
 - `ARCHITECTURE.md`、`API.md` 和 `BASELINE.md` 已同步。
 - 完整 Feature Matrix、Windows 客户端测试和 `git diff --check` 通过。
@@ -799,7 +802,7 @@ git diff --check
 | 可见资源本身超过预算 | 单独报告 pinned overflow；降采样或拒绝缓存，不伪装成普通缓存 |
 | 跨线程 Trim 造成错误析构 | Governor 发请求，缓存所有者线程执行 Drop |
 | 磁盘缓存泄露敏感数据 | 默认仅公开资源可持久化；namespace 明确允许；不缓存鉴权响应 |
-| API 过度复杂 | 普通组件默认 Auto；只在高级资源上暴露策略；不提供通用 bool |
+| API 过度复杂 | 普通图片使用应用提供的 `ApplicationDefault`；高级资源可逐项覆盖；不提供含义模糊的通用 bool |
 | 淘汰导致视觉闪烁 | 当前 Scene Pin；后台渐进 Trim；重建完成后原子替换 |
 | 工作集释放不及时引起误解 | 同时报告内部字节与 OS 指标；只在合适生命周期请求工作集 Trim |
 | 计划只覆盖图片 | 架构门禁要求所有可重建域注册；总账每阶段更新 |
@@ -831,7 +834,7 @@ git diff --check
 
 | 阶段 | 状态 | 提交 | 验收摘要 |
 | --- | --- | --- | --- |
-| 0 基线盘点 | 已完成 | 未提交（按任务要求） | 缓存总账、所有者线程、固定场景与三档预算已冻结；OS 指标由 diagnostics 固定采样。 |
+| 0 基线盘点 | 已完成 | 未提交（按任务要求） | 缓存总账、所有者线程和固定场景已冻结；Windows 三档预算由应用策略持有，OS 指标由 diagnostics 固定采样。 |
 | 1 契约与 Registry | 已完成 | 同上 | 新增 portable `memory` 模块、Application 级 Governor、Domain 注册与生命周期句柄。 |
 | 2 可观测性 | 已完成 | 同上 | 各域统一字节/命中/淘汰/最大项统计，Component/Host/Scene、Reservation 与 OS 指标进入快照。 |
 | 3 有界缓存与总预算 | 已完成 | 同上 | 图片、SVG、Blur、Raster、GDI、D2D、Skia 均受共享预算与 Trim 约束，伪磁盘 Map 已删除。 |
@@ -839,9 +842,9 @@ git diff --check
 | 5 峰值与背压 | 已完成 | 同上 | 单资源校验、目标尺寸解码、任务 Reservation、并发限制、single-flight 与失败退避已测试。 |
 | 6 持久缓存 | 已完成 | 同上 | 文件 Store 具备原子写、SHA-256、TTL、验证器、磁盘 LRU、隐私和重启命中测试。 |
 | 7 Retained 生命周期 | 已完成 | 同上 | Component 输出可重建且 State 保留；窗口/Session/设备事件统一 Trim，native 释放回所属 UI 线程。 |
-| 8 设置与压力适配 | 已完成 | 同上 | Windows 设置 v6、档位/配额/清理界面、完整 MemorySnapshot、HUD 与调试命令已接入。 |
+| 8 应用配置与压力适配 | 已完成 | 同上 | Windows `client.toml` 固定档位/持久缓存策略，完整 MemorySnapshot、HUD 与调试命令已接入；用户 Settings 不承载内存策略。 |
 | 9 收口 | 已完成 | 同上 | 旧清理旁路和兼容层归零，长期文档、架构门禁与 feature 验收矩阵已固化。 |
 
 最终验收以 `BASELINE.md` 为长期命令源。自动化覆盖预算、逐资源淘汰、持久缓存、目标尺寸
-解码、多窗口可达性、owner-thread Drop、Component 重建、GDI/D2D/Skia 和 Windows 设置迁移；
+解码、多窗口可达性、owner-thread Drop、Component 重建、GDI/D2D/Skia 和 Windows 固定配置；
 发布候选包的硬件数值按该文档定义的固定交互场景采集，不把特定机器数值固化为跨机器阈值。

@@ -6,7 +6,6 @@ pub struct Scene {
 }
 
 const SCROLL_RASTER_COMMAND_CACHE_LIMIT: usize = 8;
-const DEFAULT_SCROLL_RASTER_COMMAND_CACHE_BUDGET: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ScrollRasterCommandCacheKey {
@@ -43,7 +42,7 @@ impl Default for ScrollRasterCommandCache {
             entries: HashMap::new(),
             tick: 0,
             bytes: 0,
-            budget_bytes: DEFAULT_SCROLL_RASTER_COMMAND_CACHE_BUDGET,
+            budget_bytes: 0,
             hits: 0,
             misses: 0,
             evictions: 0,
@@ -90,7 +89,7 @@ pub(crate) fn set_scroll_raster_command_cache_budget(budget_bytes: usize) {
     let mut cache = scroll_raster_command_cache()
         .lock()
         .expect("scroll raster command cache poisoned");
-    cache.budget_bytes = budget_bytes.max(1);
+    cache.budget_bytes = budget_bytes;
     let budget = cache.budget_bytes;
     evict_scroll_raster_commands(&mut cache, budget, SCROLL_RASTER_COMMAND_CACHE_LIMIT);
 }

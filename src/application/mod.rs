@@ -29,7 +29,7 @@ pub use backend::ApplicationBackend;
     feature = "renderer-skia"
 ))]
 pub use backend::{DesktopApplication, DesktopApplicationError};
-pub use builder::Application;
+pub use builder::{Application, MemoryOptionsConfigured, MemoryOptionsMissing};
 pub use context::ApplicationContext;
 pub use error::RenderError;
 pub(crate) use error::RenderErrorRegistration;

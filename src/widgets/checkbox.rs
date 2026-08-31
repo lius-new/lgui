@@ -267,7 +267,7 @@ mod tests {
             next.store(checked, Ordering::SeqCst);
         });
         let mut context = UiEventContext::new(
-            crate::application::ApplicationContext::empty(),
+            crate::application::ApplicationContext::empty(crate::memory::test_memory_options()),
             crate::application::WindowId::new("test"),
         );
         (checkbox.on_change)(&mut context, next_checked(checkbox.checked));

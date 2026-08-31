@@ -115,7 +115,7 @@ fn auto_driver_order_matches_each_platform_policy() {
 
 #[test]
 fn auxiliary_windows_inherit_the_main_owner_and_application_context() {
-    let context = ApplicationContext::empty();
+    let context = ApplicationContext::empty(crate::memory::test_memory_options());
     let expected = context.clone();
     let rendered = Arc::new(AtomicBool::new(false));
     let rendered_view = Arc::clone(&rendered);
@@ -139,7 +139,7 @@ fn auxiliary_windows_inherit_the_main_owner_and_application_context() {
 
 #[test]
 fn auxiliary_windows_preserve_an_explicit_owner() {
-    let context = ApplicationContext::empty();
+    let context = ApplicationContext::empty(crate::memory::test_memory_options());
     let view: AppView = Arc::new(|_| crate::core::content_text("auxiliary"));
     let (options, _) = prepare_auxiliary_window(
         &context,

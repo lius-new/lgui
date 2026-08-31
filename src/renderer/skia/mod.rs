@@ -9,6 +9,4 @@ pub use backend::probe_skia_support;
 pub(crate) use backend::{
     cpu_cache_budget, gpu_cache_budget, paint_scene_damage, with_gpu_cache_usage, SkiaCache,
 };
-pub(crate) use backend::{
-    skia_text_system_handle, SkiaCacheStats, SkiaSoftwareSurface, DEFAULT_CACHE_BUDGET,
-};
+pub(crate) use backend::{skia_text_system_handle, SkiaCacheStats, SkiaSoftwareSurface};

@@ -46,8 +46,9 @@ infrastructure.
 Memory governance is Application-scoped. `ApplicationContext` owns the only `MemoryGovernor`;
 asset runtimes, sessions, renderers, and application-owned diagnostic buffers register adapters
 under a `CacheDomain`. A registration reports `CacheUsage`, accepts an assigned share of the
-Application CPU or native soft budget, and handles bounded `TrimRequest`s. Dropping the
-registration removes that domain instance from snapshots.
+application-provided budget for its exact domain, and handles bounded `TrimRequest`s. Multiple
+instances divide only their common domain total; dropping a registration removes it from
+snapshots and rebalances the survivors. Zero is a valid domain budget and is forwarded unchanged.
 
 The Governor does not own cache entries or native handles. Portable caches may trim inline.
 Win32 adapters post work through `Win32Dispatcher`, and Winit adapters send a user event, so GDI,
@@ -56,29 +57,38 @@ owning UI thread. A synchronous Trim result may therefore report only immediatel
 bytes; a later snapshot observes releases completed by the owner thread.
 
 Usage separates live, rebuildable, cache, CPU, estimated GPU, pinned, transient-reserved, and
-persistent bytes. Low-memory, balanced, and performance profiles provide one shared CPU budget,
-one shared native budget, a transient hard limit, and a persistent quota. Domain weights divide
-the shared totals between current registrations; individual caches must not add independent
-uncoordinated totals. Soft-budget enforcement runs after frame commits and option changes. Window
-hide, all-windows-hidden, Session unmount, device loss, theme or scale changes, explicit pressure,
-and Application shutdown enter the same event and Trim path.
+persistent bytes. `lgui` defines no profile, budget values, domain weights, lifecycle defaults, or
+implicit fallback policy. Application construction requires an explicit, validated
+`MemoryOptions`; it contains global limits, exact domain totals, lifecycle event actions, the
+default image policy, and the persistent-cache choice. `MemoryOptions::unbounded` is available
+only as an explicit application decision and still requires an explicit persistent-cache choice.
+Framework caches begin at zero until registration assigns the application's domain budget;
+backends do not clamp that value or raise zero to a framework minimum. Window, Session, device,
+pressure, and shutdown events enter one path, then execute the action selected by the
+application's `MemoryEventPolicy`.
 
 Scene image reachability is aggregated by window instance. `ImageRequest` carries retention,
 decode, priority, namespace, version, and sensitivity metadata through Scene primitives to each
 backend. Encoded and decoded image caches coalesce in-flight work, apply failure backoff, validate
 encoded and decoded bounds, and reserve large-task bytes before work begins. Static and scroll
 raster caches use explicit policies and byte bounds; the former pseudo-disk raster map and all
-cache-specific public clear paths are removed.
+cache-specific public clear paths are removed. Reachable image bytes are pinned long enough for
+delivery even at a zero reusable-cache budget, then become eviction candidates when unreachable.
 
 With `persistent-cache`, an application may inject a `PersistentCacheStore`. The file store keeps
 only portable compressed bytes and metadata, uses atomic replacement and SHA-256 validation, and
 enforces TTL, validators, namespace/version keys, and an on-disk LRU quota. Sensitive requests are
-not persisted. `lgui` never chooses an application directory or reads business settings.
+not persisted. `CacheScope::Persistent` is routed only to this store, while `Memory` and
+`AllRebuildable` remain in-memory scopes. `lgui` never chooses an application directory or reads
+business settings.
 
-The Liuguang Windows client maps its version-6 settings to `MemoryOptions`, injects a cache
-subdirectory, exposes profile/quota/clear controls, and adds bounded memory history to diagnostics.
-It remains a configuration and presentation consumer; resource loading and eviction stay in
-`lgui`.
+The Liuguang Windows client owns its profile names and numeric limits in
+`windows/src/memory_policy.rs`. Its embedded `windows/client.toml` selects one fixed application
+profile, persistent-cache enablement, and disk quota; startup maps `APP_CONFIG.memory` to
+`MemoryOptions` and injects a cache subdirectory only when enabled. These are deployment choices,
+not user Settings controls. Other applications can choose entirely different configuration,
+limits, and event actions. Resource loading, accounting, and policy execution remain in `lgui`;
+the policy itself remains in the application.
 
 ## Source Layout
 

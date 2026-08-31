@@ -127,7 +127,7 @@ fn stale_state_handle_cannot_dirty_a_remounted_component_generation() {
 #[test]
 fn event_hook_unsubscribes_when_its_component_unmounts() {
     let ui = UiRuntime::new();
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     let deliveries = Arc::new(AtomicUsize::new(0));
 
     let tree = mount_event_root(

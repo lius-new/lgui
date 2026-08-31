@@ -11,23 +11,12 @@ pub struct D2dRenderer {
     pub(super) scene_bytes: usize,
 }
 
-pub(super) const D2D_BITMAP_CACHE_MIN_BUDGET_BYTES: usize = 32 * 1024 * 1024;
-pub(super) const D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER: usize = 4;
-
 pub(super) fn raster_length(value: f32) -> i32 {
     value.ceil().max(1.0) as i32
 }
 
 pub(super) fn raster_size(rect: UiRect) -> (i32, i32) {
     (raster_length(rect.width()), raster_length(rect.height()))
-}
-
-pub(super) fn d2d_bitmap_cache_budget(width: i32, height: i32) -> usize {
-    (width.max(1) as usize)
-        .saturating_mul(height.max(1) as usize)
-        .saturating_mul(4)
-        .saturating_mul(D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER)
-        .max(D2D_BITMAP_CACHE_MIN_BUDGET_BYTES)
 }
 
 pub(super) struct D2dBitmapCacheEntry {
@@ -54,7 +43,7 @@ impl D2dBitmapCache {
             entries: HashMap::new(),
             bytes: 0,
             tick: 0,
-            budget_bytes: budget_bytes.max(1),
+            budget_bytes,
             hits: 0,
             misses: 0,
             evictions: 0,
@@ -129,7 +118,7 @@ impl D2dBitmapCache {
     }
 
     pub(super) fn set_budget(&mut self, budget_bytes: usize) {
-        self.budget_bytes = budget_bytes.max(1);
+        self.budget_bytes = budget_bytes;
         self.evict_to_budget();
     }
 

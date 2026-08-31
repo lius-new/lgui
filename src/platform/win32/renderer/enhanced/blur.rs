@@ -10,10 +10,6 @@ use lgui::platform::win32::render_trace;
 
 use super::image;
 
-const DEFAULT_BLUR_RESULT_BUDGET: usize = 12 * 1024 * 1024;
-const DEFAULT_BLUR_SOURCE_BUDGET: usize = 8 * 1024 * 1024;
-const DEFAULT_BLURRED_SOURCE_BUDGET: usize = 12 * 1024 * 1024;
-
 fn blur_telemetry(index: usize) -> &'static crate::memory::CacheTelemetry {
     static TELEMETRY: OnceLock<[crate::memory::CacheTelemetry; 3]> = OnceLock::new();
     &TELEMETRY.get_or_init(Default::default)[index]
@@ -22,21 +18,21 @@ fn blur_telemetry(index: usize) -> &'static crate::memory::CacheTelemetry {
 thread_local! {
     static BLUR_CACHE: RefCell<crate::memory::LruCache<BlurCacheKey, Vec<u8>>> = RefCell::new(
         crate::memory::LruCache::new(
-            DEFAULT_BLUR_RESULT_BUDGET,
+            0,
             crate::memory::ResourceClass::Cache,
             blur_telemetry(0).clone(),
         )
     );
     static SOURCE_RASTER_CACHE: RefCell<crate::memory::LruCache<SourceRasterKey, image::RasterImage>> = RefCell::new(
         crate::memory::LruCache::new(
-            DEFAULT_BLUR_SOURCE_BUDGET,
+            0,
             crate::memory::ResourceClass::Cache,
             blur_telemetry(1).clone(),
         )
     );
     static BLURRED_SOURCE_CACHE: RefCell<crate::memory::LruCache<BlurredSourceKey, image::RasterImage>> = RefCell::new(
         crate::memory::LruCache::new(
-            DEFAULT_BLURRED_SOURCE_BUDGET,
+            0,
             crate::memory::ResourceClass::Cache,
             blur_telemetry(2).clone(),
         )

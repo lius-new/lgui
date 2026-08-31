@@ -3,7 +3,7 @@ use super::*;
 thread_local! {
     pub(super) static OVERLAY_CACHE: RefCell<crate::memory::LruCache<OverlayCacheKey, Vec<u8>>> = RefCell::new(
         crate::memory::LruCache::new(
-            16 * 1024 * 1024,
+            0,
             crate::memory::ResourceClass::Cache,
             gdi_telemetry(0).clone(),
         )
@@ -14,7 +14,7 @@ thread_local! {
     pub(super) static GDI_FRAME_BLIT_METRICS: RefCell<GdiFrameBlitMetrics> = RefCell::new(GdiFrameBlitMetrics::default());
     pub(super) static GDI_FONT_FAMILY_CACHE: RefCell<crate::memory::LruCache<(char, i32, i32), usize>> = RefCell::new(
         crate::memory::LruCache::new(
-            256 * 1024,
+            0,
             crate::memory::ResourceClass::Cache,
             gdi_telemetry(2).clone(),
         )
@@ -221,8 +221,6 @@ pub(super) enum GdiFrameBlitSource {
     Other,
 }
 
-pub(super) const GDI_BITMAP_CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
-
 pub(super) struct GdiBitmapCache {
     pub(super) entries: HashMap<String, GdiBitmapEntry>,
     pub(super) bytes: usize,
@@ -239,7 +237,7 @@ impl Default for GdiBitmapCache {
             entries: HashMap::new(),
             bytes: 0,
             tick: 0,
-            budget_bytes: GDI_BITMAP_CACHE_BUDGET_BYTES,
+            budget_bytes: 0,
             hits: 0,
             misses: 0,
             evictions: 0,
@@ -347,7 +345,7 @@ impl GdiBitmapCache {
     }
 
     fn set_budget(&mut self, budget_bytes: usize) {
-        self.budget_bytes = budget_bytes.max(1);
+        self.budget_bytes = budget_bytes;
         self.evict_to_budget();
     }
 

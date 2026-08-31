@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn reactive_changes_do_not_implicitly_request_a_global_frame() {
         let mut context = UiEventContext::new(
-            ApplicationContext::empty(),
+            ApplicationContext::empty(crate::memory::test_memory_options()),
             WindowId::new("reactive-change"),
         );
 

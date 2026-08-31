@@ -2,8 +2,8 @@
 
 ## Application And Windows
 
-`Application::new().window_options(...).run(root)` creates the main window and mounts the root
-component. `.provide(value)` adds Application-scoped typed data. `.renderer(RendererKind)` selects
+`Application::new().memory_options(...).window_options(...).run(root)` creates the main window and
+mounts the root component. `.provide(value)` adds Application-scoped typed data. `.renderer(RendererKind)` selects
 GDI or Direct2D. Optional `.tray(...)` and `.notifications(...)` configure the built-in Windows
 adapters when `tray-win32` and `notifications-win32` are enabled. `.notification_service(...)`
 installs a portable application-provided adapter, and `.executor(...)` configures task execution.
@@ -14,13 +14,31 @@ Business code never receives native handles.
 
 ## Memory And Resource Lifetime
 
-The default memory profile is `Balanced`. Applications select a profile before `run`; enabling
-`persistent-cache` also allows the application to inject the storage location.
+`lgui` has no default memory profile or framework-owned byte budgets. Every application must construct
+and inject a complete `MemoryOptions` before `run`; the builder typestate intentionally provides
+`run` only after `.memory_options(...)`. The application owns the policy name, global soft/hard
+limits, every domain budget, lifecycle actions, default image retention, persistent-cache choice,
+and any user-facing profiles. `MemoryOptions::unbounded(default_image_policy,
+persistent_cache_enabled)` is an explicit application opt-out; even its persistent-cache choice
+must be supplied by the application, and it is never an implicit fallback.
 
 ```rust,ignore
-let memory = MemoryOptions::for_profile(MemoryProfile::LowMemory)
-    .persistent_cache(true)
-    .persistent_budget(128 * 1024 * 1024);
+let memory = MemoryOptions::new(
+    "my-app-low-memory",
+    MemoryBudget::new(
+        32 * MIB, // managed cache soft limit
+        48 * MIB, // managed cache hard limit
+        16 * MIB, // transient hard limit
+        128 * MIB as u64,
+        8 * MIB,  // maximum encoded resource
+        16 * MIB, // maximum decoded resource
+        1,        // parallel large tasks
+    ),
+    application_domain_budgets(),
+    application_event_policy(),
+    ImageCachePolicy::WhileVisible,
+    true,
+);
 
 Application::new()
     .memory_options(memory)
@@ -28,24 +46,41 @@ Application::new()
     .run(app)?;
 ```
 
-`LowMemory`, `Balanced`, and `Performance` use CPU/native soft budgets of 64/64, 128/128,
-and 256/256 MiB. Their transient hard limits are 32, 64, and 128 MiB; default persistent quotas
-are 128 MiB, 512 MiB, and 2 GiB. Cache hard budgets are 125% of soft budgets, capped at an extra
-64 MiB. Encoded resources are limited to 32 MiB, decoded resources to 64 MiB, and large work is
-limited to one concurrent task in low-memory mode and two in the other profiles.
+`MemoryDomainBudgets` assigns an exact total to each domain. If multiple live instances register
+the same domain, the Governor divides only that domain's total between them and rebalances when
+instances enter or leave. A zero domain budget is preserved as zero and can disable storage in
+that cache. `lgui` does not derive domain weights, minimum cache sizes, profile ratios, or hard
+limits. Applications must keep simultaneously active domain totals coherent with their global
+budget; alternative renderer domains do not need to be summed when only one can be active.
+Framework-owned caches start disabled until the application Governor assigns their domain budget,
+and backends forward that value without finite caps or nonzero minimums. A reachable image may
+temporarily appear as pinned bytes while it is delivered even when its reusable-cache budget is
+zero; after it becomes unreachable, no reusable entry is retained.
+
+`MemoryEventPolicy` maps each lifecycle event to `MemoryAction::None`, `EnforceBudget`, or an
+explicit scoped Trim target. Backends report events, but the application decides their effects.
+During lifecycle notification the Governor enforces a configured global budget only when the
+selected action requests it; `set_options()` also rebalances and enforces the new policy immediately.
+`MemoryOptions::validate()` rejects an empty policy name, soft limits above hard limits, zero
+large-task concurrency, single-resource limits above the transient hard limit, and an unresolved
+`ApplicationDefault` image policy.
 
 At runtime, `ApplicationContext::memory()` returns the application Governor. Use `snapshot()` for
-domain-level diagnostics, `set_options()` when a persisted setting changes, `notify()` for a real
-lifecycle or pressure event, and `trim()` for an explicit scoped request. Do not call
+domain-level diagnostics, `set_options()` only when application-owned policy changes at runtime,
+`notify()` for a real lifecycle or pressure event, and `trim()` for an explicit scoped request. Do not call
 cache-specific clear functions. Native adapters may complete Trim asynchronously on the owning UI
 thread, so refresh the snapshot after the UI event has run.
+`CacheScope::Memory` and `AllRebuildable` target registered in-memory domains; `Persistent`
+targets only the application-injected persistent store, including when normal persistent reads are
+disabled. Scope selection never crosses that boundary implicitly.
 
 Framework integrations that own a cache register a `DomainRegistration` through
 `ApplicationContext::register_memory_domain`. The adapter must report bytes and stats and, for a
 managed domain, accept its assigned budget. A native adapter's Trim callback must dispatch to its
 owner thread rather than moving or dropping native objects in the Governor caller.
 
-Images that need non-default retention use `ImageRequest`:
+`ImageRequest::new` uses `ImageCachePolicy::ApplicationDefault`; each application resolves it from
+its injected policy. A request can override that default explicitly:
 
 ```rust,ignore
 let request = ImageRequest::new(lgui::core::UiImageSource::url(avatar_url))
@@ -100,6 +135,7 @@ impl Command for Login {
 }
 
 Application::new()
+    .memory_options(application_memory_options())
     .command::<Login>(move |_cx, request| {
         let auth = auth.clone();
         async move { auth.login(request).await }

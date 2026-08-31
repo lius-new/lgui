@@ -6,21 +6,79 @@ use std::sync::{
 use super::*;
 
 #[test]
-fn profiles_keep_soft_hard_and_transient_budgets_ordered() {
-    for options in [
-        MemoryOptions::low_memory(),
-        MemoryOptions::balanced(),
-        MemoryOptions::performance(),
-    ] {
-        assert!(options.budget.cpu_cache_hard_bytes > options.budget.cpu_cache_soft_bytes);
-        assert!(options.budget.native_cache_hard_bytes > options.budget.native_cache_soft_bytes);
-        assert!(options.budget.transient_hard_bytes > 0);
-    }
+fn application_policy_validation_rejects_framework_defaults_and_invalid_limits() {
+    let options = test_memory_options();
+    assert!(options.validate().is_ok());
+
+    let mut invalid = options;
+    invalid.budget.cache_soft_bytes = 2;
+    invalid.budget.cache_hard_bytes = 1;
+    assert_eq!(
+        invalid.validate(),
+        Err("memory cache soft budget exceeds hard budget")
+    );
+
+    let mut unresolved = options;
+    unresolved.default_image_cache_policy = ImageCachePolicy::ApplicationDefault;
+    assert_eq!(
+        unresolved.validate(),
+        Err("application default image policy must be concrete")
+    );
+
+    let mut unnamed = options;
+    unnamed.policy_name = "";
+    assert_eq!(
+        unnamed.validate(),
+        Err("memory policy name must not be empty")
+    );
+
+    let mut no_workers = options;
+    no_workers.budget.max_parallel_large_tasks = 0;
+    assert_eq!(
+        no_workers.validate(),
+        Err("memory policy must allow at least one large task")
+    );
+
+    let mut encoded_too_large = options;
+    encoded_too_large.budget.max_encoded_resource_bytes =
+        encoded_too_large.budget.transient_hard_bytes + 1;
+    assert_eq!(
+        encoded_too_large.validate(),
+        Err("encoded resource limit exceeds transient hard budget")
+    );
+
+    let mut decoded_too_large = options;
+    decoded_too_large.budget.max_decoded_resource_bytes =
+        decoded_too_large.budget.transient_hard_bytes + 1;
+    assert_eq!(
+        decoded_too_large.validate(),
+        Err("decoded resource limit exceeds transient hard budget")
+    );
+}
+
+#[test]
+fn image_request_default_is_resolved_by_each_application_policy() {
+    let request = crate::core::ImageRequest::new(crate::core::UiImageSource::url(
+        "https://example.invalid/image.png",
+    ));
+    let mut first = test_memory_options();
+    first.default_image_cache_policy = ImageCachePolicy::NoStore;
+    let mut second = test_memory_options();
+    second.default_image_cache_policy = ImageCachePolicy::Session;
+
+    assert_eq!(
+        request.cache_policy_value(first.default_image_cache_policy),
+        ImageCachePolicy::NoStore
+    );
+    assert_eq!(
+        request.cache_policy_value(second.default_image_cache_policy),
+        ImageCachePolicy::Session
+    );
 }
 
 #[test]
 fn registrations_are_application_scoped_and_unregister_on_drop() {
-    let governor = MemoryGovernor::default();
+    let governor = MemoryGovernor::new(test_memory_options());
     let registration = governor.register(DomainRegistration::new(
         CacheDomain::EncodedImage,
         governor.next_instance_id(),
@@ -45,7 +103,7 @@ fn registrations_are_application_scoped_and_unregister_on_drop() {
 
 #[test]
 fn trim_callbacks_run_without_holding_the_registry_lock() {
-    let governor = MemoryGovernor::default();
+    let governor = MemoryGovernor::new(test_memory_options());
     let nested = governor.clone();
     let calls = Arc::new(AtomicUsize::new(0));
     let trim_calls = Arc::clone(&calls);
@@ -82,8 +140,10 @@ fn trim_callbacks_run_without_holding_the_registry_lock() {
 
 #[test]
 fn reservations_enforce_the_transient_hard_limit_and_release_on_drop() {
-    let mut options = MemoryOptions::low_memory();
+    let mut options = test_memory_options();
     options.budget.transient_hard_bytes = 16;
+    options.budget.max_encoded_resource_bytes = 16;
+    options.budget.max_decoded_resource_bytes = 16;
     let governor = MemoryGovernor::new(options);
     let first = governor.try_reserve(12).expect("first reservation fits");
     assert!(governor.try_reserve(5).is_none());
@@ -94,8 +154,10 @@ fn reservations_enforce_the_transient_hard_limit_and_release_on_drop() {
 
 #[test]
 fn task_reservations_enforce_parallel_and_byte_limits() {
-    let mut options = MemoryOptions::low_memory();
+    let mut options = test_memory_options();
     options.budget.transient_hard_bytes = 32;
+    options.budget.max_encoded_resource_bytes = 32;
+    options.budget.max_decoded_resource_bytes = 32;
     options.budget.max_parallel_large_tasks = 1;
     let governor = MemoryGovernor::new(options);
     let first = governor
@@ -110,8 +172,27 @@ fn task_reservations_enforce_parallel_and_byte_limits() {
 }
 
 #[test]
-fn native_domain_budgets_share_the_application_total() {
-    let governor = MemoryGovernor::new(MemoryOptions::low_memory());
+fn unbounded_transient_policy_does_not_serialize_maximum_sized_reservations() {
+    let governor = MemoryGovernor::new(MemoryOptions::unbounded(ImageCachePolicy::NoStore, false));
+    let first = governor
+        .try_reserve_task(usize::MAX)
+        .expect("first unbounded reservation");
+    let second = governor
+        .try_reserve_task(usize::MAX)
+        .expect("second unbounded reservation");
+
+    assert_eq!(first.bytes(), usize::MAX);
+    assert_eq!(second.bytes(), usize::MAX);
+    assert_eq!(governor.snapshot().transient_reserved_bytes, 0);
+    drop((first, second));
+}
+
+#[test]
+fn domain_budgets_are_supplied_by_the_application_policy() {
+    let mut options = test_memory_options();
+    options.domains.gdi_bytes = 40;
+    options.domains.d2d_bytes = 24;
+    let governor = MemoryGovernor::new(options);
     let gdi_budget = Arc::new(AtomicUsize::new(0));
     let d2d_budget = Arc::new(AtomicUsize::new(0));
     let register = |domain, budget: Arc<AtomicUsize>| {
@@ -129,13 +210,106 @@ fn native_domain_budgets_share_the_application_total() {
         ))
     };
     let gdi = register(CacheDomain::Gdi, Arc::clone(&gdi_budget));
+    let second_gdi_budget = Arc::new(AtomicUsize::new(0));
+    let second_gdi = register(CacheDomain::Gdi, Arc::clone(&second_gdi_budget));
     let _d2d = register(CacheDomain::D2d, Arc::clone(&d2d_budget));
 
-    let total = gdi_budget
-        .load(Ordering::Acquire)
-        .saturating_add(d2d_budget.load(Ordering::Acquire));
-    assert!(total <= governor.options().budget.native_cache_soft_bytes);
+    assert_eq!(gdi_budget.load(Ordering::Acquire), 20);
+    assert_eq!(second_gdi_budget.load(Ordering::Acquire), 20);
+    assert_eq!(d2d_budget.load(Ordering::Acquire), 24);
+    drop(second_gdi);
+    assert_eq!(gdi_budget.load(Ordering::Acquire), 40);
     drop(gdi);
+}
+
+#[test]
+fn zero_domain_budget_is_forwarded_without_a_framework_minimum() {
+    let mut options = test_memory_options();
+    options.domains.encoded_image_bytes = 0;
+    let governor = MemoryGovernor::new(options);
+    let observed = Arc::new(AtomicUsize::new(usize::MAX));
+    let set_observed = Arc::clone(&observed);
+    let _registration = governor.register(DomainRegistration::new(
+        CacheDomain::EncodedImage,
+        governor.next_instance_id(),
+        "disabled-image-cache",
+        CacheAdapter::managed(
+            CacheUsage::default,
+            |_| TrimResult::default(),
+            move |budget| set_observed.store(budget, Ordering::Release),
+        ),
+    ));
+
+    assert_eq!(observed.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn lifecycle_actions_are_selected_by_the_application_policy() {
+    let mut options = test_memory_options();
+    let text_budget = options.domains.text_bytes;
+    options.events.window_hidden = MemoryAction::trim(CacheScope::Memory, usize::MAX);
+    options.events.window_shown = MemoryAction::None;
+    let governor = MemoryGovernor::new(options);
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let trim_observed = Arc::clone(&observed);
+    let _registration = governor.register(DomainRegistration::new(
+        CacheDomain::Text,
+        governor.next_instance_id(),
+        "event-policy",
+        CacheAdapter::new(CacheUsage::default, move |request| {
+            trim_observed.lock().unwrap().push(request);
+            TrimResult::default()
+        }),
+    ));
+
+    governor.notify(MemoryEvent::WindowShown);
+    assert!(observed.lock().unwrap().is_empty());
+    governor.notify(MemoryEvent::WindowHidden);
+    assert_eq!(
+        observed.lock().unwrap().as_slice(),
+        &[TrimRequest {
+            reason: TrimReason::WindowHidden,
+            scope: CacheScope::Memory,
+            target_bytes: text_budget,
+        }]
+    );
+}
+
+#[test]
+fn finite_trim_targets_follow_active_application_domain_budgets() {
+    let mut options = test_memory_options();
+    options.budget.cache_soft_bytes = 100;
+    options.budget.cache_hard_bytes = 120;
+    options.domains.text_bytes = 60;
+    options.domains.gdi_bytes = 40;
+    let governor = MemoryGovernor::new(options);
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let register = |domain| {
+        let observed = Arc::clone(&observed);
+        governor.register(DomainRegistration::new(
+            domain,
+            governor.next_instance_id(),
+            domain.as_str(),
+            CacheAdapter::new(CacheUsage::default, move |request| {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push((domain, request.target_bytes));
+                TrimResult::default()
+            }),
+        ))
+    };
+    let _text = register(CacheDomain::Text);
+    let _gdi = register(CacheDomain::Gdi);
+
+    governor.trim(TrimReason::Explicit, CacheScope::Memory, 50);
+    let mut targets = observed.lock().unwrap().clone();
+    targets.sort_by_key(|(domain, _)| *domain);
+
+    assert_eq!(
+        targets,
+        vec![(CacheDomain::Text, 30), (CacheDomain::Gdi, 20)]
+    );
 }
 
 #[test]
@@ -182,7 +356,7 @@ fn native_trim_drops_resources_on_the_adapter_owner_thread() {
         }
     });
     let owner_id = owner_rx.recv().unwrap();
-    let governor = MemoryGovernor::default();
+    let governor = MemoryGovernor::new(test_memory_options());
     let snapshot_usage = Arc::clone(&usage);
     let trim_usage = Arc::clone(&usage);
     let trim_tx = command_tx.clone();
@@ -288,6 +462,44 @@ mod file_store {
             store.put(sensitive),
             Err(CacheStoreError::SensitiveEntry)
         ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn persistent_trim_scope_does_not_touch_memory_domains() {
+        let root = temporary_directory("persistent-scope");
+        let store = FileCacheStore::new(&root);
+        store
+            .put(PersistentEntry::new(
+                PersistentCacheKey::new("public", "entry", 1),
+                vec![7; 16],
+            ))
+            .unwrap();
+        let mut options = test_memory_options();
+        options.persistent_cache_enabled = false;
+        let governor = MemoryGovernor::with_store(options, Some(Arc::new(store.clone())));
+        let memory_trims = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&memory_trims);
+        let _registration = governor.register(DomainRegistration::new(
+            CacheDomain::EncodedImage,
+            governor.next_instance_id(),
+            "memory-cache",
+            CacheAdapter::new(CacheUsage::default, move |_| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                TrimResult::default()
+            }),
+        ));
+
+        governor.trim(TrimReason::Explicit, CacheScope::Memory, 0);
+        assert_eq!(memory_trims.load(Ordering::SeqCst), 1);
+        assert_eq!(store.stats().unwrap().entry_count, 1);
+
+        assert_eq!(
+            governor.trim(TrimReason::Explicit, CacheScope::Persistent, 0),
+            16
+        );
+        assert_eq!(memory_trims.load(Ordering::SeqCst), 1);
+        assert_eq!(store.stats().unwrap().entry_count, 0);
         let _ = fs::remove_dir_all(root);
     }
 }

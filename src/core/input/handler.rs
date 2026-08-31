@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn async_handler_spawns_with_an_owned_ui_context() {
-        let application = ApplicationContext::empty();
+        let application = ApplicationContext::empty(crate::memory::test_memory_options());
         application.set_executor(Arc::new(|mut task: UiTask| {
             let waker = Waker::noop();
             let mut context = Context::from_waker(waker);
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn async_handler_with_moves_the_control_argument_into_the_task() {
-        let application = ApplicationContext::empty();
+        let application = ApplicationContext::empty(crate::memory::test_memory_options());
         application.set_executor(Arc::new(|mut task: UiTask| {
             let waker = Waker::noop();
             let mut context = Context::from_waker(waker);

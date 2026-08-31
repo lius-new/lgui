@@ -199,7 +199,7 @@ mod tests {
 
         dispatch_runtime_output(
             output,
-            &ApplicationContext::empty(),
+            &ApplicationContext::empty(crate::memory::test_memory_options()),
             &WindowId::new("test"),
             |action| runtime.handle_default_action(&tree, action),
             |_| {},

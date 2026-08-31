@@ -69,8 +69,13 @@ pub(super) fn create_window(
         ));
         source
     })?;
+    let memory_domain = if renderer_name == "d2d" {
+        crate::memory::CacheDomain::D2d
+    } else {
+        crate::memory::CacheDomain::Gdi
+    };
     let renderer_budget = Arc::new(AtomicUsize::new(
-        context.memory().options().budget.native_cache_soft_bytes,
+        context.memory().options().domain_budget(memory_domain),
     ));
     renderer.set_memory_budget(renderer_budget.load(Ordering::Acquire));
     let renderer_memory = Arc::new(Mutex::new(renderer.memory_usage()));
@@ -81,11 +86,6 @@ pub(super) fn create_window(
     let trim_dispatcher = dispatcher.clone();
     let budget_dispatcher = dispatcher.clone();
     let raw_hwnd = hwnd.0 as isize;
-    let memory_domain = if renderer_name == "d2d" {
-        crate::memory::CacheDomain::D2d
-    } else {
-        crate::memory::CacheDomain::Gdi
-    };
     let memory_instance = context.memory().next_instance_id();
     let renderer_memory_registration =
         context

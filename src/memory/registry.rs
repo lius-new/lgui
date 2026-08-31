@@ -69,7 +69,7 @@ impl CacheAdapter {
     }
 
     pub(crate) fn set_budget(&self, budget_bytes: usize) {
-        (self.set_budget)(budget_bytes.max(1));
+        (self.set_budget)(budget_bytes);
     }
 }
 
@@ -123,11 +123,20 @@ impl Default for RegistryState {
 pub struct CacheRegistration {
     id: u64,
     registry: Weak<Mutex<RegistryState>>,
+    on_drop: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
 
 impl CacheRegistration {
-    pub(crate) fn new(id: u64, registry: Weak<Mutex<RegistryState>>) -> Self {
-        Self { id, registry }
+    pub(crate) fn new(
+        id: u64,
+        registry: Weak<Mutex<RegistryState>>,
+        on_drop: impl FnOnce() + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            id,
+            registry,
+            on_drop: Some(Box::new(on_drop)),
+        }
     }
 
     pub const fn id(&self) -> u64 {
@@ -146,12 +155,18 @@ impl fmt::Debug for CacheRegistration {
 
 impl Drop for CacheRegistration {
     fn drop(&mut self) {
-        if let Some(registry) = self.registry.upgrade() {
+        let removed = self.registry.upgrade().is_some_and(|registry| {
             registry
                 .lock()
                 .expect("memory registry poisoned")
                 .entries
-                .remove(&self.id);
+                .remove(&self.id)
+                .is_some()
+        });
+        if removed {
+            if let Some(on_drop) = self.on_drop.take() {
+                on_drop();
+            }
         }
     }
 }

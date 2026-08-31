@@ -22,6 +22,7 @@ pub(super) struct WinitWindow {
     pub(super) full_redraw: bool,
     pub(super) recovery: RendererRecoveryState,
     pub(super) memory_instance: crate::memory::DomainInstanceId,
+    pub(super) memory_budget: usize,
     pub(super) memory_usage: Arc<Mutex<crate::memory::CacheUsage>>,
     pub(super) _memory_registration: crate::memory::CacheRegistration,
     pub(super) component_memory: Arc<Mutex<crate::memory::CacheUsage>>,
@@ -580,12 +581,7 @@ impl WinitWindow {
             &self.soft_context,
             Arc::clone(&self.window),
             self.options.transparent,
-            self.context
-                .memory()
-                .options()
-                .budget
-                .native_cache_soft_bytes
-                .min(DEFAULT_CACHE_BUDGET),
+            self.memory_budget,
         ) {
             Ok(mut renderer) => {
                 if fallback_to_software {
@@ -686,6 +682,7 @@ impl WinitWindow {
     }
 
     pub(super) fn set_memory_budget(&mut self, budget_bytes: usize) {
+        self.memory_budget = budget_bytes;
         self.renderer.set_cache_budget(budget_bytes);
         self.update_memory_usage();
     }

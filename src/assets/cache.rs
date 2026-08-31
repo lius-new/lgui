@@ -39,6 +39,7 @@ pub struct ImageCacheHandle {
 pub struct ImageCacheStats {
     pub entries: usize,
     pub resident_bytes: usize,
+    pub pinned_bytes: usize,
     pub budget_bytes: usize,
     pub hits: u64,
     pub misses: u64,
@@ -96,7 +97,7 @@ impl ImageCacheHandle {
     }
 
     pub fn set_budget(&self, budget_bytes: usize) {
-        (self.set_budget)(budget_bytes.max(1));
+        (self.set_budget)(budget_bytes);
     }
 
     pub fn update_reachability(
@@ -216,7 +217,7 @@ pub(crate) fn async_image_cache(
     governor: crate::memory::MemoryGovernor,
 ) -> ImageCacheHandle {
     let state = Arc::new(Mutex::new(AsyncImageState::new()));
-    let budget = Arc::new(AtomicUsize::new(budget_bytes.max(1)));
+    let budget = Arc::new(AtomicUsize::new(budget_bytes));
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
     let request_state = Arc::clone(&state);
     let request_loader = loader.clone();
@@ -268,6 +269,12 @@ pub(crate) fn async_image_cache(
         ImageCacheStats {
             entries: state.entries.len(),
             resident_bytes: state.resident_bytes,
+            pinned_bytes: state
+                .entries
+                .values()
+                .filter(|entry| entry.reachable)
+                .map(|entry| entry.resident_bytes)
+                .sum(),
             budget_bytes: stats_budget.load(Ordering::Acquire),
             hits: state.hits,
             misses: state.misses,
@@ -293,17 +300,19 @@ pub(crate) fn async_image_cache(
             state.epoch = state.epoch.wrapping_add(1);
             state.reachable_by_owner.clear();
         }
-        evict_async_images(&mut state, target_bytes, 0);
+        evict_async_images(&mut state, target_bytes, 0, target_bytes != 0);
         before.saturating_sub(state.resident_bytes)
     };
     let set_state = Arc::clone(&state);
     let set_budget_value = Arc::clone(&budget);
     let set_budget = move |value: usize| {
-        set_budget_value.store(value.max(1), Ordering::Release);
+        set_budget_value.store(value, Ordering::Release);
         let mut state = set_state.lock().expect("async image cache poisoned");
-        evict_async_images(&mut state, value.max(1), 4096);
+        evict_async_images(&mut state, value, 4096, true);
     };
     let reachability_state = Arc::clone(&state);
+    let reachability_governor = governor.clone();
+    let reachability_budget = Arc::clone(&budget);
     let reachability = move |owner, requests: &[ImageRequest]| {
         let mut state = reachability_state
             .lock()
@@ -327,7 +336,8 @@ pub(crate) fn async_image_cache(
         }
         for request in requests {
             if let Some(entry) = state.entries.get_mut(&request.cache_key()) {
-                entry.policy = request.cache_policy_value();
+                entry.policy = request
+                    .cache_policy_value(reachability_governor.options().default_image_cache_policy);
                 entry.priority = request.priority_value();
             }
         }
@@ -335,6 +345,12 @@ pub(crate) fn async_image_cache(
             entry.reachable = reachable.contains(key);
         }
         evict_unreachable_visible_images(&mut state);
+        evict_async_images(
+            &mut state,
+            reachability_budget.load(Ordering::Acquire),
+            4096,
+            true,
+        );
     };
     ImageCacheHandle::new_managed(request, bytes, stats, trim, set_budget, reachability)
 }
@@ -378,7 +394,7 @@ fn request_async_image(
                 resident_bytes: 0,
                 used: generation,
                 retry_at: None,
-                policy: request.cache_policy_value(),
+                policy: request.cache_policy_value(governor.options().default_image_cache_policy),
                 priority: request.priority_value(),
                 reachable: true,
             },
@@ -460,7 +476,7 @@ fn finish_async_image(
     let used = state.generation;
     let (policy, priority, reachable) = state.entries.get(key).map_or(
         (
-            ImageCachePolicy::Session,
+            ImageCachePolicy::NoStore,
             crate::memory::CachePriority::Normal,
             true,
         ),
@@ -483,7 +499,7 @@ fn finish_async_image(
             reachable,
         },
     );
-    evict_async_images(&mut state, budget_bytes, 4096);
+    evict_async_images(&mut state, budget_bytes, 4096, true);
 }
 
 pub(crate) fn load_url_image(
@@ -499,7 +515,7 @@ pub(crate) fn load_url_image(
     if let ImageCachePolicy::Persistent {
         max_age,
         revalidate,
-    } = request.cache_policy_value()
+    } = request.cache_policy_value(governor.options().default_image_cache_policy)
     {
         if let Some(store) = governor.persistent_cache() {
             let key = crate::memory::PersistentCacheKey::new(
@@ -654,12 +670,19 @@ fn validate_decoded_dimensions(
 }
 
 #[cfg(any(test, feature = "backend-winit"))]
-fn evict_async_images(state: &mut AsyncImageState, budget_bytes: usize, max_entries: usize) {
+fn evict_async_images(
+    state: &mut AsyncImageState,
+    budget_bytes: usize,
+    max_entries: usize,
+    preserve_reachable: bool,
+) {
     while state.resident_bytes > budget_bytes || state.entries.len() > max_entries {
         let Some(evict) = state
             .entries
             .iter()
-            .filter(|(_, entry)| entry.status != ImageStatus::Loading)
+            .filter(|(_, entry)| {
+                entry.status != ImageStatus::Loading && (!preserve_reachable || !entry.reachable)
+            })
             .min_by_key(|(_, entry)| (entry.reachable, entry.priority, entry.used))
             .map(|(key, _)| key.clone())
         else {

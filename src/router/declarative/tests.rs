@@ -243,7 +243,7 @@ fn nested_outlet_preserves_parent_layout_lifecycle_across_child_navigation() {
             ),
         ),
     ));
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     let router = application.router::<Location>();
     router.replace(Location::new("/community"));
     let mut ui = UiRuntime::new();
@@ -273,7 +273,7 @@ fn navigation_invalidates_the_outlet_bounds_instead_of_the_window() {
         route("/", move |_| group(outlet_bounds)),
         route("/dialog", move |_| group(outlet_bounds)),
     ));
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     let router = application.router::<Location>();
     let mut ui = UiRuntime::new();
     let old_tree = mount_nested_router(&ui, application, routes);
@@ -295,7 +295,7 @@ fn navigation_commits_the_new_nested_outlet_in_the_first_retained_frame() {
     let viewport = UiRect::new(0.0, 0.0, 320.0, 200.0);
     let outlet_bounds = UiRect::new(80.0, 40.0, 280.0, 180.0);
     let login_link_bounds = UiRect::new(180.0, 140.0, 260.0, 170.0);
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     let router = application.router::<Location>();
     let view: AppView = Arc::new({
         let application = application.clone();
@@ -399,7 +399,7 @@ fn route_match_consumers_refresh_alongside_the_changed_outlet() {
             route("/dialog", |_| group(UiRect::new(0.0, 20.0, 100.0, 100.0))),
         ),
     ));
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     let router = application.router::<Location>();
     let mut ui = UiRuntime::new();
 
@@ -418,7 +418,7 @@ fn route_match_consumers_refresh_alongside_the_changed_outlet() {
 #[test]
 fn redirect_replaces_the_location_without_adding_history() {
     let routes = create_router((redirect("/", "/community"), route("/community", empty)));
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     let router = application.router::<Location>();
     let ui = UiRuntime::new();
 

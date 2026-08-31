@@ -49,7 +49,7 @@ use crate::{
     window::{ClosePolicy, WindowCommand, WindowId, WindowMode, WindowOptions, WindowPosition},
 };
 
-use super::skia::{SkiaSoftwareSurface, DEFAULT_CACHE_BUDGET};
+use super::skia::SkiaSoftwareSurface;
 
 use super::skia;
 

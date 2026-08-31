@@ -58,6 +58,7 @@ mod task;
 #[path = "view/tree.rs"]
 mod tree;
 
+pub use crate::memory::ImageCachePolicy;
 #[cfg(feature = "router")]
 pub use crate::router::{Back, Navigate, Replace, RouterContext};
 pub use action::{ActionId, UiAction, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION};
@@ -107,8 +108,8 @@ pub use layout::{
     LayoutRuntime, LayoutSpec,
 };
 pub use node::{
-    EventPolicy, ImageCachePolicy, ImageDecodePolicy, ImageRequest, InteractionRole, UiImageSource,
-    UiNode, UiNodeKind,
+    EventPolicy, ImageDecodePolicy, ImageRequest, InteractionRole, UiImageSource, UiNode,
+    UiNodeKind,
 };
 pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};

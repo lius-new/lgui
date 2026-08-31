@@ -1,7 +1,5 @@
 use super::*;
 
-pub(crate) const DEFAULT_CACHE_BUDGET: usize = 96 * 1024 * 1024;
-
 #[cfg(any(
     feature = "renderer-skia-gl",
     feature = "renderer-skia-vulkan",

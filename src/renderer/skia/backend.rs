@@ -45,7 +45,6 @@ pub(crate) use cache::{SkiaCache, SkiaCacheStats};
 pub(crate) use software::paint_scene_damage;
 pub(crate) use software::SkiaSoftwareSurface;
 pub use support::probe_skia_support;
-pub(crate) use support::DEFAULT_CACHE_BUDGET;
 #[cfg(any(
     feature = "renderer-skia-gl",
     feature = "renderer-skia-vulkan",

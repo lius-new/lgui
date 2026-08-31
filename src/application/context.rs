@@ -49,12 +49,13 @@ struct ApplicationContextInner {
 }
 
 impl ApplicationContext {
-    pub fn empty() -> Self {
+    pub fn empty(memory_options: MemoryOptions) -> Self {
         Self::new(
             Resources::new(),
             None,
             CommandRegistry::default(),
             EventBus::default(),
+            memory_options,
         )
     }
 
@@ -63,13 +64,14 @@ impl ApplicationContext {
         executor: Option<UiTaskSpawner>,
         commands: CommandRegistry,
         events: EventBus,
+        memory_options: MemoryOptions,
     ) -> Self {
         Self::new_with_memory(
             resources,
             executor,
             commands,
             events,
-            MemoryOptions::default(),
+            memory_options,
             #[cfg(feature = "persistent-cache")]
             None,
         )

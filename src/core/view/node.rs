@@ -1,4 +1,6 @@
-use std::{borrow::Cow, path::PathBuf, sync::Arc, time::Duration};
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
+
+use crate::memory::ImageCachePolicy;
 
 use super::{
     ActionId, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
@@ -86,19 +88,6 @@ impl From<&'static str> for UiImageSource {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum ImageCachePolicy {
-    NoStore,
-    WhileVisible,
-    Scene,
-    #[default]
-    Session,
-    Persistent {
-        max_age: Duration,
-        revalidate: bool,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ImageDecodePolicy {
     #[default]
     Original,
@@ -120,7 +109,7 @@ impl ImageRequest {
     pub fn new(source: impl Into<UiImageSource>) -> Self {
         Self {
             source: source.into(),
-            cache_policy: ImageCachePolicy::Session,
+            cache_policy: ImageCachePolicy::ApplicationDefault,
             decode_policy: ImageDecodePolicy::Original,
             priority: crate::memory::CachePriority::Normal,
             namespace: "images".to_owned(),
@@ -163,8 +152,14 @@ impl ImageRequest {
         &self.source
     }
 
-    pub const fn cache_policy_value(&self) -> ImageCachePolicy {
-        self.cache_policy
+    pub const fn cache_policy_value(
+        &self,
+        application_default: ImageCachePolicy,
+    ) -> ImageCachePolicy {
+        match self.cache_policy {
+            ImageCachePolicy::ApplicationDefault => application_default,
+            policy => policy,
+        }
     }
 
     pub const fn decode_policy_value(&self) -> ImageDecodePolicy {

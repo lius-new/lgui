@@ -28,9 +28,7 @@ impl ApplicationBackend for Win32Application {
             context
                 .memory()
                 .options()
-                .budget
-                .cpu_cache_soft_bytes
-                .min(64 * 1024 * 1024),
+                .domain_budget(crate::memory::CacheDomain::EncodedImage),
         );
         #[cfg(feature = "images-win32")]
         let _image_cache = crate::assets::install_image_cache(image_cache_handle.clone());
@@ -50,6 +48,7 @@ impl ApplicationBackend for Win32Application {
                             crate::memory::CacheUsage {
                                 cache_bytes: stats.resident_bytes,
                                 cpu_bytes: stats.resident_bytes,
+                                pinned_bytes: stats.pinned_bytes,
                                 entries: stats.entries,
                                 hits: stats.hits,
                                 misses: stats.misses,

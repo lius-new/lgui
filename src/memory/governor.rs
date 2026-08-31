@@ -9,8 +9,8 @@ use std::{
 use super::registry::RegistryState;
 use super::{
     CacheDomain, CacheRegistration, CacheScope, CacheUsage, DomainInstanceId, DomainRegistration,
-    DomainSnapshot, MemoryEvent, MemoryOptions, MemorySnapshot, TrimReason, TrimRequest,
-    TrimSnapshot,
+    DomainSnapshot, MemoryAction, MemoryEvent, MemoryOptions, MemorySnapshot, TrimReason,
+    TrimRequest, TrimSnapshot,
 };
 
 #[cfg(feature = "persistent-cache")]
@@ -45,6 +45,9 @@ impl MemoryGovernor {
         options: MemoryOptions,
         #[cfg(feature = "persistent-cache")] persistent: Option<Arc<dyn PersistentCacheStore>>,
     ) -> Self {
+        options
+            .validate()
+            .expect("invalid application memory policy");
         Self {
             inner: Arc::new(MemoryGovernorInner {
                 options: Mutex::new(options),
@@ -64,10 +67,13 @@ impl MemoryGovernor {
     }
 
     pub fn set_options(&self, options: MemoryOptions) {
+        options
+            .validate()
+            .expect("invalid application memory policy");
         *self.inner.options.lock().expect("memory options poisoned") = options;
         self.bump_epoch();
         self.rebalance_budgets();
-        self.enforce_soft_budget(TrimReason::SoftBudget);
+        self.enforce_budget();
         #[cfg(feature = "persistent-cache")]
         if let Some(store) = self.persistent_cache() {
             let _ = store.trim_to(options.budget.persistent_bytes);
@@ -97,7 +103,11 @@ impl MemoryGovernor {
         drop(registry);
         self.rebalance_budgets();
         self.bump_epoch();
-        CacheRegistration::new(id, Arc::downgrade(&self.inner.registry))
+        let governor = self.clone();
+        CacheRegistration::new(id, Arc::downgrade(&self.inner.registry), move || {
+            governor.rebalance_budgets();
+            governor.bump_epoch();
+        })
     }
 
     pub fn snapshot(&self) -> MemorySnapshot {
@@ -117,10 +127,7 @@ impl MemoryGovernor {
             });
         }
         let options = self.options();
-        let cache_soft = options
-            .budget
-            .cpu_cache_soft_bytes
-            .saturating_add(options.budget.native_cache_soft_bytes);
+        let cache_soft = options.budget.cache_soft_bytes;
         MemorySnapshot {
             epoch,
             options,
@@ -140,22 +147,41 @@ impl MemoryGovernor {
     pub fn trim(&self, reason: TrimReason, scope: CacheScope, target_bytes: usize) -> usize {
         let epoch = self.bump_epoch();
         let started = Instant::now();
-        let entries = self.registered_entries();
+        let entries = if scope == CacheScope::Persistent {
+            Vec::new()
+        } else {
+            self.registered_entries()
+        };
+        let assignments = entries
+            .iter()
+            .filter(|(_, registration)| {
+                registration.domain != CacheDomain::Persistent
+                    && (scope == CacheScope::AllRebuildable
+                        || registration.domain != CacheDomain::HostScene)
+            })
+            .map(|(_, registration)| {
+                (
+                    registration,
+                    self.assigned_budget(registration.domain, &entries),
+                )
+            })
+            .collect::<Vec<_>>();
+        let assigned_total = assignments
+            .iter()
+            .map(|(_, assigned)| *assigned as u128)
+            .sum::<u128>();
         let mut released = 0usize;
-        for (_, registration) in &entries {
-            let assigned = self.assigned_budget(registration.domain, &entries);
+        for (registration, assigned) in assignments {
             let domain_target = if target_bytes == 0 {
                 0
             } else if target_bytes == usize::MAX {
                 assigned
+            } else if assigned_total == 0 {
+                0
             } else {
-                let total = self
-                    .options()
-                    .budget
-                    .cpu_cache_soft_bytes
-                    .saturating_add(self.options().budget.native_cache_soft_bytes)
-                    .max(1);
-                assigned.saturating_mul(target_bytes).saturating_div(total)
+                let proportional =
+                    (assigned as u128).saturating_mul(target_bytes as u128) / assigned_total;
+                usize::try_from(proportional).unwrap_or(usize::MAX)
             };
             let result = registration.adapter.trim(TrimRequest {
                 reason,
@@ -163,6 +189,18 @@ impl MemoryGovernor {
                 target_bytes: domain_target,
             });
             released = released.saturating_add(result.released_bytes());
+        }
+        #[cfg(feature = "persistent-cache")]
+        if scope == CacheScope::Persistent {
+            if let Some(store) = self.inner.persistent.as_ref() {
+                let target = u64::try_from(target_bytes).unwrap_or(u64::MAX);
+                if let (Ok(before), Ok(after)) = (store.stats(), store.trim_to(target)) {
+                    released = released.saturating_add(
+                        usize::try_from(before.bytes.saturating_sub(after.bytes))
+                            .unwrap_or(usize::MAX),
+                    );
+                }
+            }
         }
         let duration_micros = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
         *self
@@ -200,46 +238,14 @@ impl MemoryGovernor {
     }
 
     pub fn notify(&self, event: MemoryEvent) {
-        match event {
-            MemoryEvent::FrameCommitted => self.enforce_soft_budget(TrimReason::SoftBudget),
-            MemoryEvent::WindowShown => {}
-            MemoryEvent::WindowHidden => {
-                self.trim(TrimReason::WindowHidden, CacheScope::Memory, usize::MAX);
-            }
-            MemoryEvent::AllWindowsHidden => {
-                self.trim(TrimReason::AllWindowsHidden, CacheScope::AllRebuildable, 0);
-            }
-            MemoryEvent::SessionUnmounted => {
-                self.trim(
-                    TrimReason::SessionUnmounted,
-                    CacheScope::AllRebuildable,
-                    usize::MAX,
-                );
-            }
-            MemoryEvent::RendererDeviceLost => {
-                self.trim(TrimReason::DeviceLost, CacheScope::Memory, 0);
-            }
-            MemoryEvent::ThemeOrScaleChanged => {
-                self.trim(TrimReason::ThemeOrScaleChanged, CacheScope::Memory, 0);
-            }
-            MemoryEvent::ModeratePressure => {
-                let options = self.options();
-                let target = options
-                    .budget
-                    .cpu_cache_soft_bytes
-                    .saturating_add(options.budget.native_cache_soft_bytes)
-                    .saturating_mul(3)
-                    / 4;
-                self.trim(TrimReason::ModeratePressure, CacheScope::Memory, target);
-            }
-            MemoryEvent::CriticalPressure => {
-                self.trim(TrimReason::CriticalPressure, CacheScope::AllRebuildable, 0);
-            }
-            MemoryEvent::ExplicitTrim => {
-                self.trim(TrimReason::Explicit, CacheScope::AllRebuildable, 0);
-            }
-            MemoryEvent::ApplicationShutdown => {
-                self.trim(TrimReason::Shutdown, CacheScope::AllRebuildable, 0);
+        match self.options().event_action(event) {
+            MemoryAction::None => {}
+            MemoryAction::EnforceBudget => self.enforce_budget(),
+            MemoryAction::Trim {
+                scope,
+                target_bytes,
+            } => {
+                self.trim(event.trim_reason(), scope, target_bytes);
             }
         }
     }
@@ -247,6 +253,13 @@ impl MemoryGovernor {
     pub fn try_reserve(&self, bytes: usize) -> Option<MemoryReservation> {
         let hard = self.options().budget.transient_hard_bytes;
         let reserved = &self.inner.transient_reserved;
+        if hard == usize::MAX {
+            return Some(MemoryReservation {
+                bytes,
+                accounted_bytes: 0,
+                reserved: Arc::clone(reserved),
+            });
+        }
         let mut current = reserved.load(Ordering::Acquire);
         loop {
             let next = current.checked_add(bytes)?;
@@ -259,6 +272,7 @@ impl MemoryGovernor {
                 Ok(_) => {
                     return Some(MemoryReservation {
                         bytes,
+                        accounted_bytes: bytes,
                         reserved: Arc::clone(reserved),
                     })
                 }
@@ -268,7 +282,7 @@ impl MemoryGovernor {
     }
 
     pub fn try_reserve_task(&self, bytes: usize) -> Option<MemoryTaskReservation> {
-        let limit = self.options().budget.max_parallel_large_tasks.max(1);
+        let limit = self.options().budget.max_parallel_large_tasks;
         let in_flight = &self.inner.large_tasks_in_flight;
         let mut current = in_flight.load(Ordering::Acquire);
         loop {
@@ -326,20 +340,21 @@ impl MemoryGovernor {
         Ok(super::PersistentCacheStats::default())
     }
 
-    fn enforce_soft_budget(&self, reason: TrimReason) {
+    fn enforce_budget(&self) {
         let snapshot = self.snapshot();
         let options = snapshot.options;
-        let cpu_exceeded = snapshot.usage.cpu_bytes > options.budget.cpu_cache_soft_bytes;
-        let native_exceeded =
-            snapshot.usage.gpu_estimated_bytes > options.budget.native_cache_soft_bytes;
-        if cpu_exceeded || native_exceeded {
+        let managed = snapshot.usage.managed_bytes();
+        if managed > options.budget.cache_hard_bytes {
             self.trim(
-                reason,
+                TrimReason::HardBudget,
                 CacheScope::Memory,
-                options
-                    .budget
-                    .cpu_cache_soft_bytes
-                    .saturating_add(options.budget.native_cache_soft_bytes),
+                options.budget.cache_soft_bytes,
+            );
+        } else if managed > options.budget.cache_soft_bytes {
+            self.trim(
+                TrimReason::SoftBudget,
+                CacheScope::Memory,
+                options.budget.cache_soft_bytes,
             );
         }
     }
@@ -369,25 +384,12 @@ impl MemoryGovernor {
         if domain == CacheDomain::Persistent {
             return options.budget.persistent_bytes.min(usize::MAX as u64) as usize;
         }
-        let native = is_native_domain(domain);
-        let total = if native {
-            options.budget.native_cache_soft_bytes
-        } else {
-            options.budget.cpu_cache_soft_bytes
-        };
-        let total_weight = entries
+        let instances = entries
             .iter()
-            .filter(|(_, registration)| {
-                registration.domain != CacheDomain::Persistent
-                    && is_native_domain(registration.domain) == native
-            })
-            .map(|(_, registration)| domain_weight(registration.domain))
-            .sum::<usize>()
+            .filter(|(_, registration)| registration.domain == domain)
+            .count()
             .max(1);
-        total
-            .saturating_mul(domain_weight(domain))
-            .saturating_div(total_weight)
-            .max(1)
+        options.domain_budget(domain).saturating_div(instances)
     }
 
     fn bump_epoch(&self) -> u64 {
@@ -395,43 +397,21 @@ impl MemoryGovernor {
     }
 }
 
-fn is_native_domain(domain: CacheDomain) -> bool {
-    matches!(
-        domain,
-        CacheDomain::Gdi | CacheDomain::D2d | CacheDomain::Skia
-    )
-}
-
-fn domain_weight(domain: CacheDomain) -> usize {
-    match domain {
-        CacheDomain::EncodedImage => 20,
-        CacheDomain::DecodedImage => 20,
-        CacheDomain::Svg => 5,
-        CacheDomain::Blur => 10,
-        CacheDomain::Text => 10,
-        CacheDomain::StaticLayer => 15,
-        CacheDomain::ScrollRaster => 10,
-        CacheDomain::ComponentOutput => 5,
-        CacheDomain::HostScene => 5,
-        CacheDomain::Diagnostics => 1,
-        CacheDomain::Gdi | CacheDomain::D2d | CacheDomain::Skia | CacheDomain::Persistent => 100,
-    }
-}
-
-impl Default for MemoryGovernor {
-    fn default() -> Self {
-        Self::new(MemoryOptions::default())
-    }
-}
-
 pub struct MemoryReservation {
     bytes: usize,
+    accounted_bytes: usize,
     reserved: Arc<AtomicUsize>,
 }
 
 pub struct MemoryTaskReservation {
     _reservation: MemoryReservation,
     in_flight: Arc<AtomicUsize>,
+}
+
+impl MemoryTaskReservation {
+    pub const fn bytes(&self) -> usize {
+        self._reservation.bytes()
+    }
 }
 
 impl Drop for MemoryTaskReservation {
@@ -448,6 +428,7 @@ impl MemoryReservation {
 
 impl Drop for MemoryReservation {
     fn drop(&mut self) {
-        self.reserved.fetch_sub(self.bytes, Ordering::AcqRel);
+        self.reserved
+            .fetch_sub(self.accounted_bytes, Ordering::AcqRel);
     }
 }

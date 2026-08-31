@@ -383,6 +383,13 @@ fn memory_governance_has_no_legacy_cache_bypasses() {
         "clear_scroll_raster_command_cache",
         "clear_svg_bitmap_cache",
         "MemoryAndDisk",
+        "DEFAULT_CACHE_BUDGET",
+        "DEFAULT_IMAGE_CACHE_BUDGET",
+        "DEFAULT_DECODED_IMAGE_CACHE_BUDGET",
+        "DEFAULT_SCROLL_RASTER_COMMAND_CACHE_BUDGET",
+        "DEFAULT_SVG_CACHE_BUDGET",
+        "D2D_BITMAP_CACHE_MIN_BUDGET_BYTES",
+        "GDI_BITMAP_CACHE_BUDGET_BYTES",
     ] {
         assert!(
             !source.contains(forbidden),
@@ -400,10 +407,34 @@ fn memory_governance_has_no_legacy_cache_bypasses() {
         .into_iter()
         .map(|(_, source)| source)
         .collect::<String>();
-    for forbidden in ["windows::", "Win32::", "crate::backend", "crate::frontend"] {
+    for forbidden in [
+        "windows::",
+        "Win32::",
+        "crate::backend",
+        "crate::frontend",
+        "MemoryProfile",
+        "for_profile",
+        "domain_weight",
+        "MemoryOptions::default",
+        "impl Default for MemoryOptions",
+    ] {
         assert!(
             !memory.contains(forbidden),
             "portable memory governance depends on `{forbidden}`"
+        );
+    }
+
+    let builder = fs::read_to_string(root.join("src/application/builder.rs"))
+        .expect("read application builder");
+    for required in [
+        "pub struct MemoryOptionsMissing",
+        "pub struct MemoryOptionsConfigured",
+        "impl<B> Application<B, MemoryOptionsMissing>",
+        "impl<B> Application<B, MemoryOptionsConfigured>",
+    ] {
+        assert!(
+            builder.contains(required),
+            "application construction no longer requires explicit memory policy through `{required}`"
         );
     }
 

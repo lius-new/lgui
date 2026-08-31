@@ -34,6 +34,10 @@ impl CacheUsage {
             .saturating_add(self.cache_bytes)
     }
 
+    pub const fn managed_bytes(self) -> usize {
+        self.rebuildable_bytes.saturating_add(self.cache_bytes)
+    }
+
     pub(crate) fn add_assign(&mut self, other: Self) {
         self.live_bytes = self.live_bytes.saturating_add(other.live_bytes);
         self.rebuildable_bytes = self

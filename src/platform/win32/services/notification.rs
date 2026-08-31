@@ -22,7 +22,7 @@ pub(crate) struct Win32NotificationRegistration {
 }
 
 #[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
-impl<B> Application<B> {
+impl<B, M> Application<B, M> {
     /// Configures the built-in Windows toast notification adapter.
     pub fn notifications(self, identity: impl Into<String>) -> Self {
         self.provide(Win32NotificationRegistration {

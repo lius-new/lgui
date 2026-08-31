@@ -296,12 +296,9 @@ impl WinitHost {
             .context
             .memory()
             .options()
-            .budget
-            .native_cache_soft_bytes
+            .domain_budget(crate::memory::CacheDomain::Skia)
             .checked_div(self.windows.len().saturating_add(1))
-            .unwrap_or(1)
-            .min(DEFAULT_CACHE_BUDGET)
-            .max(1);
+            .unwrap_or(0);
         let renderer = create_renderer(
             self.preference,
             &self.soft_context,
@@ -461,6 +458,7 @@ impl WinitHost {
                 full_redraw: true,
                 recovery,
                 memory_instance,
+                memory_budget: renderer_budget,
                 memory_usage,
                 _memory_registration: memory_registration,
                 component_memory,

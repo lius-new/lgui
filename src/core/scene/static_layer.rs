@@ -97,7 +97,7 @@ impl StaticLayerSpec {
             opacity: 255,
             offset_x: 0.0,
             offset_y: 0.0,
-            memory_budget_bytes: 64 * 1024 * 1024,
+            memory_budget_bytes: usize::MAX,
             background: StaticLayerBackground::Opaque,
         }
     }
@@ -128,7 +128,7 @@ impl StaticLayerSpec {
     }
 
     pub fn memory_budget_bytes(mut self, budget: usize) -> Self {
-        self.memory_budget_bytes = budget.max(1);
+        self.memory_budget_bytes = budget;
         self
     }
 

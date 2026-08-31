@@ -36,8 +36,8 @@ pub use crate::dialogs::{
 };
 pub use crate::events::{AsyncEventHandler, Event, EventFuture, EventSubscription};
 pub use crate::memory::{
-    CacheDomain, CachePriority, MemoryOptions, MemoryProfile, MemorySnapshot, RetentionClass,
-    TrimReason,
+    CacheDomain, CachePriority, CacheScope, MemoryAction, MemoryBudget, MemoryDomainBudgets,
+    MemoryEventPolicy, MemoryOptions, MemorySnapshot, RetentionClass, TrimReason,
 };
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},

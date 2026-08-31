@@ -70,7 +70,7 @@ fn async_image_cache_wakes_and_publishes_loaded_bytes() {
             let _ = wake.send(());
         },
         1024,
-        crate::memory::MemoryGovernor::default(),
+        crate::memory::MemoryGovernor::new(crate::memory::test_memory_options()),
     );
     let request =
         crate::core::ImageRequest::new(ImageSource::url("https://example.invalid/test.png"));
@@ -79,6 +79,34 @@ fn async_image_cache_wakes_and_publishes_loaded_bytes() {
         .expect("image completion wake");
     assert_eq!(cache.request(&request), ImageStatus::Ready);
     assert_eq!(cache.bytes(&request).as_deref(), Some(ONE_PIXEL_PNG));
+}
+
+#[test]
+fn zero_cache_budget_still_delivers_a_reachable_image() {
+    let (wake, woke) = mpsc::channel();
+    let cache = async_image_cache(
+        RemoteImageLoaderHandle::new(TestRemoteLoader),
+        move || {
+            let _ = wake.send(());
+        },
+        0,
+        crate::memory::MemoryGovernor::new(crate::memory::test_memory_options()),
+    );
+    let request =
+        crate::core::ImageRequest::new(ImageSource::url("https://example.invalid/uncached.png"))
+            .cache_policy(crate::core::ImageCachePolicy::WhileVisible);
+    let owner = crate::memory::DomainInstanceId(1);
+    cache.update_reachability(owner, std::slice::from_ref(&request));
+
+    assert_eq!(cache.request(&request), ImageStatus::Loading);
+    woke.recv_timeout(Duration::from_secs(2))
+        .expect("image completion wake");
+    assert_eq!(cache.request(&request), ImageStatus::Ready);
+    assert_eq!(cache.stats().pinned_bytes, ONE_PIXEL_PNG.len());
+    assert_eq!(cache.bytes(&request).as_deref(), Some(ONE_PIXEL_PNG));
+
+    cache.update_reachability(owner, &[]);
+    assert_eq!(cache.stats().resident_bytes, 0);
 }
 
 #[test]
@@ -93,7 +121,7 @@ fn async_image_cache_coalesces_in_flight_failure_and_applies_retry_backoff() {
             let _ = wake.send(());
         },
         1024,
-        crate::memory::MemoryGovernor::default(),
+        crate::memory::MemoryGovernor::new(crate::memory::test_memory_options()),
     );
     let request =
         crate::core::ImageRequest::new(ImageSource::url("https://example.invalid/fail.png"));
@@ -118,7 +146,7 @@ fn reachability_is_aggregated_across_window_owners() {
             let _ = wake.send(());
         },
         1024,
-        crate::memory::MemoryGovernor::default(),
+        crate::memory::MemoryGovernor::new(crate::memory::test_memory_options()),
     );
     let first =
         crate::core::ImageRequest::new(ImageSource::url("https://example.invalid/first.png"))
@@ -163,7 +191,7 @@ fn target_decode_downsamples_large_sources() {
     let resized = prepare_image_bytes(
         Arc::from(encoded.into_inner()),
         &request,
-        crate::memory::MemoryOptions::balanced().budget,
+        crate::memory::test_memory_options().budget,
     )
     .expect("downsample image");
     let decoded = image::load_from_memory(resized.as_ref()).expect("decode resized image");
@@ -219,7 +247,7 @@ fn persistent_image_revalidation_reuses_cached_bytes_after_304() {
     entry.expires_unix_seconds = Some(1);
     crate::memory::PersistentCacheStore::put(&store, entry).expect("seed persistent image");
     let governor = crate::memory::MemoryGovernor::with_store(
-        crate::memory::MemoryOptions::balanced(),
+        crate::memory::test_memory_options(),
         Some(Arc::new(store.clone())),
     );
     let observed_etag = Arc::new(Mutex::new(None));

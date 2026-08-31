@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CacheDomain {
@@ -69,6 +71,21 @@ pub enum CachePriority {
 }
 
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImageCachePolicy {
+    #[default]
+    ApplicationDefault,
+    NoStore,
+    WhileVisible,
+    Scene,
+    Session,
+    Persistent {
+        max_age: Duration,
+        revalidate: bool,
+    },
+}
+
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub enum CacheScope {
     #[default]
@@ -107,6 +124,36 @@ pub enum MemoryEvent {
     CriticalPressure,
     ExplicitTrim,
     ApplicationShutdown,
+}
+
+impl MemoryEvent {
+    pub const fn trim_reason(self) -> TrimReason {
+        match self {
+            Self::FrameCommitted => TrimReason::SoftBudget,
+            Self::WindowHidden => TrimReason::WindowHidden,
+            Self::WindowShown => TrimReason::SoftBudget,
+            Self::AllWindowsHidden => TrimReason::AllWindowsHidden,
+            Self::SessionUnmounted => TrimReason::SessionUnmounted,
+            Self::RendererDeviceLost => TrimReason::DeviceLost,
+            Self::ThemeOrScaleChanged => TrimReason::ThemeOrScaleChanged,
+            Self::ModeratePressure => TrimReason::ModeratePressure,
+            Self::CriticalPressure => TrimReason::CriticalPressure,
+            Self::ExplicitTrim => TrimReason::Explicit,
+            Self::ApplicationShutdown => TrimReason::Shutdown,
+        }
+    }
+}
+
+#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub enum MemoryAction {
+    #[default]
+    None,
+    EnforceBudget,
+    Trim {
+        scope: CacheScope,
+        target_bytes: usize,
+    },
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]

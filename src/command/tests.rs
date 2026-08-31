@@ -29,7 +29,7 @@ fn run_ready<T>(future: impl Future<Output = T>) -> T {
 
 #[test]
 fn typed_commands_preserve_arguments_outputs_and_errors() {
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     assert!(application
         .command_registry()
         .register::<Add>(|_, (left, right)| async move {
@@ -47,7 +47,7 @@ fn typed_commands_preserve_arguments_outputs_and_errors() {
 
 #[test]
 fn duplicate_command_registration_is_rejected() {
-    let application = ApplicationContext::empty();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
     assert!(application
         .command_registry()
         .register::<Add>(|_, _| async { Ok(0) }));

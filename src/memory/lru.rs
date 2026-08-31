@@ -32,7 +32,7 @@ where
         let cache = Self {
             entries: HashMap::new(),
             bytes: 0,
-            budget_bytes: budget_bytes.max(1),
+            budget_bytes,
             tick: 0,
             hits: 0,
             misses: 0,
@@ -129,7 +129,7 @@ where
         )
     ))]
     pub(crate) fn set_budget(&mut self, budget_bytes: usize) {
-        self.budget_bytes = budget_bytes.max(1);
+        self.budget_bytes = budget_bytes;
         self.evict_to(self.budget_bytes);
     }
 

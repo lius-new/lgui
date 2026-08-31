@@ -23,8 +23,6 @@ use crate::{
     platform::win32::{self as cached_image, render_trace},
 };
 
-const DEFAULT_DECODED_IMAGE_CACHE_BUDGET: usize = 32 * 1024 * 1024;
-
 fn decoded_image_telemetry() -> &'static crate::memory::CacheTelemetry {
     static TELEMETRY: OnceLock<crate::memory::CacheTelemetry> = OnceLock::new();
     TELEMETRY.get_or_init(Default::default)
@@ -33,7 +31,7 @@ fn decoded_image_telemetry() -> &'static crate::memory::CacheTelemetry {
 thread_local! {
     static DECODED_IMAGE_CACHE: RefCell<crate::memory::LruCache<String, DecodedImage>> = RefCell::new(
         crate::memory::LruCache::new(
-            DEFAULT_DECODED_IMAGE_CACHE_BUDGET,
+            0,
             crate::memory::ResourceClass::Cache,
             decoded_image_telemetry().clone(),
         )

@@ -80,11 +80,6 @@ fn bitmap_cache_budget_evicts_oldest_entries_and_rejects_oversized_entries() {
         ),
         vec![third]
     );
-    assert_eq!(
-        d2d_bitmap_cache_budget(1432, 860),
-        D2D_BITMAP_CACHE_MIN_BUDGET_BYTES
-    );
-    assert!(d2d_bitmap_cache_budget(3840, 2160) > D2D_BITMAP_CACHE_MIN_BUDGET_BYTES);
 }
 
 #[test]

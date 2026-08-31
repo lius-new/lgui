@@ -59,12 +59,12 @@ impl Default for StaticLayerMemoryCache {
             entries: HashMap::new(),
             bytes: 0,
             tick: 0,
-            budget_bytes: 64 * 1024 * 1024,
+            budget_bytes: 0,
             hits: 0,
             misses: 0,
             stores: 0,
             evictions: 0,
-            governor_budget_bytes: 64 * 1024 * 1024,
+            governor_budget_bytes: 0,
         }
     }
 }
@@ -139,7 +139,7 @@ impl StaticLayerMemoryCache {
         policy: RasterCachePolicy,
     ) -> bool {
         let bytes = bitmap.byte_len();
-        self.budget_bytes = budget_bytes.max(1).min(self.governor_budget_bytes.max(1));
+        self.budget_bytes = budget_bytes.min(self.governor_budget_bytes);
         self.stores = self.stores.saturating_add(1);
         if bytes > self.budget_bytes {
             return false;
@@ -195,7 +195,7 @@ pub(crate) fn set_static_layer_memory_cache_budget(budget_bytes: usize) {
     let mut cache = static_layer_cache()
         .lock()
         .expect("static layer cache poisoned");
-    cache.governor_budget_bytes = budget_bytes.max(1);
+    cache.governor_budget_bytes = budget_bytes;
     cache.budget_bytes = cache.budget_bytes.min(cache.governor_budget_bytes);
     cache.evict_to_budget();
 }
@@ -333,6 +333,7 @@ mod tests {
     #[test]
     fn raster_policy_evicts_shorter_retention_then_lower_priority() {
         let mut cache = StaticLayerMemoryCache::default();
+        cache.governor_budget_bytes = 64;
         for (key, retention, priority) in [
             (
                 "frame-high",

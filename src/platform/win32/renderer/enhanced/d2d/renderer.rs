@@ -15,7 +15,7 @@ impl D2dRenderer {
             context,
             dwrite_factory,
             scene_bitmap,
-            bitmap_cache: D2dBitmapCache::new(d2d_bitmap_cache_budget(width, height)),
+            bitmap_cache: D2dBitmapCache::new(0),
             overlay_brush_cache: HashMap::new(),
             frame_bitmap_cache: HashMap::new(),
             compositing_layers: HashMap::new(),

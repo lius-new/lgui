@@ -30,6 +30,10 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     Application::new_skia(GraphicsPreference::Auto)
+        .memory_options(MemoryOptions::unbounded(
+            ImageCachePolicy::WhileVisible,
+            false,
+        ))
         .window_options(
             WindowOptions::new("counter")
                 .title("lgui counter")

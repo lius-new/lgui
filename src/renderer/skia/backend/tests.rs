@@ -11,6 +11,8 @@ use crate::{
     renderer::FrameReason,
 };
 
+const TEST_CACHE_BUDGET: usize = 96 * 1024 * 1024;
+
 const PIXEL_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xB5, 0x1C, 0x0C,
@@ -343,7 +345,7 @@ fn every_scene_primitive_has_a_real_skia_paint_path() {
     for command in commands {
         let mut scene = Scene::new();
         scene.push(command);
-        let mut surface = SkiaSoftwareSurface::new(DEFAULT_CACHE_BUDGET);
+        let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
         draw_scene(
             &mut surface,
             &scene,
@@ -357,7 +359,7 @@ fn every_scene_primitive_has_a_real_skia_paint_path() {
 fn dirty_draw_preserves_pixels_outside_damage_and_clears_removals() {
     let full = [PhysicalRect::new(0, 0, 32, 32)];
     let left = [PhysicalRect::new(0, 0, 16, 32)];
-    let mut surface = SkiaSoftwareSurface::new(DEFAULT_CACHE_BUDGET);
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
     let mut red = Scene::new();
     red.push(rect_command(
         "background-red",
@@ -403,7 +405,7 @@ fn dpi_projection_and_nested_clip_use_physical_bounds() {
         phase: RenderPhase::Content,
     });
     let scene = logical.project_to_physical(UiScale::new(2.0));
-    let mut surface = SkiaSoftwareSurface::new(DEFAULT_CACHE_BUDGET);
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
     draw_scene(
         &mut surface,
         &scene,
@@ -516,7 +518,7 @@ fn layer_opacity_and_content_signature_invalidate_retained_images() {
         phase: RenderPhase::Content,
     };
     let damage = [PhysicalRect::new(0, 0, 32, 32)];
-    let mut surface = SkiaSoftwareSurface::new(DEFAULT_CACHE_BUDGET);
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
     let mut first = Scene::new();
     first.push(layer(1, Color(0xFF0000)));
     draw_scene(&mut surface, &first, true, &damage);
