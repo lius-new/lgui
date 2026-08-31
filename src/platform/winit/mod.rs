@@ -82,6 +82,11 @@ pub use application::{WinitApplication, WinitApplicationError};
 use event_loop::WinitHost;
 pub(in crate::platform) use event_loop::WinitUserEvent;
 use input::*;
+#[cfg(any(
+    feature = "renderer-skia-gl",
+    feature = "renderer-skia-vulkan",
+    feature = "renderer-skia-metal"
+))]
 pub(in crate::platform) use renderer::WinitFrameTimings;
 use renderer::*;
 use window::*;

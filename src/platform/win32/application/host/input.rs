@@ -1,4 +1,6 @@
-fn dispatch_input(hwnd: HWND, input: InputEvent) {
+use super::*;
+
+pub(super) fn dispatch_input(hwnd: HWND, input: InputEvent) {
     let (repaint, ime_update, frame_dispatcher) = STATE.with(|state| {
         if let Some(state) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
             let dispatcher = state.dispatcher.clone();
@@ -45,7 +47,7 @@ fn dispatch_input(hwnd: HWND, input: InputEvent) {
     }
 }
 
-fn ime_composition_point(output: &RuntimeOutput) -> Option<Option<Point>> {
+pub(super) fn ime_composition_point(output: &RuntimeOutput) -> Option<Option<Point>> {
     output
         .events
         .iter()
@@ -60,7 +62,7 @@ fn ime_composition_point(output: &RuntimeOutput) -> Option<Option<Point>> {
         .last()
 }
 
-fn update_ime_composition_window(hwnd: HWND, logical_size: Size, point: Option<Point>) {
+pub(super) fn update_ime_composition_window(hwnd: HWND, logical_size: Size, point: Option<Point>) {
     unsafe {
         let _ = DestroyCaret();
     }
@@ -89,7 +91,7 @@ fn update_ime_composition_window(hwnd: HWND, logical_size: Size, point: Option<P
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowRepaint {
+pub(super) enum WindowRepaint {
     None,
     Rect(UiRect),
     Full,
@@ -106,7 +108,7 @@ impl WindowRepaint {
     }
 }
 
-fn pending_session_repaint(session: &mut UiSession) -> (WindowRepaint, bool) {
+pub(super) fn pending_session_repaint(session: &mut UiSession) -> (WindowRepaint, bool) {
     let updates = session.apply_pending_updates();
     if updates.focus_changed {
         return (WindowRepaint::Full, updates.frame_requested);
@@ -122,7 +124,7 @@ fn pending_session_repaint(session: &mut UiSession) -> (WindowRepaint, bool) {
     (repaint, updates.frame_requested)
 }
 
-fn apply_pending_window_updates(hwnd: HWND) -> (WindowRepaint, bool) {
+pub(super) fn apply_pending_window_updates(hwnd: HWND) -> (WindowRepaint, bool) {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
@@ -132,7 +134,7 @@ fn apply_pending_window_updates(hwnd: HWND) -> (WindowRepaint, bool) {
     })
 }
 
-fn request_window_repaint(hwnd: HWND, repaint: WindowRepaint) {
+pub(super) fn request_window_repaint(hwnd: HWND, repaint: WindowRepaint) {
     if repaint != WindowRepaint::None {
         STATE.with(|state| {
             if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
@@ -168,7 +170,7 @@ fn request_window_repaint(hwnd: HWND, repaint: WindowRepaint) {
     }
 }
 
-fn logical_point(hwnd: HWND, point: PhysicalPoint) -> Point {
+pub(super) fn logical_point(hwnd: HWND, point: PhysicalPoint) -> Point {
     STATE.with(|state| {
         state
             .borrow()
@@ -178,7 +180,12 @@ fn logical_point(hwnd: HWND, point: PhysicalPoint) -> Point {
     })
 }
 
-fn dispatch_mouse_button(hwnd: HWND, lparam: LPARAM, button: PointerButton, pressed: bool) {
+pub(super) fn dispatch_mouse_button(
+    hwnd: HWND,
+    lparam: LPARAM,
+    button: PointerButton,
+    pressed: bool,
+) {
     let pointer = PointerData::mouse(logical_point(hwnd, unpack_point(lparam)));
     if pressed {
         unsafe {
@@ -193,7 +200,7 @@ fn dispatch_mouse_button(hwnd: HWND, lparam: LPARAM, button: PointerButton, pres
     }
 }
 
-fn track_mouse_leave(hwnd: HWND) {
+pub(super) fn track_mouse_leave(hwnd: HWND) {
     let mut tracking = TRACKMOUSEEVENT {
         cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
         dwFlags: TME_LEAVE,
@@ -205,7 +212,7 @@ fn track_mouse_leave(hwnd: HWND) {
     }
 }
 
-fn current_logical_cursor(hwnd: HWND) -> Point {
+pub(super) fn current_logical_cursor(hwnd: HWND) -> Point {
     let mut point = POINT::default();
     unsafe {
         let _ = GetCursorPos(&mut point);
@@ -214,11 +221,11 @@ fn current_logical_cursor(hwnd: HWND) -> Point {
     logical_point(hwnd, PhysicalPoint::new(point.x, point.y))
 }
 
-fn unpack_point(lparam: LPARAM) -> PhysicalPoint {
+pub(super) fn unpack_point(lparam: LPARAM) -> PhysicalPoint {
     PhysicalPoint::new(lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32)
 }
 
-fn logical_key(value: usize) -> LogicalKey {
+pub(super) fn logical_key(value: usize) -> LogicalKey {
     match value {
         0x08 => NamedKey::Backspace.into(),
         0x09 => NamedKey::Tab.into(),
@@ -250,7 +257,7 @@ fn logical_key(value: usize) -> LogicalKey {
     }
 }
 
-fn key_modifiers() -> KeyModifiers {
+pub(super) fn key_modifiers() -> KeyModifiers {
     let mut modifiers = KeyModifiers::empty();
     for (virtual_key, modifier) in [
         (VK_CONTROL.0 as i32, KeyModifiers::CONTROL),
@@ -274,7 +281,7 @@ fn key_modifiers() -> KeyModifiers {
     modifiers
 }
 
-fn keyboard_event(value: usize, lparam: LPARAM, state: KeyState) -> KeyboardEvent {
+pub(super) fn keyboard_event(value: usize, lparam: LPARAM, state: KeyState) -> KeyboardEvent {
     let raw = lparam.0 as u32;
     KeyboardEvent {
         state,
@@ -287,7 +294,7 @@ fn keyboard_event(value: usize, lparam: LPARAM, state: KeyState) -> KeyboardEven
     }
 }
 
-fn physical_key(value: usize) -> PhysicalKey {
+pub(super) fn physical_key(value: usize) -> PhysicalKey {
     match value {
         0x08 => PhysicalKey::Backspace,
         0x09 => PhysicalKey::Tab,
@@ -311,7 +318,7 @@ fn physical_key(value: usize) -> PhysicalKey {
     }
 }
 
-fn key_location(value: usize, raw_lparam: u32) -> KeyLocation {
+pub(super) fn key_location(value: usize, raw_lparam: u32) -> KeyLocation {
     match value {
         0xA0 | 0xA2 | 0xA4 | 0x5B => KeyLocation::Left,
         0xA1 | 0xA3 | 0xA5 | 0x5C => KeyLocation::Right,
@@ -321,7 +328,7 @@ fn key_location(value: usize, raw_lparam: u32) -> KeyLocation {
     }
 }
 
-fn take_window_char(hwnd: HWND, unit: u16) -> Option<String> {
+pub(super) fn take_window_char(hwnd: HWND, unit: u16) -> Option<String> {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
@@ -334,7 +341,7 @@ fn take_window_char(hwnd: HWND, unit: u16) -> Option<String> {
     })
 }
 
-fn suppress_committed_ime_char(pending: &mut VecDeque<u16>, unit: u16) -> bool {
+pub(super) fn suppress_committed_ime_char(pending: &mut VecDeque<u16>, unit: u16) -> bool {
     if pending.front().copied() == Some(unit) {
         pending.pop_front();
         true
@@ -344,7 +351,10 @@ fn suppress_committed_ime_char(pending: &mut VecDeque<u16>, unit: u16) -> bool {
     }
 }
 
-fn decode_utf16_char_unit(pending_high_surrogate: &mut Option<u16>, unit: u16) -> Option<String> {
+pub(super) fn decode_utf16_char_unit(
+    pending_high_surrogate: &mut Option<u16>,
+    unit: u16,
+) -> Option<String> {
     if (0xD800..=0xDBFF).contains(&unit) {
         *pending_high_surrogate = Some(unit);
         return None;
@@ -355,7 +365,7 @@ fn decode_utf16_char_unit(pending_high_surrogate: &mut Option<u16>, unit: u16) -
     Some(String::from_utf16_lossy(&units))
 }
 
-fn read_ime_string(
+pub(super) fn read_ime_string(
     hwnd: HWND,
     kind: windows::Win32::UI::Input::Ime::IME_COMPOSITION_STRING,
 ) -> Option<String> {
@@ -388,7 +398,7 @@ fn read_ime_string(
     }
 }
 
-fn read_ime_cursor(hwnd: HWND) -> Option<usize> {
+pub(super) fn read_ime_cursor(hwnd: HWND) -> Option<usize> {
     unsafe {
         let context = ImmGetContext(hwnd);
         if context.is_invalid() {
@@ -400,6 +410,6 @@ fn read_ime_cursor(hwnd: HWND) -> Option<usize> {
     }
 }
 
-fn wide(value: &str) -> Vec<u16> {
+pub(super) fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }

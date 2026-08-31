@@ -1,4 +1,6 @@
-fn create_window(
+use super::*;
+
+pub(super) fn create_window(
     instance: HINSTANCE,
     class_name: &[u16],
     options: WindowOptions,
@@ -140,7 +142,7 @@ fn create_window(
     Ok(hwnd)
 }
 
-fn install_window_icons(hwnd: HWND) {
+pub(super) fn install_window_icons(hwnd: HWND) {
     for (kind, class_index) in [(ICON_BIG, GCLP_HICON), (ICON_SMALL, GCLP_HICONSM)] {
         let icon = unsafe { GetClassLongPtrW(hwnd, class_index) };
         if icon != 0 {
@@ -156,7 +158,7 @@ fn install_window_icons(hwnd: HWND) {
     }
 }
 
-fn render_hidden_window_once(hwnd: HWND) {
+pub(super) fn render_hidden_window_once(hwnd: HWND) {
     let target = unsafe { GetDC(Some(hwnd)) };
     if target.is_invalid() {
         return;
@@ -167,7 +169,7 @@ fn render_hidden_window_once(hwnd: HWND) {
     }
 }
 
-fn window_style(options: &WindowOptions) -> WINDOW_STYLE {
+pub(super) fn window_style(options: &WindowOptions) -> WINDOW_STYLE {
     // A custom-framed window must be born as a popup. Creating an overlapped window and
     // removing WS_CAPTION afterwards lets Windows paint the native frame for one frame.
     let mut style = if options.native_titlebar {
@@ -182,7 +184,7 @@ fn window_style(options: &WindowOptions) -> WINDOW_STYLE {
     style
 }
 
-fn set_runtime_window_style(hwnd: HWND, style: WINDOW_STYLE) {
+pub(super) fn set_runtime_window_style(hwnd: HWND, style: WINDOW_STYLE) {
     let current = WINDOW_STYLE(unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32);
     let visibility = WINDOW_STYLE(current.0 & WS_VISIBLE.0);
     unsafe {
@@ -190,7 +192,7 @@ fn set_runtime_window_style(hwnd: HWND, style: WINDOW_STYLE) {
     }
 }
 
-fn set_window_corner_preference(hwnd: HWND, radius: i32, mode: WindowMode) {
+pub(super) fn set_window_corner_preference(hwnd: HWND, radius: i32, mode: WindowMode) {
     let preference = window_corner_preference(radius, mode);
     unsafe {
         // Windows versions before Windows 11 do not expose this attribute. The request is a
@@ -204,7 +206,10 @@ fn set_window_corner_preference(hwnd: HWND, radius: i32, mode: WindowMode) {
     }
 }
 
-fn window_corner_preference(radius: i32, mode: WindowMode) -> DWM_WINDOW_CORNER_PREFERENCE {
+pub(super) fn window_corner_preference(
+    radius: i32,
+    mode: WindowMode,
+) -> DWM_WINDOW_CORNER_PREFERENCE {
     if radius <= 0 || mode != WindowMode::Windowed {
         DWMWCP_DONOTROUND
     } else if radius <= 4 {
@@ -214,7 +219,7 @@ fn window_corner_preference(radius: i32, mode: WindowMode) -> DWM_WINDOW_CORNER_
     }
 }
 
-enum WindowModeTransition {
+pub(super) enum WindowModeTransition {
     Fullscreen,
     Windowed {
         corner_radius: i32,
@@ -223,7 +228,7 @@ enum WindowModeTransition {
     },
 }
 
-fn set_window_mode(hwnd: HWND, mode: WindowMode) {
+pub(super) fn set_window_mode(hwnd: HWND, mode: WindowMode) {
     let current_mode = STATE.with(|state| {
         state
             .borrow()
@@ -327,7 +332,7 @@ fn set_window_mode(hwnd: HWND, mode: WindowMode) {
     }
 }
 
-fn hwnd_for_id(id: &WindowId) -> Option<HWND> {
+pub(super) fn hwnd_for_id(id: &WindowId) -> Option<HWND> {
     STATE.with(|state| {
         state
             .borrow()
@@ -336,7 +341,7 @@ fn hwnd_for_id(id: &WindowId) -> Option<HWND> {
     })
 }
 
-fn set_desired_visibility(hwnd: HWND, visible: bool) {
+pub(super) fn set_desired_visibility(hwnd: HWND, visible: bool) {
     STATE.with(|state| {
         if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
             window.visibility.set_desired(visible);
@@ -344,7 +349,7 @@ fn set_desired_visibility(hwnd: HWND, visible: bool) {
     });
 }
 
-fn hide_window(hwnd: HWND) {
+pub(super) fn hide_window(hwnd: HWND) {
     set_desired_visibility(hwnd, false);
     hide_owned_windows(hwnd);
     unsafe {
@@ -354,7 +359,7 @@ fn hide_window(hwnd: HWND) {
     suspend_application_if_backgrounded();
 }
 
-fn show_window(hwnd: HWND) {
+pub(super) fn show_window(hwnd: HWND) {
     set_desired_visibility(hwnd, true);
     if !application_is_backgrounded() {
         BACKGROUND_TRIM_GENERATION.fetch_add(1, Ordering::AcqRel);
@@ -370,7 +375,7 @@ fn show_window(hwnd: HWND) {
     }
 }
 
-fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
+pub(super) fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
     STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
@@ -386,7 +391,7 @@ fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
     })
 }
 
-fn resume_window_rendering(hwnd: HWND) {
+pub(super) fn resume_window_rendering(hwnd: HWND) {
     STATE.with(|state| {
         if let Some(window) = state.borrow_mut().get_mut(&(hwnd.0 as isize)) {
             window.rendering_suspended = false;
@@ -394,7 +399,7 @@ fn resume_window_rendering(hwnd: HWND) {
     });
 }
 
-fn suspend_application_if_backgrounded() {
+pub(super) fn suspend_application_if_backgrounded() {
     if !application_is_backgrounded() {
         return;
     }
@@ -403,12 +408,12 @@ fn suspend_application_if_backgrounded() {
     for raw in windows {
         suspend_window_rendering(HWND(raw as _), true);
     }
-    super::super::background::release_visual_caches();
-    super::super::background::trim_process_working_set();
+    super::super::super::background::release_visual_caches();
+    super::super::super::background::trim_process_working_set();
     schedule_background_retrim();
 }
 
-fn application_is_backgrounded() -> bool {
+pub(super) fn application_is_backgrounded() -> bool {
     STATE.with(|state| {
         let windows = state.borrow();
         let mut has_opted_in_root = false;
@@ -422,7 +427,7 @@ fn application_is_backgrounded() -> bool {
     })
 }
 
-fn schedule_background_retrim() {
+pub(super) fn schedule_background_retrim() {
     let generation = BACKGROUND_TRIM_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     let dispatcher = STATE.with(|state| {
         state
@@ -442,13 +447,13 @@ fn schedule_background_retrim() {
                 if BACKGROUND_TRIM_GENERATION.load(Ordering::Acquire) == generation
                     && application_is_backgrounded()
                 {
-                    super::super::background::trim_process_working_set();
+                    super::super::super::background::trim_process_working_set();
                 }
             });
         });
 }
 
-fn hide_owned_windows(owner: HWND) {
+pub(super) fn hide_owned_windows(owner: HWND) {
     let owned = STATE.with(|state| {
         let mut state = state.borrow_mut();
         state
@@ -467,7 +472,7 @@ fn hide_owned_windows(owner: HWND) {
     }
 }
 
-fn restore_owned_windows(owner: HWND) {
+pub(super) fn restore_owned_windows(owner: HWND) {
     let owned = STATE.with(|state| {
         let mut state = state.borrow_mut();
         state
@@ -488,7 +493,7 @@ fn restore_owned_windows(owner: HWND) {
     }
 }
 
-fn reposition_owned_windows(owner: HWND) {
+pub(super) fn reposition_owned_windows(owner: HWND) {
     let owned = STATE.with(|state| {
         state
             .borrow()
@@ -504,7 +509,7 @@ fn reposition_owned_windows(owner: HWND) {
     }
 }
 
-fn position_window(hwnd: HWND) {
+pub(super) fn position_window(hwnd: HWND) {
     let Some((owner, position, logical_size, native_titlebar)) = STATE.with(|state| {
         state.borrow().get(&(hwnd.0 as isize)).map(|state| {
             (
@@ -574,7 +579,7 @@ fn position_window(hwnd: HWND) {
     }
 }
 
-fn install_wake(hwnd: HWND) {
+pub(super) fn install_wake(hwnd: HWND) {
     let raw = hwnd.0 as isize;
     STATE.with(|state| {
         if let Some(state) = state.borrow().get(&raw) {
@@ -585,7 +590,7 @@ fn install_wake(hwnd: HWND) {
     });
 }
 
-fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
+pub(super) fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
     let screen_point = unpack_point(lparam);
     let mut window_rect = RECT::default();
     if unsafe { GetWindowRect(hwnd, &mut window_rect) }.is_err() {
@@ -657,7 +662,12 @@ fn custom_frame_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
     })
 }
 
-fn resize_border_hit(rect: RECT, point: PhysicalPoint, horizontal: i32, vertical: i32) -> u32 {
+pub(super) fn resize_border_hit(
+    rect: RECT,
+    point: PhysicalPoint,
+    horizontal: i32,
+    vertical: i32,
+) -> u32 {
     let left = point.x >= rect.left && point.x < rect.left + horizontal;
     let right = point.x < rect.right && point.x >= rect.right - horizontal;
     let top = point.y >= rect.top && point.y < rect.top + vertical;

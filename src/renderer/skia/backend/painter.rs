@@ -1,9 +1,11 @@
-struct SkiaPainter<'a> {
-    cache: &'a mut SkiaCache,
+use super::*;
+
+pub(super) struct SkiaPainter<'a> {
+    pub(super) cache: &'a mut SkiaCache,
 }
 
 impl SkiaPainter<'_> {
-    fn draw_commands(
+    pub(super) fn draw_commands(
         &mut self,
         canvas: &Canvas,
         commands: &[ScenePrimitive],

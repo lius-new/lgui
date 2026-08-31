@@ -1,7 +1,9 @@
-struct SkiaTextSystem;
+use super::*;
+
+pub(super) struct SkiaTextSystem;
 
 thread_local! {
-    static SKIA_TEXT_FONTS: RefCell<FontCollection> = RefCell::new(skia_font_collection());
+    pub(super) static SKIA_TEXT_FONTS: RefCell<FontCollection> = RefCell::new(skia_font_collection());
 }
 
 impl crate::text::TextSystem for SkiaTextSystem {
@@ -37,7 +39,7 @@ pub(crate) fn skia_text_system_handle() -> crate::text::TextSystemHandle {
     crate::text::TextSystemHandle::new(SkiaTextSystem)
 }
 
-fn skia_font_collection() -> FontCollection {
+pub(super) fn skia_font_collection() -> FontCollection {
     let mut collection = FontCollection::new();
     collection.set_default_font_manager(FontMgr::default(), None);
     let assets = crate::text::font_assets();
@@ -58,7 +60,7 @@ fn skia_font_collection() -> FontCollection {
     collection
 }
 
-fn build_skia_paragraph(
+pub(super) fn build_skia_paragraph(
     request: &crate::text::TextLayoutRequest<'_>,
     fonts: FontCollection,
     color: Option<SkColor>,
@@ -152,7 +154,7 @@ fn build_skia_paragraph(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn skia_paragraph_text_style(
+pub(super) fn skia_paragraph_text_style(
     font_height: f32,
     font_weight: i32,
     font_width: crate::text::TextFontWidth,
@@ -201,7 +203,7 @@ fn skia_paragraph_text_style(
     style
 }
 
-fn resolved_text_direction(
+pub(super) fn resolved_text_direction(
     text: &str,
     requested: crate::text::TextDirection,
 ) -> crate::text::TextDirection {
@@ -221,7 +223,7 @@ fn resolved_text_direction(
         .unwrap_or(crate::text::TextDirection::LeftToRight)
 }
 
-fn portable_text_layout(
+pub(super) fn portable_text_layout(
     paragraph: &Paragraph,
     request: &crate::text::TextLayoutRequest<'_>,
 ) -> crate::text::TextLayout {
@@ -349,7 +351,7 @@ fn portable_text_layout(
     )
 }
 
-fn paragraph_caret_rect(
+pub(super) fn paragraph_caret_rect(
     paragraph: &Paragraph,
     byte_range: std::ops::Range<usize>,
     at_start: bool,
@@ -379,7 +381,7 @@ fn paragraph_caret_rect(
     ))
 }
 
-fn offset_skia_rect(rect: Rect, offset_x: f32, offset_y: f32) -> UiRect {
+pub(super) fn offset_skia_rect(rect: Rect, offset_x: f32, offset_y: f32) -> UiRect {
     UiRect::new(
         rect.left + offset_x,
         rect.top + offset_y,
@@ -388,14 +390,14 @@ fn offset_skia_rect(rect: Rect, offset_x: f32, offset_y: f32) -> UiRect {
     )
 }
 
-fn char_byte_boundaries(text: &str) -> Vec<usize> {
+pub(super) fn char_byte_boundaries(text: &str) -> Vec<usize> {
     text.char_indices()
         .map(|(index, _)| index)
         .chain(std::iter::once(text.len()))
         .collect()
 }
 
-fn char_utf16_boundaries(text: &str) -> Vec<usize> {
+pub(super) fn char_utf16_boundaries(text: &str) -> Vec<usize> {
     let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
     let mut offset = 0;
     boundaries.push(offset);
@@ -406,24 +408,24 @@ fn char_utf16_boundaries(text: &str) -> Vec<usize> {
     boundaries
 }
 
-fn byte_range_to_char_range(
+pub(super) fn byte_range_to_char_range(
     boundaries: &[usize],
     range: std::ops::Range<usize>,
 ) -> std::ops::Range<usize> {
     byte_to_char_index(boundaries, range.start)..byte_to_char_index(boundaries, range.end)
 }
 
-fn byte_to_char_index(boundaries: &[usize], byte: usize) -> usize {
+pub(super) fn byte_to_char_index(boundaries: &[usize], byte: usize) -> usize {
     boundaries.partition_point(|boundary| *boundary < byte)
 }
 
-fn utf16_range_to_char_range(
+pub(super) fn utf16_range_to_char_range(
     boundaries: &[usize],
     range: std::ops::Range<usize>,
 ) -> std::ops::Range<usize> {
     utf16_to_char_index(boundaries, range.start)..utf16_to_char_index(boundaries, range.end)
 }
 
-fn utf16_to_char_index(boundaries: &[usize], offset: usize) -> usize {
+pub(super) fn utf16_to_char_index(boundaries: &[usize], offset: usize) -> usize {
     boundaries.partition_point(|boundary| *boundary < offset)
 }

@@ -1,27 +1,32 @@
+#[cfg(feature = "multi-window")]
 use std::ffi::c_void;
 
-use windows::Win32::{
-    Foundation::RECT,
-    Graphics::Gdi::{
-        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ,
-    },
+#[cfg(feature = "multi-window")]
+use windows::Win32::Foundation::RECT;
+use windows::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ,
 };
 
+#[cfg(feature = "multi-window")]
 use crate::core::PhysicalRect;
 
 pub struct LayeredBackbuffer {
     hdc: HDC,
     bitmap: HBITMAP,
     old_bitmap: HGDIOBJ,
+    #[cfg(feature = "multi-window")]
     bits: *mut c_void,
     width: i32,
     height: i32,
+    #[cfg(feature = "multi-window")]
     generation: u64,
     valid: bool,
+    #[cfg(feature = "multi-window")]
     alpha_policy: AlphaPolicy,
 }
 
+#[cfg(feature = "multi-window")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AlphaPolicy {
     Opaque,
@@ -73,11 +78,14 @@ impl LayeredBackbuffer {
                 hdc,
                 bitmap,
                 old_bitmap,
+                #[cfg(feature = "multi-window")]
                 bits,
                 width,
                 height,
+                #[cfg(feature = "multi-window")]
                 generation: 0,
                 valid: false,
+                #[cfg(feature = "multi-window")]
                 alpha_policy: AlphaPolicy::Opaque,
             })
         }
@@ -95,10 +103,12 @@ impl LayeredBackbuffer {
         self.height
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn viewport(&self) -> PhysicalRect {
         PhysicalRect::new(0, 0, self.width, self.height)
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn pixels(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
@@ -108,6 +118,7 @@ impl LayeredBackbuffer {
         }
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn copy_pixels_from(&mut self, pixels: &[u8]) -> bool {
         let expected_len = (self.width as usize)
             .saturating_mul(self.height as usize)
@@ -126,10 +137,12 @@ impl LayeredBackbuffer {
         self.valid
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn alpha_policy(&self) -> AlphaPolicy {
         self.alpha_policy
     }
@@ -138,15 +151,18 @@ impl LayeredBackbuffer {
         self.valid = true;
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn invalidate(&mut self) {
         self.valid = false;
         self.generation = self.generation.wrapping_add(1);
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn set_opaque_alpha(&mut self) {
         set_opaque_alpha(self.bits.cast(), self.width, self.height);
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn set_opaque_alpha_region(&mut self, rect: PhysicalRect) {
         let Some(rect) = rect.intersect(self.viewport()) else {
             return;
@@ -154,6 +170,7 @@ impl LayeredBackbuffer {
         set_opaque_alpha_region(self.bits.cast(), self.width, self.height, rect);
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn set_rounded_rect_alpha_mask(&mut self, rect: PhysicalRect, radius: i32) {
         let Some(rect) = rect.intersect(self.viewport()) else {
             return;
@@ -161,6 +178,7 @@ impl LayeredBackbuffer {
         set_rounded_rect_alpha_mask(self.bits.cast(), self.width, self.height, rect, radius);
     }
 
+    #[cfg(feature = "multi-window")]
     pub fn clear_region(&mut self, rect: PhysicalRect) {
         let Some(rect) = rect.intersect(self.viewport()) else {
             return;
@@ -189,6 +207,7 @@ impl Drop for LayeredBackbuffer {
     }
 }
 
+#[cfg(feature = "multi-window")]
 fn set_opaque_alpha(bits: *mut u8, width: i32, height: i32) {
     if bits.is_null() || width <= 0 || height <= 0 {
         return;
@@ -202,6 +221,7 @@ fn set_opaque_alpha(bits: *mut u8, width: i32, height: i32) {
     }
 }
 
+#[cfg(feature = "multi-window")]
 fn set_opaque_alpha_region(bits: *mut u8, width: i32, height: i32, rect: PhysicalRect) {
     if bits.is_null() || width <= 0 || height <= 0 {
         return;
@@ -218,6 +238,7 @@ fn set_opaque_alpha_region(bits: *mut u8, width: i32, height: i32, rect: Physica
     }
 }
 
+#[cfg(feature = "multi-window")]
 fn set_rounded_rect_alpha_mask(
     bits: *mut u8,
     width: i32,
@@ -253,6 +274,7 @@ fn set_rounded_rect_alpha_mask(
     }
 }
 
+#[cfg(feature = "multi-window")]
 fn rounded_rect_coverage(x: i32, y: i32, rect: PhysicalRect, radius: f32) -> f32 {
     if radius <= 0.0 {
         return if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
@@ -274,6 +296,7 @@ fn rounded_rect_coverage(x: i32, y: i32, rect: PhysicalRect, radius: f32) -> f32
     covered as f32 / 16.0
 }
 
+#[cfg(feature = "multi-window")]
 fn rounded_rect_contains(x: f32, y: f32, rect: PhysicalRect, radius: f32) -> bool {
     let left = rect.left as f32;
     let top = rect.top as f32;
@@ -304,6 +327,7 @@ fn rounded_rect_contains(x: f32, y: f32, rect: PhysicalRect, radius: f32) -> boo
     dx * dx + dy * dy <= radius * radius
 }
 
+#[cfg(feature = "multi-window")]
 pub fn rect_size(rect: RECT) -> (i32, i32) {
     (rect.right - rect.left, rect.bottom - rect.top)
 }

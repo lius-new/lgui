@@ -17,6 +17,7 @@ pub trait RemoteImageLoader: Send + Sync + 'static {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct RemoteImageLoaderHandle(Arc<dyn RemoteImageLoader>);
 
 impl RemoteImageLoaderHandle {
@@ -24,6 +25,7 @@ impl RemoteImageLoaderHandle {
         Self(Arc::new(loader))
     }
 
+    #[cfg(any(test, feature = "backend-winit"))]
     pub(super) fn load(&self, url: &str) -> Result<AssetBytes, AssetError> {
         self.0.load(url)
     }

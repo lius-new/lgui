@@ -1,6 +1,8 @@
-const PIXEL_FORMAT_32BPP_PARGB: i32 = 0x000E_200B;
+use super::*;
 
-fn draw_gdi_transformed_bitmap(
+pub(super) const PIXEL_FORMAT_32BPP_PARGB: i32 = 0x000E_200B;
+
+pub(super) fn draw_gdi_transformed_bitmap(
     hdc: HDC,
     rect: UiRect,
     clip: Option<UiRect>,
@@ -83,7 +85,7 @@ fn draw_gdi_transformed_bitmap(
     }
 }
 
-fn gdi_layer_destination_points(rect: UiRect, transform: LayerTransform) -> [PointF; 3] {
+pub(super) fn gdi_layer_destination_points(rect: UiRect, transform: LayerTransform) -> [PointF; 3] {
     let transform_point = |x, y| {
         let (x, y) = transform.transform_point(rect, x, y);
         PointF { X: x, Y: y }
@@ -95,7 +97,7 @@ fn gdi_layer_destination_points(rect: UiRect, transform: LayerTransform) -> [Poi
     ]
 }
 
-fn draw_gdi_compositing_layer_fallback(
+pub(super) fn draw_gdi_compositing_layer_fallback(
     hdc: HDC,
     rect: UiRect,
     clip: Option<UiRect>,
@@ -126,7 +128,7 @@ fn draw_gdi_compositing_layer_fallback(
     }
 }
 
-fn draw_backdrop_blur(
+pub(super) fn draw_backdrop_blur(
     hdc: HDC,
     rect: UiRect,
     style: lgui::core::BackdropBlurStyle,
@@ -199,7 +201,7 @@ fn draw_backdrop_blur(
     });
 }
 
-fn draw_backdrop_blur_path(
+pub(super) fn draw_backdrop_blur_path(
     hdc: HDC,
     rect: UiRect,
     path: &UiPath,
@@ -299,7 +301,7 @@ fn draw_backdrop_blur_path(
     });
 }
 
-fn backdrop_gdi_cache_key(rect: UiRect, style: lgui::core::BackdropBlurStyle) -> String {
+pub(super) fn backdrop_gdi_cache_key(rect: UiRect, style: lgui::core::BackdropBlurStyle) -> String {
     let mut hasher = DefaultHasher::new();
     "backdrop-blur-gdi".hash(&mut hasher);
     style.source.hash(&mut hasher);
@@ -318,13 +320,13 @@ fn backdrop_gdi_cache_key(rect: UiRect, style: lgui::core::BackdropBlurStyle) ->
     format!("backdrop:{:016x}", hasher.finish())
 }
 
-struct ClipGuard {
+pub(super) struct ClipGuard {
     hdc: HDC,
     state: Option<i32>,
 }
 
 impl ClipGuard {
-    fn new(hdc: HDC, clip: Option<UiRect>) -> Self {
+    pub(super) fn new(hdc: HDC, clip: Option<UiRect>) -> Self {
         let Some(clip) = clip else {
             return Self { hdc, state: None };
         };
@@ -359,13 +361,13 @@ impl Drop for ClipGuard {
     }
 }
 
-struct PolygonClipGuard {
+pub(super) struct PolygonClipGuard {
     hdc: HDC,
     state: i32,
 }
 
 impl PolygonClipGuard {
-    fn new(hdc: HDC, path: &UiPath, clip: Option<UiRect>) -> Option<Self> {
+    pub(super) fn new(hdc: HDC, path: &UiPath, clip: Option<UiRect>) -> Option<Self> {
         let points = polygon_points(path)?;
         if points.len() < 3 {
             return None;
@@ -415,7 +417,7 @@ impl Drop for PolygonClipGuard {
     }
 }
 
-fn polygon_points(path: &UiPath) -> Option<Vec<POINT>> {
+pub(super) fn polygon_points(path: &UiPath) -> Option<Vec<POINT>> {
     let mut points = Vec::new();
     let mut has_close = false;
     for command in path.commands() {
@@ -439,7 +441,7 @@ fn polygon_points(path: &UiPath) -> Option<Vec<POINT>> {
     }
 }
 
-struct GdiStaticLayerBackend;
+pub(super) struct GdiStaticLayerBackend;
 
 impl StaticLayerDrawBackend for GdiStaticLayerBackend {
     fn draw_command(hdc: HDC, command: &ScenePrimitive) {

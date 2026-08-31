@@ -363,7 +363,14 @@ pub(super) fn create_renderer(
     window: Arc<Window>,
     transparent: bool,
 ) -> Result<WinitSkiaRenderer, WinitApplicationError> {
+    #[allow(unused_mut)]
     let mut fallback_reason = None;
+    #[cfg(not(any(
+        feature = "renderer-skia-gl",
+        feature = "renderer-skia-vulkan",
+        feature = "renderer-skia-metal"
+    )))]
+    let _ = transparent;
 
     #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
     if matches!(

@@ -36,6 +36,7 @@ fn scroll_raster_command_cache() -> &'static Mutex<ScrollRasterCommandCache> {
     CACHE.get_or_init(|| Mutex::new(ScrollRasterCommandCache::default()))
 }
 
+#[cfg(all(target_os = "windows", feature = "backend-win32"))]
 pub(crate) fn clear_scroll_raster_command_cache() {
     *scroll_raster_command_cache()
         .lock()

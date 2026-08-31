@@ -24,8 +24,12 @@ pub use compiler::{compile_scene, compile_scene_root, scene_root_ids};
 pub use damage::compositing_layer_damage;
 pub use phase::commands_for_phase;
 pub use primitive::{ImageFit, RenderPhase, ScenePrimitive, ScenePrimitiveKind, ScrollRasterSpec};
-pub(crate) use scene::{clear_scroll_raster_command_cache, patch_compositing_layer_spec};
+#[cfg(all(target_os = "windows", feature = "backend-win32"))]
+pub(crate) use scene::clear_scroll_raster_command_cache;
+pub(crate) use scene::patch_compositing_layer_spec;
 pub use scene::{scroll_raster_command_snapshot_exists, Scene};
+#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+pub(crate) use transform::translate_scene_primitive_for_backend;
 
 #[cfg(test)]
 mod tests;

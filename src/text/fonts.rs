@@ -22,6 +22,7 @@ pub(crate) fn install_font_families(families: &'static [&'static str]) -> FontFa
     FontFamiliesGuard
 }
 
+#[cfg(feature = "renderer-skia")]
 pub(crate) fn font_families() -> &'static [&'static str] {
     FONT_FAMILIES.with(|current| current.borrow().last().copied().unwrap_or(&["Segoe UI"]))
 }
@@ -46,15 +47,19 @@ impl FontAsset {
     }
 }
 
+#[cfg(feature = "renderer-skia")]
 #[derive(Clone, Default)]
 pub(crate) struct FontAssets(pub Arc<Vec<FontAsset>>);
 
+#[cfg(feature = "renderer-skia")]
 thread_local! {
     static FONT_ASSETS: RefCell<Vec<Arc<Vec<FontAsset>>>> = const { RefCell::new(Vec::new()) };
 }
 
+#[cfg(feature = "renderer-skia")]
 pub(crate) struct FontAssetsGuard;
 
+#[cfg(feature = "renderer-skia")]
 impl Drop for FontAssetsGuard {
     fn drop(&mut self) {
         FONT_ASSETS.with(|current| {
@@ -63,11 +68,13 @@ impl Drop for FontAssetsGuard {
     }
 }
 
+#[cfg(feature = "renderer-skia")]
 pub(crate) fn install_font_assets(assets: Arc<Vec<FontAsset>>) -> FontAssetsGuard {
     FONT_ASSETS.with(|current| current.borrow_mut().push(assets));
     FontAssetsGuard
 }
 
+#[cfg(feature = "renderer-skia")]
 pub(crate) fn font_assets() -> Arc<Vec<FontAsset>> {
     FONT_ASSETS.with(|current| current.borrow().last().cloned().unwrap_or_default())
 }

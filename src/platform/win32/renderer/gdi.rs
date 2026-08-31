@@ -14,6 +14,7 @@ use windows::{
     },
 };
 
+#[cfg(feature = "advanced-rendering")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::application::Win32RenderError;
@@ -29,9 +30,11 @@ use crate::{
 pub struct GdiRenderer {
     background: Color,
     backbuffer: Option<LayeredBackbuffer>,
+    #[cfg(feature = "advanced-rendering")]
     compositing_layer_scope: u64,
 }
 
+#[cfg(feature = "advanced-rendering")]
 static NEXT_COMPOSITING_LAYER_SCOPE: AtomicU64 = AtomicU64::new(1);
 
 impl GdiRenderer {
@@ -39,6 +42,7 @@ impl GdiRenderer {
         Self {
             background,
             backbuffer: None,
+            #[cfg(feature = "advanced-rendering")]
             compositing_layer_scope: NEXT_COMPOSITING_LAYER_SCOPE.fetch_add(1, Ordering::Relaxed),
         }
     }

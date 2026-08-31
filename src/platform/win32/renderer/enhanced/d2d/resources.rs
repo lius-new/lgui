@@ -1,4 +1,6 @@
-fn draw_text(
+use super::*;
+
+pub(super) fn draw_text(
     context: &ID2D1DeviceContext,
     dwrite_factory: &IDWriteFactory,
     rect: UiRect,
@@ -68,7 +70,7 @@ fn draw_text(
     Ok(())
 }
 
-fn solid_brush(
+pub(super) fn solid_brush(
     context: &ID2D1DeviceContext,
     color: Color,
     alpha: u8,
@@ -76,7 +78,7 @@ fn solid_brush(
     unsafe { context.CreateSolidColorBrush(&d2d_color(color, alpha), None) }
 }
 
-fn d2d_rect(rect: UiRect) -> D2D_RECT_F {
+pub(super) fn d2d_rect(rect: UiRect) -> D2D_RECT_F {
     D2D_RECT_F {
         left: rect.left,
         top: rect.top,
@@ -85,11 +87,11 @@ fn d2d_rect(rect: UiRect) -> D2D_RECT_F {
     }
 }
 
-fn vector2(x: f32, y: f32) -> windows_numerics::Vector2 {
+pub(super) fn vector2(x: f32, y: f32) -> windows_numerics::Vector2 {
     windows_numerics::Vector2 { X: x, Y: y }
 }
 
-fn rounded_rect(rect: UiRect, radius: f32) -> D2D1_ROUNDED_RECT {
+pub(super) fn rounded_rect(rect: UiRect, radius: f32) -> D2D1_ROUNDED_RECT {
     D2D1_ROUNDED_RECT {
         rect: d2d_rect(rect),
         radiusX: radius,
@@ -97,11 +99,11 @@ fn rounded_rect(rect: UiRect, radius: f32) -> D2D1_ROUNDED_RECT {
     }
 }
 
-fn d2d_color(color: Color, alpha: u8) -> D2D1_COLOR_F {
+pub(super) fn d2d_color(color: Color, alpha: u8) -> D2D1_COLOR_F {
     d2d_color_alpha(color, alpha as f32 / 255.0)
 }
 
-fn d2d_color_alpha(color: Color, alpha: f32) -> D2D1_COLOR_F {
+pub(super) fn d2d_color_alpha(color: Color, alpha: f32) -> D2D1_COLOR_F {
     let rgb = color.0;
     D2D1_COLOR_F {
         r: ((rgb >> 16) & 0xFF) as f32 / 255.0,
@@ -111,7 +113,7 @@ fn d2d_color_alpha(color: Color, alpha: f32) -> D2D1_COLOR_F {
     }
 }
 
-fn transparent() -> D2D1_COLOR_F {
+pub(super) fn transparent() -> D2D1_COLOR_F {
     D2D1_COLOR_F {
         r: 0.0,
         g: 0.0,
@@ -120,7 +122,7 @@ fn transparent() -> D2D1_COLOR_F {
     }
 }
 
-fn opaque_black() -> D2D1_COLOR_F {
+pub(super) fn opaque_black() -> D2D1_COLOR_F {
     D2D1_COLOR_F {
         r: 0.0,
         g: 0.0,
@@ -129,14 +131,14 @@ fn opaque_black() -> D2D1_COLOR_F {
     }
 }
 
-fn static_layer_clear_color(spec: &StaticLayerSpec) -> D2D1_COLOR_F {
+pub(super) fn static_layer_clear_color(spec: &StaticLayerSpec) -> D2D1_COLOR_F {
     match spec.background {
         StaticLayerBackground::Opaque => opaque_black(),
         StaticLayerBackground::Transparent => transparent(),
     }
 }
 
-fn create_scene_bitmap(
+pub(super) fn create_scene_bitmap(
     context: &ID2D1DeviceContext,
     width: i32,
     height: i32,
@@ -144,7 +146,7 @@ fn create_scene_bitmap(
     create_bitmap_with_options(context, width, height, D2D1_BITMAP_OPTIONS_TARGET, None)
 }
 
-fn create_bitmap_with_options(
+pub(super) fn create_bitmap_with_options(
     context: &ID2D1DeviceContext,
     width: i32,
     height: i32,
@@ -185,7 +187,7 @@ fn create_bitmap_with_options(
     }
 }
 
-fn static_layer_cache_key(
+pub(super) fn static_layer_cache_key(
     id: &UiId,
     spec: &StaticLayerSpec,
     width: i32,
@@ -202,13 +204,13 @@ fn static_layer_cache_key(
     }
 }
 
-fn static_layer_spec_signature(spec: &StaticLayerSpec) -> u64 {
+pub(super) fn static_layer_spec_signature(spec: &StaticLayerSpec) -> u64 {
     let mut hasher = DefaultHasher::new();
     spec.cache_signature().hash(&mut hasher);
     hasher.finish()
 }
 
-fn trace_d2d_regions(label: &str, rects: Option<&[UiRect]>) {
+pub(super) fn trace_d2d_regions(label: &str, rects: Option<&[UiRect]>) {
     if !trace::enabled(TraceCategory::RegionDetail) {
         return;
     }
@@ -229,19 +231,10 @@ fn trace_d2d_regions(label: &str, rects: Option<&[UiRect]>) {
     }
 }
 
-fn trace_duration(label: &str, duration: Duration) {
+pub(super) fn trace_duration(label: &str, duration: Duration) {
     if trace::duration_enabled(label) {
         eprintln!(
             "[ui-trace] {label}: {:.2}ms",
-            duration.as_secs_f64() * 1000.0
-        );
-    }
-}
-
-fn trace_custom_duration(label: &str, key: &str, duration: Duration) {
-    if trace::duration_detail_enabled(label) {
-        eprintln!(
-            "[ui-trace] {label}: key={key} {:.2}ms",
             duration.as_secs_f64() * 1000.0
         );
     }

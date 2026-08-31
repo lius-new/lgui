@@ -1,3 +1,5 @@
+use super::*;
+
 impl D2dRenderer {
     pub fn new(
         context: ID2D1DeviceContext,

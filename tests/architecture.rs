@@ -31,6 +31,8 @@ fn source_tree_expresses_subsystem_boundaries() {
         "core/layout",
         "core/scene",
         "core/component/runtime",
+        "core/view/declarative",
+        "core/view/tree",
         "core/scene/render",
         "router/matcher",
         "router/runtime",
@@ -47,6 +49,7 @@ fn source_tree_expresses_subsystem_boundaries() {
         "platform/win32/renderer",
         "platform/win32/renderer/enhanced/gdi_renderer",
         "platform/win32/renderer/enhanced/d2d",
+        "platform/win32/renderer/enhanced/static_layer",
         "platform/win32/assets",
         "platform/win32/services",
     ] {
@@ -92,6 +95,16 @@ fn source_tree_expresses_subsystem_boundaries() {
         "runtime/host/reconcile.rs",
         "runtime/host/scene.rs",
         "runtime/host/damage.rs",
+        "core/view/declarative/content.rs",
+        "core/view/declarative/element.rs",
+        "core/view/declarative/events.rs",
+        "core/view/declarative/primitives.rs",
+        "core/view/tree/events.rs",
+        "core/view/tree/mutation.rs",
+        "core/view/tree/scene.rs",
+        "platform/win32/renderer/enhanced/static_layer/draw.rs",
+        "platform/win32/renderer/enhanced/static_layer/raster.rs",
+        "platform/win32/renderer/enhanced/static_layer/scroll.rs",
         "assets/resolver.rs",
         "assets/cache.rs",
         "text/layout.rs",
@@ -102,6 +115,36 @@ fn source_tree_expresses_subsystem_boundaries() {
         "platform/winit/input.rs",
     ] {
         assert!(root.join(leaf).is_file(), "missing `{leaf}`");
+    }
+}
+
+#[test]
+fn source_tree_uses_real_modules_instead_of_textual_includes() {
+    let violations = rust_sources("src")
+        .into_iter()
+        .filter_map(|(path, source)| {
+            source
+                .contains("include!(")
+                .then(|| path.display().to_string())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        violations.is_empty(),
+        "Rust source assembly must use real modules, not include!():\n{}",
+        violations.join("\n")
+    );
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for facade in [
+        "core/view/declarative.rs",
+        "core/view/tree.rs",
+        "platform/win32/renderer/enhanced/static_layer.rs",
+    ] {
+        let source = fs::read_to_string(root.join(facade)).expect("read split facade");
+        assert!(
+            source.lines().count() <= 400,
+            "responsibility facade `{facade}` grew beyond 400 lines"
+        );
     }
 }
 
@@ -529,4 +572,21 @@ fn portable_skia_feature_does_not_enable_win32_backend() {
         .0;
     assert!(!feature.contains("backend-win32"));
     assert!(!feature.contains("windows/"));
+}
+
+#[test]
+fn winit_backend_declares_its_skia_renderer_dependency() {
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("read lgui manifest");
+    let feature = manifest
+        .split_once("backend-winit = [")
+        .expect("backend-winit feature")
+        .1
+        .split_once(']')
+        .expect("backend-winit feature end")
+        .0;
+    assert!(
+        feature.contains("\"renderer-skia\""),
+        "backend-winit must express its Skia software-renderer dependency"
+    );
 }

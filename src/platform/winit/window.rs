@@ -436,6 +436,8 @@ impl WinitWindow {
                 return;
             }
         };
+        #[cfg(not(feature = "diagnostics"))]
+        let _ = frame_timings;
         self.recovery = match self.recovery {
             RendererRecoveryState::Fallback { reason, .. } => RendererRecoveryState::Fallback {
                 reason,

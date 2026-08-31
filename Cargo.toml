@@ -9,7 +9,12 @@ readme = "README.md"
 default = ["renderer-gdi", "router", "store", "widgets"]
 async = []
 desktop = ["backend-winit", "clipboard", "open-url", "dialogs", "accessibility"]
-backend-winit = ["dep:raw-window-handle", "dep:softbuffer", "dep:winit"]
+backend-winit = [
+  "renderer-skia",
+  "dep:raw-window-handle",
+  "dep:softbuffer",
+  "dep:winit",
+]
 accessibility = ["backend-winit", "dep:accesskit", "dep:accesskit_winit"]
 advanced-rendering = [
   "renderer-d2d",

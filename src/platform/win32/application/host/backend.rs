@@ -1,3 +1,5 @@
+use super::*;
+
 impl ApplicationBackend for Win32Application {
     type Error = Error;
 
@@ -7,16 +9,16 @@ impl ApplicationBackend for Win32Application {
             .cloned()
             .unwrap_or_default();
         #[cfg(feature = "images")]
-        let _gdiplus = super::super::gdiplus::GdiPlusRuntime::start()?;
+        let _gdiplus = super::super::super::gdiplus::GdiPlusRuntime::start()?;
         #[cfg(feature = "images")]
         let _image_cache =
-            crate::assets::install_image_cache(super::super::portable_image_cache_handle());
+            crate::assets::install_image_cache(super::super::super::portable_image_cache_handle());
         #[cfg(feature = "advanced-rendering")]
         let _render_cache = crate::renderer::install_render_cache(
-            super::super::enhanced::portable_render_cache_handle(),
+            super::super::super::enhanced::portable_render_cache_handle(),
         );
         if let Some(fonts) = context.try_resource::<crate::text::FontFamilies>() {
-            super::super::set_ui_font_families(fonts.0);
+            super::super::super::set_ui_font_families(fonts.0);
         }
         let font_families = context
             .try_resource::<crate::text::FontFamilies>()
@@ -25,7 +27,7 @@ impl ApplicationBackend for Win32Application {
         let _text_system = crate::text::install_text_system(self.renderer_factory.text_system());
         #[cfg(feature = "svg")]
         if let Some(registration) = context.try_resource::<crate::icons::IconRegistration>() {
-            let _ = super::super::install_svg_icon_registry((*registration.0).clone());
+            let _ = super::super::super::install_svg_icon_registry((*registration.0).clone());
         }
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -35,7 +37,7 @@ impl ApplicationBackend for Win32Application {
         let notification_registration = context.try_resource::<NotificationRegistration>();
         #[cfg(feature = "notifications")]
         if let Some(registration) = notification_registration.as_ref() {
-            super::super::notifications::initialize_process_identity(&registration.identity)
+            super::super::super::notifications::initialize_process_identity(&registration.identity)
                 .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
         }
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None) }?.0);
@@ -79,8 +81,11 @@ impl ApplicationBackend for Win32Application {
         dispatcher.attach(hwnd);
         #[cfg(feature = "notifications")]
         if let Some(registration) = notification_registration {
-            let service = super::super::Win32NotificationService::new(&registration.identity)
-                .map_err(|error| Error::new(HRESULT(0x80004005_u32 as i32), error.to_string()))?;
+            let service =
+                super::super::super::Win32NotificationService::new(&registration.identity)
+                    .map_err(|error| {
+                        Error::new(HRESULT(0x80004005_u32 as i32), error.to_string())
+                    })?;
             context
                 .resources()
                 .provide(NotificationHandle::new(move |notification| {
@@ -154,7 +159,7 @@ impl ApplicationBackend for Win32Application {
     }
 }
 
-fn execute_window_command(
+pub(super) fn execute_window_command(
     command: WindowCommand,
     instance: isize,
     class_name: &[u16],

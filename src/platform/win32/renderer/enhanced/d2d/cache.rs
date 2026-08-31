@@ -1,25 +1,27 @@
+use super::*;
+
 pub struct D2dRenderer {
-    context: ID2D1DeviceContext,
-    dwrite_factory: IDWriteFactory,
-    scene_bitmap: ID2D1Bitmap1,
-    bitmap_cache: D2dBitmapCache,
-    overlay_brush_cache: HashMap<D2dOverlayBrushCacheKey, D2dOverlayBrushSet>,
-    frame_bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
-    compositing_layers: HashMap<UiId, D2dCompositingLayer>,
+    pub(super) context: ID2D1DeviceContext,
+    pub(super) dwrite_factory: IDWriteFactory,
+    pub(super) scene_bitmap: ID2D1Bitmap1,
+    pub(super) bitmap_cache: D2dBitmapCache,
+    pub(super) overlay_brush_cache: HashMap<D2dOverlayBrushCacheKey, D2dOverlayBrushSet>,
+    pub(super) frame_bitmap_cache: HashMap<D2dBitmapCacheKey, ID2D1Bitmap1>,
+    pub(super) compositing_layers: HashMap<UiId, D2dCompositingLayer>,
 }
 
-const D2D_BITMAP_CACHE_MIN_BUDGET_BYTES: usize = 32 * 1024 * 1024;
-const D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER: usize = 4;
+pub(super) const D2D_BITMAP_CACHE_MIN_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+pub(super) const D2D_BITMAP_CACHE_VIEWPORT_MULTIPLIER: usize = 4;
 
-fn raster_length(value: f32) -> i32 {
+pub(super) fn raster_length(value: f32) -> i32 {
     value.ceil().max(1.0) as i32
 }
 
-fn raster_size(rect: UiRect) -> (i32, i32) {
+pub(super) fn raster_size(rect: UiRect) -> (i32, i32) {
     (raster_length(rect.width()), raster_length(rect.height()))
 }
 
-fn d2d_bitmap_cache_budget(width: i32, height: i32) -> usize {
+pub(super) fn d2d_bitmap_cache_budget(width: i32, height: i32) -> usize {
     (width.max(1) as usize)
         .saturating_mul(height.max(1) as usize)
         .saturating_mul(4)
@@ -27,21 +29,21 @@ fn d2d_bitmap_cache_budget(width: i32, height: i32) -> usize {
         .max(D2D_BITMAP_CACHE_MIN_BUDGET_BYTES)
 }
 
-struct D2dBitmapCacheEntry {
-    bitmap: ID2D1Bitmap1,
-    bytes: usize,
-    last_used: u64,
+pub(super) struct D2dBitmapCacheEntry {
+    pub(super) bitmap: ID2D1Bitmap1,
+    pub(super) bytes: usize,
+    pub(super) last_used: u64,
 }
 
-struct D2dBitmapCache {
-    entries: HashMap<D2dBitmapCacheKey, D2dBitmapCacheEntry>,
-    bytes: usize,
-    tick: u64,
-    budget_bytes: usize,
+pub(super) struct D2dBitmapCache {
+    pub(super) entries: HashMap<D2dBitmapCacheKey, D2dBitmapCacheEntry>,
+    pub(super) bytes: usize,
+    pub(super) tick: u64,
+    pub(super) budget_bytes: usize,
 }
 
 impl D2dBitmapCache {
-    fn new(budget_bytes: usize) -> Self {
+    pub(super) fn new(budget_bytes: usize) -> Self {
         Self {
             entries: HashMap::new(),
             bytes: 0,
@@ -50,7 +52,7 @@ impl D2dBitmapCache {
         }
     }
 
-    fn retain_live(&mut self, live: &HashSet<D2dBitmapCacheKey>) {
+    pub(super) fn retain_live(&mut self, live: &HashSet<D2dBitmapCacheKey>) {
         let mut removed_bytes = 0usize;
         self.entries.retain(|key, entry| {
             let retain = live.contains(key);
@@ -62,14 +64,14 @@ impl D2dBitmapCache {
         self.bytes = self.bytes.saturating_sub(removed_bytes);
     }
 
-    fn get(&mut self, key: &D2dBitmapCacheKey) -> Option<ID2D1Bitmap1> {
+    pub(super) fn get(&mut self, key: &D2dBitmapCacheKey) -> Option<ID2D1Bitmap1> {
         self.tick = self.tick.saturating_add(1);
         let entry = self.entries.get_mut(key)?;
         entry.last_used = self.tick;
         Some(entry.bitmap.clone())
     }
 
-    fn insert(&mut self, key: D2dBitmapCacheKey, bitmap: ID2D1Bitmap1) {
+    pub(super) fn insert(&mut self, key: D2dBitmapCacheKey, bitmap: ID2D1Bitmap1) {
         self.tick = self.tick.saturating_add(1);
         let bytes = key.estimated_bytes();
         if let Some(previous) = self.entries.remove(&key) {
@@ -86,7 +88,7 @@ impl D2dBitmapCache {
         );
     }
 
-    fn evict_to_budget(&mut self) {
+    pub(super) fn evict_to_budget(&mut self) {
         let evictions = bitmap_cache_eviction_plan(
             self.entries
                 .iter()
@@ -102,7 +104,7 @@ impl D2dBitmapCache {
     }
 }
 
-fn bitmap_cache_eviction_plan(
+pub(super) fn bitmap_cache_eviction_plan(
     entries: impl IntoIterator<Item = (D2dBitmapCacheKey, u64, usize)>,
     mut bytes: usize,
     budget_bytes: usize,
@@ -122,28 +124,28 @@ fn bitmap_cache_eviction_plan(
     evictions
 }
 
-struct D2dCompositingLayer {
-    content_signature: Option<u64>,
-    background: CompositingLayerBackground,
-    width: i32,
-    height: i32,
-    bitmap: ID2D1Bitmap1,
-    commands: Vec<ScenePrimitive>,
+pub(super) struct D2dCompositingLayer {
+    pub(super) content_signature: Option<u64>,
+    pub(super) background: CompositingLayerBackground,
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) bitmap: ID2D1Bitmap1,
+    pub(super) commands: Vec<ScenePrimitive>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct D2dOverlayBrushCacheKey {
-    rect: UiRect,
-    style_signature: u64,
+pub(super) struct D2dOverlayBrushCacheKey {
+    pub(super) rect: UiRect,
+    pub(super) style_signature: u64,
 }
 
-struct D2dOverlayBrushSet {
-    linear: Vec<ID2D1LinearGradientBrush>,
-    radial: Vec<ID2D1RadialGradientBrush>,
+pub(super) struct D2dOverlayBrushSet {
+    pub(super) linear: Vec<ID2D1LinearGradientBrush>,
+    pub(super) radial: Vec<ID2D1RadialGradientBrush>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum D2dBitmapCacheKey {
+pub(super) enum D2dBitmapCacheKey {
     Image {
         source: UiImageSource,
         fit: ImageFit,
@@ -173,7 +175,7 @@ enum D2dBitmapCacheKey {
 }
 
 impl D2dBitmapCacheKey {
-    fn estimated_bytes(&self) -> usize {
+    pub(super) fn estimated_bytes(&self) -> usize {
         let (width, height) = match self {
             Self::Image { width, height, .. }
             | Self::Icon { width, height, .. }

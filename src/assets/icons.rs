@@ -100,6 +100,7 @@ pub(crate) fn with_icon_registry<R>(
     }
 }
 
+#[cfg(feature = "renderer-skia")]
 pub(crate) fn resolve_svg(key: &str) -> Option<Cow<'static, str>> {
     CURRENT_ICON_REGISTRY.with(|current| {
         current

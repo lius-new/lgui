@@ -184,6 +184,7 @@ pub struct SemanticUpdate {
 }
 
 impl SemanticUpdate {
+    #[cfg(feature = "accessibility")]
     pub(crate) fn full_from_tree(tree: &super::HostTree, focus: Option<UiId>) -> Self {
         Self {
             nodes: tree

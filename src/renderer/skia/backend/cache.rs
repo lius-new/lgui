@@ -1,11 +1,13 @@
-struct CachedImage {
+use super::*;
+
+pub(super) struct CachedImage {
     image: Image,
     bytes: usize,
     used: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct ParagraphCacheKey {
+pub(super) struct ParagraphCacheKey {
     text: String,
     width: u32,
     height: u32,
@@ -13,25 +15,25 @@ struct ParagraphCacheKey {
     families: Vec<&'static str>,
 }
 
-struct CachedParagraph {
+pub(super) struct CachedParagraph {
     paragraph: Paragraph,
     bytes: usize,
     used: u64,
 }
 
 pub(crate) struct SkiaCache {
-    entries: HashMap<String, CachedImage>,
-    paragraphs: HashMap<ParagraphCacheKey, CachedParagraph>,
-    fonts: FontCollection,
-    resident_bytes: usize,
-    budget_bytes: usize,
-    generation: u64,
-    hits: u64,
-    misses: u64,
-    evictions: u64,
-    text_hits: u64,
-    text_misses: u64,
-    text_evictions: u64,
+    pub(super) entries: HashMap<String, CachedImage>,
+    pub(super) paragraphs: HashMap<ParagraphCacheKey, CachedParagraph>,
+    pub(super) fonts: FontCollection,
+    pub(super) resident_bytes: usize,
+    pub(super) budget_bytes: usize,
+    pub(super) generation: u64,
+    pub(super) hits: u64,
+    pub(super) misses: u64,
+    pub(super) evictions: u64,
+    pub(super) text_hits: u64,
+    pub(super) text_misses: u64,
+    pub(super) text_evictions: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -69,7 +71,13 @@ impl SkiaCache {
         }
     }
 
-    fn draw_text(&mut self, canvas: &Canvas, rect: UiRect, text: &str, style: TextStyle) {
+    pub(super) fn draw_text(
+        &mut self,
+        canvas: &Canvas,
+        rect: UiRect,
+        text: &str,
+        style: TextStyle,
+    ) {
         let key = ParagraphCacheKey {
             text: text.to_owned(),
             width: rect.width().to_bits(),
@@ -105,7 +113,7 @@ impl SkiaCache {
         self.evict_to_budget();
     }
 
-    fn get(&mut self, key: &str) -> Option<Image> {
+    pub(super) fn get(&mut self, key: &str) -> Option<Image> {
         let Some(entry) = self.entries.get_mut(key) else {
             self.misses = self.misses.saturating_add(1);
             return None;
@@ -115,7 +123,7 @@ impl SkiaCache {
         Some(entry.image.clone())
     }
 
-    fn insert(&mut self, key: String, image: Image) -> Image {
+    pub(super) fn insert(&mut self, key: String, image: Image) -> Image {
         let bytes = image.width().max(0) as usize * image.height().max(0) as usize * 4;
         if let Some(previous) = self.entries.remove(&key) {
             self.resident_bytes = self.resident_bytes.saturating_sub(previous.bytes);
@@ -243,7 +251,7 @@ impl SkiaCache {
     }
 }
 
-fn scene_text_layout_request<'a>(
+pub(super) fn scene_text_layout_request<'a>(
     text: &'a str,
     rect: UiRect,
     style: TextStyle,
@@ -255,7 +263,7 @@ fn scene_text_layout_request<'a>(
     request
 }
 
-fn paint_cached_paragraph(canvas: &Canvas, rect: UiRect, paragraph: &Paragraph) {
+pub(super) fn paint_cached_paragraph(canvas: &Canvas, rect: UiRect, paragraph: &Paragraph) {
     let y = rect.top + ((rect.height() - paragraph.height()) * 0.5).max(0.0);
     canvas.save();
     canvas.clip_rect(sk_rect(rect), None, true);
@@ -263,7 +271,7 @@ fn paint_cached_paragraph(canvas: &Canvas, rect: UiRect, paragraph: &Paragraph) 
     canvas.restore();
 }
 
-fn paragraph_cache_entry_bytes(text: &str, paragraph: &Paragraph) -> usize {
+pub(super) fn paragraph_cache_entry_bytes(text: &str, paragraph: &Paragraph) -> usize {
     2048usize
         .saturating_add(text.len())
         .saturating_add(paragraph.line_number().saturating_mul(256))

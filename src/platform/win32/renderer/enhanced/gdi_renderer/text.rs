@@ -1,4 +1,6 @@
-fn draw_text(hdc: HDC, rect: UiRect, text: &str, style: TextStyle) {
+use super::*;
+
+pub(super) fn draw_text(hdc: HDC, rect: UiRect, text: &str, style: TextStyle) {
     if style.alpha == 0 || text.is_empty() {
         return;
     }
@@ -68,12 +70,12 @@ fn draw_text(hdc: HDC, rect: UiRect, text: &str, style: TextStyle) {
 }
 
 #[derive(Clone)]
-struct GdiTextRun {
+pub(super) struct GdiTextRun {
     family_index: usize,
     text: String,
 }
 
-fn gdi_text_runs(hdc: HDC, text: &str, height: i32, weight: i32) -> Vec<GdiTextRun> {
+pub(super) fn gdi_text_runs(hdc: HDC, text: &str, height: i32, weight: i32) -> Vec<GdiTextRun> {
     let mut runs: Vec<GdiTextRun> = Vec::new();
     for ch in text.chars() {
         let family_index = gdi_font_family_for_char(hdc, ch, height, weight);
@@ -91,7 +93,7 @@ fn gdi_text_runs(hdc: HDC, text: &str, height: i32, weight: i32) -> Vec<GdiTextR
     runs
 }
 
-fn gdi_font_family_for_char(hdc: HDC, ch: char, height: i32, weight: i32) -> usize {
+pub(super) fn gdi_font_family_for_char(hdc: HDC, ch: char, height: i32, weight: i32) -> usize {
     GDI_FONT_FAMILY_CACHE.with(|cache| {
         let key = (ch, height, weight);
         if let Some(family_index) = cache.borrow().get(&key).copied() {
@@ -186,14 +188,14 @@ unsafe fn gdi_text_width(hdc: HDC, text: &str, tracking: i32) -> Option<i32> {
     measured.then_some(size.cx)
 }
 
-fn colorref(color: Color) -> windows::Win32::Foundation::COLORREF {
+pub(super) fn colorref(color: Color) -> windows::Win32::Foundation::COLORREF {
     let value = color.0;
     windows::Win32::Foundation::COLORREF(
         ((value & 0xFF) << 16) | (value & 0x00FF00) | ((value >> 16) & 0xFF),
     )
 }
 
-fn win_rect(rect: UiRect) -> RECT {
+pub(super) fn win_rect(rect: UiRect) -> RECT {
     let rect = pixel_rect_outward(rect);
     RECT {
         left: rect.left,
@@ -203,7 +205,7 @@ fn win_rect(rect: UiRect) -> RECT {
     }
 }
 
-fn draw_antialiased_rect(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
+pub(super) fn draw_antialiased_rect(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
     unsafe {
         let mut graphics: *mut GpGraphics = std::ptr::null_mut();
         if GdipCreateFromHDC(hdc, &mut graphics) != GpOk || graphics.is_null() {
@@ -226,7 +228,7 @@ fn draw_antialiased_rect(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
     }
 }
 
-fn draw_antialiased_ellipse(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
+pub(super) fn draw_antialiased_ellipse(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
     unsafe {
         let mut graphics: *mut GpGraphics = std::ptr::null_mut();
         if GdipCreateFromHDC(hdc, &mut graphics) != GpOk || graphics.is_null() {
@@ -290,7 +292,11 @@ fn draw_antialiased_ellipse(hdc: HDC, rect: RECT, style: VisualStyle) -> bool {
     }
 }
 
-fn fill_and_stroke_path(graphics: *mut GpGraphics, path: *mut GpPath, style: VisualStyle) -> bool {
+pub(super) fn fill_and_stroke_path(
+    graphics: *mut GpGraphics,
+    path: *mut GpPath,
+    style: VisualStyle,
+) -> bool {
     unsafe {
         if let Some(fill) = style.fill {
             let mut brush = std::ptr::null_mut();
@@ -324,7 +330,11 @@ fn fill_and_stroke_path(graphics: *mut GpGraphics, path: *mut GpPath, style: Vis
     }
 }
 
-fn fill_and_stroke_ui_path(graphics: *mut GpGraphics, path: *mut GpPath, style: PathStyle) -> bool {
+pub(super) fn fill_and_stroke_ui_path(
+    graphics: *mut GpGraphics,
+    path: *mut GpPath,
+    style: PathStyle,
+) -> bool {
     unsafe {
         if let Some(fill) = style.fill {
             let mut brush = std::ptr::null_mut();
@@ -358,7 +368,7 @@ fn fill_and_stroke_ui_path(graphics: *mut GpGraphics, path: *mut GpPath, style: 
     }
 }
 
-fn draw_path(hdc: HDC, path: &UiPath, style: PathStyle) {
+pub(super) fn draw_path(hdc: HDC, path: &UiPath, style: PathStyle) {
     if path.commands().is_empty() {
         return;
     }
@@ -380,7 +390,7 @@ fn draw_path(hdc: HDC, path: &UiPath, style: PathStyle) {
     }
 }
 
-fn create_ui_path(path: &UiPath) -> *mut GpPath {
+pub(super) fn create_ui_path(path: &UiPath) -> *mut GpPath {
     unsafe {
         let mut gp_path: *mut GpPath = std::ptr::null_mut();
         if GdipCreatePath(FillModeAlternate, &mut gp_path) != GpOk || gp_path.is_null() {
@@ -476,7 +486,7 @@ fn create_ui_path(path: &UiPath) -> *mut GpPath {
     }
 }
 
-fn create_rect_path(rect: RECT, radius: i32) -> *mut GpPath {
+pub(super) fn create_rect_path(rect: RECT, radius: i32) -> *mut GpPath {
     if radius > 0 {
         return create_rounded_rect_path(rect, radius);
     }
@@ -502,7 +512,7 @@ fn create_rect_path(rect: RECT, radius: i32) -> *mut GpPath {
     }
 }
 
-fn create_rounded_rect_path(rect: RECT, radius: i32) -> *mut GpPath {
+pub(super) fn create_rounded_rect_path(rect: RECT, radius: i32) -> *mut GpPath {
     unsafe {
         let mut path: *mut GpPath = std::ptr::null_mut();
         if GdipCreatePath(FillModeAlternate, &mut path) != GpOk || path.is_null() {
@@ -561,7 +571,7 @@ fn create_rounded_rect_path(rect: RECT, radius: i32) -> *mut GpPath {
     }
 }
 
-fn color_to_argb(color: Color, alpha: u8) -> u32 {
+pub(super) fn color_to_argb(color: Color, alpha: u8) -> u32 {
     let red = (color.0 >> 16) & 0xFF;
     let green = (color.0 >> 8) & 0xFF;
     let blue = color.0 & 0xFF;

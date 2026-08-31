@@ -254,13 +254,52 @@ pub(super) fn translate_commands(
     dx: f32,
     dy: f32,
 ) -> Vec<ScenePrimitive> {
+    translate_commands_with_policy(commands, dx, dy, NestedStaticLayerPolicy::Translate)
+}
+
+#[derive(Clone, Copy)]
+enum NestedStaticLayerPolicy {
+    Translate,
+    #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+    PreserveLocalCommands,
+}
+
+#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+pub(crate) fn translate_scene_primitive_for_backend(
+    command: &ScenePrimitive,
+    dx: f32,
+    dy: f32,
+) -> ScenePrimitive {
+    translate_command_with_policy(
+        command,
+        dx,
+        dy,
+        NestedStaticLayerPolicy::PreserveLocalCommands,
+    )
+}
+
+fn translate_commands_with_policy(
+    commands: Vec<ScenePrimitive>,
+    dx: f32,
+    dy: f32,
+    nested_static_layer: NestedStaticLayerPolicy,
+) -> Vec<ScenePrimitive> {
     commands
         .into_iter()
-        .map(|command| translate_command(&command, dx, dy))
+        .map(|command| translate_command_with_policy(&command, dx, dy, nested_static_layer))
         .collect()
 }
 
 pub(super) fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> ScenePrimitive {
+    translate_command_with_policy(command, dx, dy, NestedStaticLayerPolicy::Translate)
+}
+
+fn translate_command_with_policy(
+    command: &ScenePrimitive,
+    dx: f32,
+    dy: f32,
+    nested_static_layer: NestedStaticLayerPolicy,
+) -> ScenePrimitive {
     let translate_rect = |rect: UiRect| rect.translate(dx, dy);
     let translate_point = |point: super::Point| super::Point::new(point.x + dx, point.y + dy);
     match command {
@@ -438,7 +477,13 @@ pub(super) fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> S
             id: id.clone(),
             rect: translate_rect(*rect),
             spec: spec.clone(),
-            commands: translate_commands(commands.clone(), dx, dy),
+            commands: match nested_static_layer {
+                NestedStaticLayerPolicy::Translate => {
+                    translate_commands_with_policy(commands.clone(), dx, dy, nested_static_layer)
+                }
+                #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+                NestedStaticLayerPolicy::PreserveLocalCommands => commands.clone(),
+            },
             child_signature: *child_signature,
             phase: *phase,
         },
@@ -453,7 +498,7 @@ pub(super) fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> S
             id: id.clone(),
             viewport: translate_rect(*viewport),
             spec: spec.clone(),
-            commands: translate_commands(commands.clone(), dx, dy),
+            commands: translate_commands_with_policy(commands.clone(), dx, dy, nested_static_layer),
             child_signature: *child_signature,
             phase: *phase,
         },
@@ -466,7 +511,7 @@ pub(super) fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> S
         } => ScenePrimitive::Clip {
             id: id.clone(),
             rect: translate_rect(*rect),
-            commands: translate_commands(commands.clone(), dx, dy),
+            commands: translate_commands_with_policy(commands.clone(), dx, dy, nested_static_layer),
             child_signature: *child_signature,
             phase: *phase,
         },
@@ -481,7 +526,7 @@ pub(super) fn translate_command(command: &ScenePrimitive, dx: f32, dy: f32) -> S
             id: id.clone(),
             rect: translate_rect(*rect),
             path: translate_path(path, dx, dy),
-            commands: translate_commands(commands.clone(), dx, dy),
+            commands: translate_commands_with_policy(commands.clone(), dx, dy, nested_static_layer),
             child_signature: *child_signature,
             phase: *phase,
         },

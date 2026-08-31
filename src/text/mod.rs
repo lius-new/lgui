@@ -14,11 +14,11 @@ pub use model::{
 };
 pub use service::{layout, measure, measure_width, TextSystem, TextSystemHandle};
 
-#[cfg(feature = "backend-winit")]
+#[cfg(feature = "renderer-skia")]
 pub(crate) use fonts::install_font_assets;
 #[cfg(feature = "renderer-skia")]
-pub(crate) use fonts::{font_assets, font_families};
-pub(crate) use fonts::{install_font_families, FontAssets, FontFamilies};
+pub(crate) use fonts::{font_assets, font_families, FontAssets};
+pub(crate) use fonts::{install_font_families, FontFamilies};
 pub(crate) use service::install_text_system;
 
 #[cfg(test)]

@@ -1,16 +1,20 @@
-fn bitmap_cache_keys(commands: &[ScenePrimitive]) -> HashSet<D2dBitmapCacheKey> {
+use super::*;
+
+pub(super) fn bitmap_cache_keys(commands: &[ScenePrimitive]) -> HashSet<D2dBitmapCacheKey> {
     let mut keys = HashSet::new();
     collect_bitmap_cache_keys(commands, &mut keys);
     keys
 }
 
-fn overlay_brush_cache_keys(commands: &[ScenePrimitive]) -> HashSet<D2dOverlayBrushCacheKey> {
+pub(super) fn overlay_brush_cache_keys(
+    commands: &[ScenePrimitive],
+) -> HashSet<D2dOverlayBrushCacheKey> {
     let mut keys = HashSet::new();
     collect_overlay_brush_cache_keys(commands, &mut keys);
     keys
 }
 
-fn collect_compositing_layer_ids(
+pub(super) fn collect_compositing_layer_ids(
     commands: &[ScenePrimitive],
     ids: &mut std::collections::HashSet<UiId>,
 ) {
@@ -31,7 +35,10 @@ fn collect_compositing_layer_ids(
     }
 }
 
-fn collect_bitmap_cache_keys(commands: &[ScenePrimitive], keys: &mut HashSet<D2dBitmapCacheKey>) {
+pub(super) fn collect_bitmap_cache_keys(
+    commands: &[ScenePrimitive],
+    keys: &mut HashSet<D2dBitmapCacheKey>,
+) {
     for command in commands {
         match command {
             ScenePrimitive::Image {
@@ -92,7 +99,7 @@ fn collect_bitmap_cache_keys(commands: &[ScenePrimitive], keys: &mut HashSet<D2d
     }
 }
 
-fn collect_overlay_brush_cache_keys(
+pub(super) fn collect_overlay_brush_cache_keys(
     commands: &[ScenePrimitive],
     keys: &mut HashSet<D2dOverlayBrushCacheKey>,
 ) {
@@ -116,7 +123,7 @@ fn collect_overlay_brush_cache_keys(
     }
 }
 
-fn pure_static_layer_image(
+pub(super) fn pure_static_layer_image(
     spec: &StaticLayerSpec,
     commands: &[ScenePrimitive],
 ) -> Option<(&'static str, ImageFit)> {
@@ -136,11 +143,15 @@ fn pure_static_layer_image(
     }
 }
 
-fn draw_scene_d2d(resources: &mut D2dRenderer, list: &Scene, clip: Option<UiRect>) -> Result<()> {
+pub(super) fn draw_scene_d2d(
+    resources: &mut D2dRenderer,
+    list: &Scene,
+    clip: Option<UiRect>,
+) -> Result<()> {
     draw_commands_d2d(resources, list.commands(), clip)
 }
 
-fn draw_commands_d2d(
+pub(super) fn draw_commands_d2d(
     resources: &mut D2dRenderer,
     commands: &[ScenePrimitive],
     clip: Option<UiRect>,

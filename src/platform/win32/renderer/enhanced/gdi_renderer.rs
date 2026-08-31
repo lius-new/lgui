@@ -61,9 +61,22 @@ use lgui::core::{
 use lgui::platform::win32::{draw_svg_icon, ui_font_family_at, ui_font_family_count};
 use lgui::renderer::ClipRegion;
 
-include!("gdi_renderer/cache.rs");
-include!("gdi_renderer/renderer.rs");
-include!("gdi_renderer/compositing.rs");
-include!("gdi_renderer/primitives.rs");
-include!("gdi_renderer/tests.rs");
-include!("gdi_renderer/text.rs");
+mod cache;
+mod compositing;
+mod primitives;
+mod renderer;
+mod text;
+
+pub use cache::{
+    clear_gdi_renderer_caches, release_gdi_compositing_layer_scope, reset_gdi_frame_blit_metrics,
+    take_gdi_frame_blit_metrics, GdiFrameBlitMetrics, GdiFrameBlitSourceMetrics,
+};
+pub use renderer::GdiRenderer;
+
+use cache::*;
+use compositing::*;
+use primitives::*;
+use text::*;
+
+#[cfg(test)]
+mod tests;

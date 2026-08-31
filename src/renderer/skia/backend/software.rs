@@ -1,3 +1,5 @@
+use super::*;
+
 pub(crate) struct SkiaSoftwareSurface {
     pixels: Vec<u8>,
     size: (i32, i32),

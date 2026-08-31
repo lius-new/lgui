@@ -1,4 +1,10 @@
-fn draw_overlay(resources: &mut D2dRenderer, rect: UiRect, style: &OverlayStyle) -> Result<()> {
+use super::*;
+
+pub(super) fn draw_overlay(
+    resources: &mut D2dRenderer,
+    rect: UiRect,
+    style: &OverlayStyle,
+) -> Result<()> {
     let start = Instant::now();
     let area = d2d_rect(rect);
     let key = ensure_overlay_brush_set(resources, rect, style)?;
@@ -18,7 +24,7 @@ fn draw_overlay(resources: &mut D2dRenderer, rect: UiRect, style: &OverlayStyle)
     Ok(())
 }
 
-fn ensure_overlay_brush_set(
+pub(super) fn ensure_overlay_brush_set(
     resources: &mut D2dRenderer,
     rect: UiRect,
     style: &OverlayStyle,
@@ -100,14 +106,17 @@ fn ensure_overlay_brush_set(
     Ok(key)
 }
 
-fn overlay_brush_cache_key(rect: UiRect, style: &OverlayStyle) -> D2dOverlayBrushCacheKey {
+pub(super) fn overlay_brush_cache_key(
+    rect: UiRect,
+    style: &OverlayStyle,
+) -> D2dOverlayBrushCacheKey {
     D2dOverlayBrushCacheKey {
         rect,
         style_signature: overlay_signature(style),
     }
 }
 
-fn overlay_signature(style: &OverlayStyle) -> u64 {
+pub(super) fn overlay_signature(style: &OverlayStyle) -> u64 {
     let mut hasher = DefaultHasher::new();
     style.vertical_layers.len().hash(&mut hasher);
     for layer in &style.vertical_layers {
@@ -126,14 +135,16 @@ fn overlay_signature(style: &OverlayStyle) -> u64 {
     hasher.finish()
 }
 
-fn radial_gradient_stops(layer: lgui::core::RadialGradientLayer) -> [D2D1_GRADIENT_STOP; 5] {
+pub(super) fn radial_gradient_stops(
+    layer: lgui::core::RadialGradientLayer,
+) -> [D2D1_GRADIENT_STOP; 5] {
     [0.0_f32, 0.25, 0.5, 0.75, 1.0].map(|position| D2D1_GRADIENT_STOP {
         position,
         color: d2d_color_alpha(layer.color, layer.alpha * (1.0 - position).powi(2)),
     })
 }
 
-fn draw_backdrop_blur(
+pub(super) fn draw_backdrop_blur(
     resources: &mut D2dRenderer,
     rect: UiRect,
     style: lgui::core::BackdropBlurStyle,
@@ -158,7 +169,7 @@ fn draw_backdrop_blur(
     result
 }
 
-fn backdrop_blur_cache_key(
+pub(super) fn backdrop_blur_cache_key(
     rect: UiRect,
     style: lgui::core::BackdropBlurStyle,
 ) -> D2dBitmapCacheKey {
@@ -170,7 +181,7 @@ fn backdrop_blur_cache_key(
     }
 }
 
-fn draw_backdrop_blur_path(
+pub(super) fn draw_backdrop_blur_path(
     resources: &mut D2dRenderer,
     rect: UiRect,
     path: &UiPath,
@@ -193,7 +204,7 @@ fn draw_backdrop_blur_path(
     result
 }
 
-fn create_bgra_bitmap(
+pub(super) fn create_bgra_bitmap(
     context: &ID2D1DeviceContext,
     width: i32,
     height: i32,
@@ -225,11 +236,11 @@ fn create_bgra_bitmap(
     }
 }
 
-fn draw_bitmap(context: &ID2D1DeviceContext, rect: UiRect, bitmap: &ID2D1Bitmap1) {
+pub(super) fn draw_bitmap(context: &ID2D1DeviceContext, rect: UiRect, bitmap: &ID2D1Bitmap1) {
     draw_bitmap_opacity(context, rect, bitmap, 1.0);
 }
 
-fn draw_bitmap_opacity(
+pub(super) fn draw_bitmap_opacity(
     context: &ID2D1DeviceContext,
     rect: UiRect,
     bitmap: &ID2D1Bitmap1,
@@ -248,7 +259,7 @@ fn draw_bitmap_opacity(
     }
 }
 
-fn draw_compositing_layer_bitmap(
+pub(super) fn draw_compositing_layer_bitmap(
     context: &ID2D1DeviceContext,
     rect: UiRect,
     bitmap: &ID2D1Bitmap1,
@@ -274,7 +285,10 @@ fn draw_compositing_layer_bitmap(
     }
 }
 
-fn d2d_layer_transform(rect: UiRect, transform: LayerTransform) -> windows_numerics::Matrix3x2 {
+pub(super) fn d2d_layer_transform(
+    rect: UiRect,
+    transform: LayerTransform,
+) -> windows_numerics::Matrix3x2 {
     let center = windows_numerics::Vector2 {
         X: rect.left as f32 + rect.width() as f32 * transform.origin_x(),
         Y: rect.top as f32 + rect.height() as f32 * transform.origin_y(),
@@ -287,7 +301,7 @@ fn d2d_layer_transform(rect: UiRect, transform: LayerTransform) -> windows_numer
         )
 }
 
-fn polygon_points(path: &UiPath) -> Option<Vec<lgui::core::Point>> {
+pub(super) fn polygon_points(path: &UiPath) -> Option<Vec<lgui::core::Point>> {
     let mut points = Vec::new();
     let mut has_close = false;
     for command in path.commands() {
@@ -306,7 +320,7 @@ fn polygon_points(path: &UiPath) -> Option<Vec<lgui::core::Point>> {
     }
 }
 
-fn mask_polygon(
+pub(super) fn mask_polygon(
     pixels: &mut [u8],
     width: i32,
     height: i32,
@@ -323,7 +337,7 @@ fn mask_polygon(
     }
 }
 
-fn point_in_polygon(x: f32, y: f32, points: &[lgui::core::Point]) -> bool {
+pub(super) fn point_in_polygon(x: f32, y: f32, points: &[lgui::core::Point]) -> bool {
     let mut inside = false;
     let mut previous = points.len() - 1;
     for current in 0..points.len() {
@@ -340,7 +354,7 @@ fn point_in_polygon(x: f32, y: f32, points: &[lgui::core::Point]) -> bool {
     inside
 }
 
-fn backdrop_blur_signature(rect: UiRect, style: lgui::core::BackdropBlurStyle) -> u64 {
+pub(super) fn backdrop_blur_signature(rect: UiRect, style: lgui::core::BackdropBlurStyle) -> u64 {
     let mut hasher = DefaultHasher::new();
     "backdrop-blur-bitmap".hash(&mut hasher);
     style.source.hash(&mut hasher);

@@ -2,33 +2,25 @@
 
 ## Ownership
 
-`Application` owns one `ApplicationContext`, its typed resources, Store registry, Router registry,
-Command registry, Event bus, WindowManager, platform Dispatcher, and every window session. Each
-`UiSession` owns component
-identity, local State, Effects, the retained host tree, layout state, input state, and scene
-commits. Platform backends own native windows, native messages, renderer devices, caches, and
-frame presentation.
+`Application` owns one `ApplicationContext`, typed resources, Store and Router registries,
+the Command registry, Event bus, WindowManager, platform dispatcher, and all window sessions.
+Each `UiSession` owns component identity, local State, Effects, the retained host tree, layout,
+input state, and scene commits. Platform backends own native windows, renderer devices, resource
+caches, and frame presentation.
 
-State handles include component generation identity. Updates dirty only their owning component,
-coalesce in the pending update queue, and wake the current Application. Effects run after a
-successful present and clean up on dependency changes and unmount.
+State handles carry component-generation identity. Updates invalidate only their owning component,
+coalesce in the pending queue, and wake the current Application. Effects run after a successful
+present and clean up when dependencies change or the component unmounts.
 
-Stores are Application-scoped pure data. A Store type creates itself lazily on first use. Selector
-equality controls component invalidation; mutations do not return UI invalidation values. Router
-history and declarative route trees are also Application-scoped. History stores complete Locations;
-route matching produces an ancestor-to-leaf chain with decoded parameters and opaque application
-metadata. Every nested Outlet is its own retained component boundary, preserving parent component
-identity and lifecycle while invalidating only the branch selected by navigation.
+Stores are Application-scoped data. Selector equality controls component invalidation. Router
+history and declarative route trees are also Application-scoped; nested Outlets retain independent
+component boundaries. Commands are typed request/response contracts, and Events are typed
+broadcasts. Neither subsystem depends on Store, Router, a platform backend, or application
+business types.
 
-Commands are Application-scoped typed request/response contracts. Registration and invocation use
-the command Rust type; names exist only for diagnostics. Command arguments, outputs, and errors are
-not serialized. Events are Application-scoped typed broadcasts. Component subscriptions are owned
-by Effects and are removed on dependency changes or unmount. Commands and Events do not depend on
-Store, Router, a platform backend, or an application business type.
-
-`WindowManager` handles typed IDs, explicit owner relationships, show/hide/toggle/close, owner
-movement and visibility restoration, DPI changes, input, and native resource release. Auxiliary
-windows use the same Application Context, Store, Router, and Dispatcher as the main window.
+`WindowManager` owns typed IDs, owner relationships, visibility, close policy, DPI changes,
+input, and native resource release. Auxiliary windows share the same Application Context, Store,
+Router, and Dispatcher as the main window.
 
 ## Dependency Direction
 
@@ -36,95 +28,97 @@ windows use the same Application Context, Store, Router, and Dispatcher as the m
 application root -> lgui public API -> portable runtime -> platform backend
 ```
 
-The portable modules do not depend on Win32. `platform::win32` does not depend on application
-pages, routes, stores, themes, network code, or project environment variables. Business crates
-may provide data and resource providers, but they do not wrap or re-export GUI infrastructure.
+Portable modules do not depend on Win32 or Winit. `platform::win32` does not depend on pages,
+business stores, network protocols, project environment variables, or Liuguang-specific paint
+keys. Business crates may provide data and resources, but they do not wrap or re-export GUI
+infrastructure.
 
 ## Source Layout
 
-The physical source tree follows subsystem ownership rather than implementation technology:
+The physical tree follows subsystem ownership:
 
 ```text
 src/
-├─ application/                 # builder, context, handles, desktop/window registration
-├─ command/                     # typed contracts, context, registry, handles
-├─ events/                      # typed contracts, bus, subscriptions
-├─ router/                      # context/hooks, matcher, runtime, declarative router
-├─ store/                       # definitions/hooks/subscriptions and runtime registry
-├─ core/                        # foundation, view, component, input, layout, scene
-├─ runtime/                     # session, retained host, frame invalidation
-├─ renderer/                    # portable contract/cache and platform-neutral Skia backend
-├─ platform/                    # Winit adapters and categorized Win32 implementation
-├─ services/                    # clipboard, dialogs, URL opening and service facade
-├─ assets/                      # image/resource system and icons
-├─ text/                        # text model, layout and text-system boundary
-├─ theme/                       # theme tokens and context
-├─ widgets/                     # controls; complex controls own subdirectories
-└─ diagnostics/                 # model, collection, providers and timing
+|-- application/   # builders, context, handles, window registration
+|-- command/       # typed contracts, context, registry, handles
+|-- events/        # typed contracts, bus, subscriptions
+|-- router/        # hooks, matching, runtime history, declarative routes
+|-- store/         # definitions, hooks, subscriptions, runtime registry
+|-- core/          # foundation, view, component, input, layout, scene
+|-- runtime/       # session, retained host, frame invalidation
+|-- renderer/      # portable contract/cache and portable Skia renderer
+|-- platform/      # Winit adapters and categorized Win32 implementation
+|-- services/      # clipboard, dialogs, URL opening, service contracts
+|-- assets/        # image/resource system and icons
+|-- text/          # text model, layout, and text-system boundary
+|-- theme/         # theme tokens and context
+|-- widgets/       # controls; complex controls own subdirectories
+`-- diagnostics/   # model, collection, providers, timing
 ```
 
-`runtime` is the physical owner of Session/Host/Frame implementation. The existing
-`lgui::session`, `lgui::host`, and `lgui::frame` paths remain compatibility entry points, while
-`lgui::runtime` provides the consolidated namespace. Core's physical responsibility directories
-also retain the established flat `lgui::core::*` exports. Cargo Feature names and their meaning do
-not depend on the physical file layout.
+`runtime` physically owns Session, Host, and Frame. The established `lgui::session`,
+`lgui::host`, and `lgui::frame` paths remain compatibility entry points. Core keeps the
+established flat `lgui::core::*` exports while its implementation is grouped by responsibility.
 
-Winit code is grouped into application, accessibility, Windows integration, and surface adapters.
-Win32 code is grouped into application, window, renderer, assets, and services. The portable Skia
-scene implementation belongs to `renderer/skia`, not to either window backend.
-
-Large runtime implementations are split one level further by responsibility:
+Large implementations are split one level further:
 
 ```text
-core/component/runtime/          # state, input, action, animation, focus
-core/scene/render/               # primitives, scene, compiler, transform, phase, damage
-runtime/host/                    # model, storage, reconcile, commit, scene, semantics, damage
-renderer/skia/backend/           # support, text, cache, software surface, painter, primitives
-platform/winit/                  # application, event loop, window, input, renderer, surface
-platform/win32/application/host/ # contract, state, backend, window, message loop, rendering, input
-platform/win32/renderer/enhanced/d2d/
+core/component/runtime/                 # state, input, action, animation, focus
+core/view/declarative/                  # element, content, events, primitives
+core/view/tree/                         # mutation, event dispatch, scene projection
+core/scene/render/                      # compiler, transform, phase, scene, damage
+runtime/host/                           # model, storage, reconcile, commit, scene
+renderer/skia/backend/                  # support, text, cache, software, painter
+platform/win32/application/host/        # contract, state, backend, window, loop
+platform/win32/renderer/enhanced/d2d/   # cache, drawing, effects, resources
 platform/win32/renderer/enhanced/gdi_renderer/
+platform/win32/renderer/enhanced/static_layer/
 ```
 
-The Win32 and Skia leaf files are included into their owning backend module. This keeps native
-resource state and private helper visibility in the same Rust module while making physical
-ownership discoverable; it does not introduce a second renderer, message loop, or cache owner.
+These directories are real Rust submodules. Source assembly with `include!` is forbidden:
+cross-file dependencies must be visible through an explicit module boundary and the narrowest
+practical visibility, normally `pub(super)`.
 
-The GDI and Direct2D factories implement the same Win32 Application renderer contract. With
-`advanced-rendering`, both consume the complete Scene model including paths, images, SVG icons,
-custom paint, overlays, backdrop blur, static layers, and scroll rasters. Direct2D owns its
-D3D11/DXGI/DirectComposition resources and recreates them after resize or presentation failure.
+Large test suites live in sibling `tests.rs` files or `tests/` directories. Production
+facades contain module declarations, shared contracts, and re-exports rather than hundreds of
+lines of test code.
 
-`CompositingLayer` is the backend-neutral retained composition boundary. Its descendants compile
-into layer-local coordinates and remain in the normal layout, input, accessibility, and popup
-trees. The Host keeps the layer as one scene root while still calculating window damage from the
-changed descendants. Renderers compare stable command identities to calculate layer-local damage;
-movement, insertion, removal, reordering, nested layers, clips, and DPI projection therefore do
-not require an unrelated sibling layer to repaint. Popup descendants escape a regular layer and
-remain at the top of scene order.
+## Rendering
 
-GDI stores each live layer in renderer-scoped DIB surfaces and releases them with the renderer.
-Transparent GDI layers use black/white coverage reconstruction so black content, partial alpha,
-text, and antialiased edges preserve premultiplied alpha. Direct2D stores each layer in an
-`ID2D1Bitmap1`; both backends clear and redraw only layer-local damage and composite only the
-intersection with window damage. Size or background-mode changes recreate a surface, opacity-only
-changes reuse its pixels, and removed layers are pruned before drawing. Translation, rotation,
-scale, and normalized transform origin are composition properties rather than content properties.
-Direct2D applies them through its device-context matrix; GDI maps the same retained DIB to a
-transformed destination parallelogram.
+The GDI and Direct2D factories implement the same Win32 Application renderer contract. Both
+consume the complete Scene model. Direct2D owns its D3D11, DXGI, and DirectComposition resources
+and recreates them after resize or presentation failure.
 
-`CompositingLayerAnimation` keeps animation semantics and state in application code. Its
-declarative adapter binds that state to one retained layer node. On a frame tick, the runtime
-updates only the node's generic `CompositingLayerSpec`, records old and new transformed damage,
-and queues a projection change without dirtying the component owner. The Host patches that spec
-into both the retained scene root and the uniquely owned composed scene instead of compiling or
-cloning the layer descendants again. This keeps static vector or image children out of per-frame
-declarative and scene compilation while sharing the same path across GDI and Direct2D. The Host
-also retains the ordered scene-root set while projection structure is unchanged, so a
-composition-only frame does not rediscover container ownership by walking the complete UI tree.
+`CompositingLayer` is the backend-neutral retained composition boundary. Its children use
+layer-local coordinates while staying in the normal layout, input, accessibility, and popup
+trees. Renderers compare stable command identities to calculate local damage. Size and background
+changes recreate a surface; opacity and transform changes reuse its pixels.
+
+Scene primitive translation is implemented once in `core::scene::render::transform`. Portable
+scene compilation translates nested static-layer commands, while backend rasterization preserves
+the already-local command list through an explicit policy. D2D, GDI static layers, and other
+backend consumers do not maintain private copies of the primitive transform match.
+
+GDI retains live compositing layers in renderer-scoped DIB surfaces. Transparent layers use
+black/white coverage reconstruction to preserve premultiplied alpha. Direct2D retains layers in
+`ID2D1Bitmap1` surfaces. Both redraw only layer-local damage and composite only its intersection
+with window damage.
 
 ## Features
 
-`--no-default-features` is portable and does not compile Windows, Tokio, images, SVG, or
-diagnostics dependencies. Each optional desktop or renderer capability is feature-gated. The
-architecture tests recursively enforce the portable/platform and library/application boundaries.
+`--no-default-features` is portable and compiles no window backend, Tokio runtime, image stack,
+SVG stack, or diagnostics provider.
+
+Feature ownership is explicit:
+
+- `backend-win32` enables only the Win32 platform boundary.
+- `renderer-gdi` and `renderer-d2d` require `backend-win32`.
+- `backend-winit` requires `renderer-skia`, because its software fallback and presentation
+  path are Skia-based.
+- `renderer-skia` remains portable and does not enable Win32.
+- GL, Vulkan, and Metal features add only their Winit surface adapters and target dependencies.
+- Accessibility, notifications, tray, images, SVG, and diagnostics stay independently gated.
+
+The CI matrix checks portable no-default tests, each Windows backend boundary, standalone Winit,
+default tests, and all-feature tests. Architecture tests enforce directory ownership, dependency
+direction, real-module assembly, and the feature graph.

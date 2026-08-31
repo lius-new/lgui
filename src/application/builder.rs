@@ -19,7 +19,7 @@ use super::{
     feature = "renderer-skia"
 ))]
 use super::DesktopApplication;
-#[cfg(feature = "renderer-skia")]
+#[cfg(all(feature = "renderer-skia", feature = "backend-winit"))]
 use super::GraphicsPreference;
 #[cfg(feature = "notifications")]
 use super::NotificationRegistration;
@@ -103,6 +103,7 @@ impl<B> Application<B> {
         self
     }
 
+    #[cfg(feature = "renderer-skia")]
     pub fn font_assets(self, assets: Vec<crate::text::FontAsset>) -> Self {
         self.resources
             .provide(crate::text::FontAssets(std::sync::Arc::new(assets)));

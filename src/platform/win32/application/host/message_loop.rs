@@ -1,4 +1,6 @@
-extern "system" fn window_proc(
+use super::*;
+
+pub(super) extern "system" fn window_proc(
     hwnd: HWND,
     message: u32,
     wparam: WPARAM,
@@ -361,7 +363,7 @@ extern "system" fn window_proc(
     }
 }
 
-fn request_window_close(hwnd: HWND) {
+pub(super) fn request_window_close(hwnd: HWND) {
     let request = STATE.with(|state| {
         state.borrow().get(&(hwnd.0 as isize)).map(|state| {
             (
@@ -396,7 +398,7 @@ fn request_window_close(hwnd: HWND) {
     }
 }
 
-fn drain_dispatcher(hwnd: HWND) {
+pub(super) fn drain_dispatcher(hwnd: HWND) {
     let dispatcher = STATE.with(|state| {
         state
             .borrow()
@@ -420,7 +422,7 @@ fn drain_dispatcher(hwnd: HWND) {
     }
 }
 
-fn handle_frame_tick(hwnd: HWND) {
+pub(super) fn handle_frame_tick(hwnd: HWND) {
     let dispatcher = STATE.with(|state| {
         state
             .borrow()

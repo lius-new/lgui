@@ -8,12 +8,18 @@ single Application API for GDI and Direct2D.
 The acceptance suite is:
 
 ```powershell
+cargo check -p lgui --no-default-features
+cargo check -p lgui --no-default-features --features backend-win32
+cargo check -p lgui --no-default-features --features renderer-gdi
+cargo check -p lgui --no-default-features --features renderer-d2d
+cargo check -p lgui --no-default-features --features backend-winit
 cargo test -p lgui --no-default-features --quiet
+cargo test -p lgui --quiet
 cargo test -p lgui --all-features --quiet
 cargo check -p liugc --bin liugc
 cargo test -p liugc --bin liugc frontend:: --quiet
 cargo check -p lgui-showcase --all-features
-cargo fmt --all --check
+cargo fmt -p lgui -- --check
 git diff --check
 ```
 

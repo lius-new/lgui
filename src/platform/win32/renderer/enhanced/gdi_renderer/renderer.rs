@@ -1,3 +1,5 @@
+use super::*;
+
 pub struct GdiRenderer;
 
 impl GdiRenderer {
@@ -32,7 +34,7 @@ impl GdiRenderer {
         Self::draw_command_clipped(hdc, command, None);
     }
 
-    fn draw_command_clipped(hdc: HDC, command: &ScenePrimitive, clip: Option<UiRect>) {
+    pub(super) fn draw_command_clipped(hdc: HDC, command: &ScenePrimitive, clip: Option<UiRect>) {
         match command {
             ScenePrimitive::Rect { rect, style, .. } => draw_rect(hdc, *rect, *style),
             ScenePrimitive::Ellipse { rect, style, .. } => draw_ellipse(hdc, *rect, *style),
@@ -181,7 +183,7 @@ impl GdiRenderer {
     }
 }
 
-fn collect_compositing_layer_ids(
+pub(super) fn collect_compositing_layer_ids(
     commands: &[ScenePrimitive],
     ids: &mut std::collections::HashSet<UiId>,
 ) {
@@ -202,7 +204,7 @@ fn collect_compositing_layer_ids(
     }
 }
 
-fn draw_gdi_compositing_layer(
+pub(super) fn draw_gdi_compositing_layer(
     hdc: HDC,
     id: &UiId,
     rect: UiRect,

@@ -1,21 +1,23 @@
+use super::*;
+
 thread_local! {
-    static OVERLAY_CACHE: RefCell<HashMap<OverlayCacheKey, Vec<u8>>> = RefCell::new(HashMap::new());
-    static GDI_BITMAP_CACHE: RefCell<GdiBitmapCache> = RefCell::new(GdiBitmapCache::default());
-    static GDI_COMPOSITING_LAYER_SCOPE: Cell<u64> = const { Cell::new(0) };
-    static GDI_COMPOSITING_LAYERS: RefCell<HashMap<GdiCompositingLayerKey, GdiCompositingLayer>> = RefCell::new(HashMap::new());
-    static GDI_FRAME_BLIT_METRICS: RefCell<GdiFrameBlitMetrics> = RefCell::new(GdiFrameBlitMetrics::default());
-    static GDI_FONT_FAMILY_CACHE: RefCell<HashMap<(char, i32, i32), usize>> = RefCell::new(HashMap::new());
+    pub(super) static OVERLAY_CACHE: RefCell<HashMap<OverlayCacheKey, Vec<u8>>> = RefCell::new(HashMap::new());
+    pub(super) static GDI_BITMAP_CACHE: RefCell<GdiBitmapCache> = RefCell::new(GdiBitmapCache::default());
+    pub(super) static GDI_COMPOSITING_LAYER_SCOPE: Cell<u64> = const { Cell::new(0) };
+    pub(super) static GDI_COMPOSITING_LAYERS: RefCell<HashMap<GdiCompositingLayerKey, GdiCompositingLayer>> = RefCell::new(HashMap::new());
+    pub(super) static GDI_FRAME_BLIT_METRICS: RefCell<GdiFrameBlitMetrics> = RefCell::new(GdiFrameBlitMetrics::default());
+    pub(super) static GDI_FONT_FAMILY_CACHE: RefCell<HashMap<(char, i32, i32), usize>> = RefCell::new(HashMap::new());
 }
 
-fn raster_length(value: f32) -> i32 {
+pub(super) fn raster_length(value: f32) -> i32 {
     value.ceil().max(1.0) as i32
 }
 
-fn round_coord(value: f32) -> i32 {
+pub(super) fn round_coord(value: f32) -> i32 {
     value.round() as i32
 }
 
-fn pixel_rect_outward(rect: UiRect) -> PhysicalRect {
+pub(super) fn pixel_rect_outward(rect: UiRect) -> PhysicalRect {
     PhysicalRect::new(
         rect.left.floor() as i32,
         rect.top.floor() as i32,
@@ -82,7 +84,11 @@ pub fn take_gdi_frame_blit_metrics() -> GdiFrameBlitMetrics {
     })
 }
 
-fn record_gdi_frame_blit(source: GdiFrameBlitSource, kind: GdiFrameBlitKind, rect: UiRect) {
+pub(super) fn record_gdi_frame_blit(
+    source: GdiFrameBlitSource,
+    kind: GdiFrameBlitKind,
+    rect: UiRect,
+) {
     let pixels =
         (rect.width().max(0.0).ceil() as u64).saturating_mul(rect.height().max(0.0).ceil() as u64);
     GDI_FRAME_BLIT_METRICS.with(|metrics| {
@@ -106,7 +112,7 @@ fn record_gdi_frame_blit(source: GdiFrameBlitSource, kind: GdiFrameBlitKind, rec
     });
 }
 
-fn source_metrics_mut(
+pub(super) fn source_metrics_mut(
     metrics: &mut GdiFrameBlitMetrics,
     source: GdiFrameBlitSource,
 ) -> &mut GdiFrameBlitSourceMetrics {
@@ -139,14 +145,15 @@ impl GdiFrameBlitSourceMetrics {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum GdiFrameBlitKind {
+pub(super) enum GdiFrameBlitKind {
     BitBlt,
     AlphaBlend,
     FallbackAlphaBlend,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GdiFrameBlitSource {
+#[allow(dead_code)]
+pub(super) enum GdiFrameBlitSource {
     StaticLayer,
     Overlay,
     Backdrop,
@@ -154,42 +161,42 @@ enum GdiFrameBlitSource {
     Other,
 }
 
-const GDI_BITMAP_CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+pub(super) const GDI_BITMAP_CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Default)]
-struct GdiBitmapCache {
-    entries: HashMap<String, GdiBitmapEntry>,
-    bytes: usize,
-    tick: u64,
+pub(super) struct GdiBitmapCache {
+    pub(super) entries: HashMap<String, GdiBitmapEntry>,
+    pub(super) bytes: usize,
+    pub(super) tick: u64,
 }
 
-struct GdiBitmapEntry {
-    memory_dc: HDC,
-    bitmap: HBITMAP,
-    old_bitmap: HGDIOBJ,
-    bits: *mut u8,
-    width: i32,
-    height: i32,
-    bytes: usize,
-    last_used: u64,
-    opaque: bool,
+pub(super) struct GdiBitmapEntry {
+    pub(super) memory_dc: HDC,
+    pub(super) bitmap: HBITMAP,
+    pub(super) old_bitmap: HGDIOBJ,
+    pub(super) bits: *mut u8,
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) bytes: usize,
+    pub(super) last_used: u64,
+    pub(super) opaque: bool,
 }
 
-struct GdiCompositingLayer {
-    content_signature: Option<u64>,
-    background: CompositingLayerBackground,
-    width: i32,
-    height: i32,
-    output: GdiBitmapEntry,
-    black: Option<GdiBitmapEntry>,
-    white: Option<GdiBitmapEntry>,
-    commands: Vec<ScenePrimitive>,
+pub(super) struct GdiCompositingLayer {
+    pub(super) content_signature: Option<u64>,
+    pub(super) background: CompositingLayerBackground,
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) output: GdiBitmapEntry,
+    pub(super) black: Option<GdiBitmapEntry>,
+    pub(super) white: Option<GdiBitmapEntry>,
+    pub(super) commands: Vec<ScenePrimitive>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct GdiCompositingLayerKey {
-    scope: u64,
-    id: UiId,
+pub(super) struct GdiCompositingLayerKey {
+    pub(super) scope: u64,
+    pub(super) id: UiId,
 }
 
 impl GdiBitmapCache {
@@ -204,7 +211,7 @@ impl GdiBitmapCache {
         self.tick
     }
 
-    fn entry(
+    pub(super) fn entry(
         &mut self,
         hdc: HDC,
         key: &str,
@@ -311,7 +318,7 @@ impl Drop for GdiBitmapEntry {
 }
 
 impl GdiCompositingLayer {
-    fn new(
+    pub(super) fn new(
         hdc: HDC,
         width: i32,
         height: i32,
@@ -347,7 +354,7 @@ impl GdiCompositingLayer {
         })
     }
 
-    fn redraw(&mut self, commands: &[ScenePrimitive], damage: &[UiRect]) {
+    pub(super) fn redraw(&mut self, commands: &[ScenePrimitive], damage: &[UiRect]) {
         unsafe {
             let _ = GdiFlush();
         }
@@ -387,7 +394,7 @@ impl GdiCompositingLayer {
     }
 }
 
-fn solid_bgra_pixels(width: i32, height: i32, color: [u8; 4]) -> Option<Vec<u8>> {
+pub(super) fn solid_bgra_pixels(width: i32, height: i32, color: [u8; 4]) -> Option<Vec<u8>> {
     let len = usize::try_from(width.checked_mul(height)?.checked_mul(4)?).ok()?;
     let mut pixels = vec![0; len];
     for pixel in pixels.chunks_exact_mut(4) {
@@ -396,11 +403,14 @@ fn solid_bgra_pixels(width: i32, height: i32, color: [u8; 4]) -> Option<Vec<u8>>
     Some(pixels)
 }
 
-fn clipped_surface_region(surface: &GdiBitmapEntry, rect: UiRect) -> Option<PhysicalRect> {
+pub(super) fn clipped_surface_region(
+    surface: &GdiBitmapEntry,
+    rect: UiRect,
+) -> Option<PhysicalRect> {
     pixel_rect_outward(rect).intersect(PhysicalRect::new(0, 0, surface.width, surface.height))
 }
 
-fn fill_gdi_surface_region(surface: &mut GdiBitmapEntry, rect: UiRect, color: [u8; 4]) {
+pub(super) fn fill_gdi_surface_region(surface: &mut GdiBitmapEntry, rect: UiRect, color: [u8; 4]) {
     let Some(rect) = clipped_surface_region(surface, rect) else {
         return;
     };
@@ -414,7 +424,7 @@ fn fill_gdi_surface_region(surface: &mut GdiBitmapEntry, rect: UiRect, color: [u
     }
 }
 
-fn set_gdi_surface_alpha_region(surface: &mut GdiBitmapEntry, rect: UiRect, alpha: u8) {
+pub(super) fn set_gdi_surface_alpha_region(surface: &mut GdiBitmapEntry, rect: UiRect, alpha: u8) {
     let Some(rect) = clipped_surface_region(surface, rect) else {
         return;
     };
@@ -428,7 +438,7 @@ fn set_gdi_surface_alpha_region(surface: &mut GdiBitmapEntry, rect: UiRect, alph
     }
 }
 
-fn synthesize_transparent_region(
+pub(super) fn synthesize_transparent_region(
     output: &mut GdiBitmapEntry,
     black: &GdiBitmapEntry,
     white: &GdiBitmapEntry,
@@ -451,7 +461,7 @@ fn synthesize_transparent_region(
     }
 }
 
-fn synthesize_transparent_pixel(black: &[u8], white: &[u8]) -> [u8; 4] {
+pub(super) fn synthesize_transparent_pixel(black: &[u8], white: &[u8]) -> [u8; 4] {
     let backdrop = (0..3)
         .map(|channel| white[channel].saturating_sub(black[channel]) as u16)
         .sum::<u16>();
@@ -464,7 +474,7 @@ fn synthesize_transparent_pixel(black: &[u8], white: &[u8]) -> [u8; 4] {
     ]
 }
 
-fn draw_gdi_commands_clipped(hdc: HDC, commands: &[ScenePrimitive], clip: UiRect) {
+pub(super) fn draw_gdi_commands_clipped(hdc: HDC, commands: &[ScenePrimitive], clip: UiRect) {
     let saved = unsafe { SaveDC(hdc) };
     if saved == 0 {
         return;
@@ -491,8 +501,8 @@ fn draw_gdi_commands_clipped(hdc: HDC, commands: &[ScenePrimitive], clip: UiRect
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct OverlayCacheKey {
-    width: i32,
-    height: i32,
-    style_signature: u64,
+pub(super) struct OverlayCacheKey {
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) style_signature: u64,
 }

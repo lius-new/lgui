@@ -1,15 +1,16 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    fs,
-    sync::{Arc, Mutex},
-};
+use std::{cell::RefCell, sync::Arc};
 
-use super::{AssetBytes, AssetError, ImageSource, ImageStatus, RemoteImageLoaderHandle};
+#[cfg(any(test, feature = "backend-winit"))]
+use std::{collections::HashMap, fs, sync::Mutex};
+
+use super::{AssetBytes, ImageSource, ImageStatus};
+#[cfg(any(test, feature = "backend-winit"))]
+use super::{AssetError, RemoteImageLoaderHandle};
 
 #[derive(Clone)]
 pub struct ImageCacheHandle {
     request: Arc<dyn Fn(&ImageSource) -> ImageStatus + Send + Sync>,
+    #[cfg(any(test, feature = "renderer-skia"))]
     bytes: Arc<dyn Fn(&ImageSource) -> Option<AssetBytes> + Send + Sync>,
     clear: Arc<dyn Fn() + Send + Sync>,
 }
@@ -20,8 +21,11 @@ impl ImageCacheHandle {
         bytes: impl Fn(&ImageSource) -> Option<AssetBytes> + Send + Sync + 'static,
         clear: impl Fn() + Send + Sync + 'static,
     ) -> Self {
+        #[cfg(not(any(test, feature = "renderer-skia")))]
+        let _ = bytes;
         Self {
             request: Arc::new(request),
+            #[cfg(any(test, feature = "renderer-skia"))]
             bytes: Arc::new(bytes),
             clear: Arc::new(clear),
         }
@@ -35,6 +39,7 @@ impl ImageCacheHandle {
         (self.clear)();
     }
 
+    #[cfg(any(test, feature = "renderer-skia"))]
     pub(super) fn bytes(&self, source: &ImageSource) -> Option<AssetBytes> {
         (self.bytes)(source)
     }
@@ -83,6 +88,7 @@ pub fn clear_image_caches() {
     });
 }
 
+#[cfg(feature = "renderer-skia")]
 pub(crate) fn cached_image_bytes(source: &ImageSource) -> Option<AssetBytes> {
     IMAGE_CACHE_HANDLE.with(|current| {
         current
@@ -92,6 +98,7 @@ pub(crate) fn cached_image_bytes(source: &ImageSource) -> Option<AssetBytes> {
     })
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 struct AsyncImageEntry {
     status: ImageStatus,
     bytes: Option<AssetBytes>,
@@ -99,6 +106,7 @@ struct AsyncImageEntry {
     used: u64,
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 struct AsyncImageState {
     entries: HashMap<String, AsyncImageEntry>,
     epoch: u64,
@@ -106,6 +114,7 @@ struct AsyncImageState {
     resident_bytes: usize,
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 impl AsyncImageState {
     fn new() -> Self {
         Self {
@@ -117,6 +126,7 @@ impl AsyncImageState {
     }
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 pub(crate) fn async_image_cache(
     loader: RemoteImageLoaderHandle,
     wake: impl Fn() + Send + Sync + 'static,
@@ -156,6 +166,7 @@ pub(crate) fn async_image_cache(
     ImageCacheHandle::new(request, bytes, clear)
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 fn request_async_image(
     state: Arc<Mutex<AsyncImageState>>,
     loader: RemoteImageLoaderHandle,
@@ -214,6 +225,7 @@ fn request_async_image(
     ImageStatus::Loading
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 fn finish_async_image(
     state: &Mutex<AsyncImageState>,
     key: &str,
@@ -259,6 +271,7 @@ fn finish_async_image(
     }
 }
 
+#[cfg(any(test, feature = "backend-winit"))]
 fn image_source_key(source: &ImageSource) -> String {
     match source {
         ImageSource::Static(key) => format!("asset:{key}"),

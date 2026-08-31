@@ -1,20 +1,15 @@
-const WM_MOUSE_LEAVE: u32 = 0x02A3;
-#[cfg(feature = "renderer-gdi")]
-use super::super::GdiRenderer;
-#[cfg(feature = "tray")]
-use super::super::Win32TrayHost;
-use super::super::{
-    dispatcher::{DEFAULT_FRAME_INTERVAL_MS, WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
-    set_scale_preference, DpiContext, Win32Dispatcher,
-};
+use super::*;
 
-const WINDOW_CLASS: &str = "LguiApplicationWindow";
-const BACKGROUND_RETRIM_DELAY: Duration = Duration::from_secs(3);
-const INTERACTIVE_RESIZE_FRAME_INTERVAL_MS: u64 = 33;
-static BACKGROUND_TRIM_GENERATION: AtomicU64 = AtomicU64::new(0);
+pub(super) const WM_MOUSE_LEAVE: u32 = 0x02A3;
+#[cfg(feature = "renderer-gdi")]
+use super::super::super::GdiRenderer;
+pub(super) const WINDOW_CLASS: &str = "LguiApplicationWindow";
+pub(super) const BACKGROUND_RETRIM_DELAY: Duration = Duration::from_secs(3);
+pub(super) const INTERACTIVE_RESIZE_FRAME_INTERVAL_MS: u64 = 33;
+pub(super) static BACKGROUND_TRIM_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
-    static STATE: RefCell<HashMap<isize, WindowState>> = RefCell::new(HashMap::new());
+    pub(super) static STATE: RefCell<HashMap<isize, WindowState>> = RefCell::new(HashMap::new());
 }
 
 #[derive(Debug)]
@@ -62,19 +57,29 @@ impl std::error::Error for Win32RenderError {}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Win32RenderTarget {
+    #[cfg(feature = "renderer-gdi")]
     hwnd: HWND,
+    #[cfg(feature = "renderer-gdi")]
     hdc: HDC,
 }
 
 impl Win32RenderTarget {
-    fn new(hwnd: HWND, hdc: HDC) -> Self {
+    pub(super) fn new(hwnd: HWND, hdc: HDC) -> Self {
+        #[cfg(not(feature = "renderer-gdi"))]
+        {
+            let _ = (hwnd, hdc);
+            Self {}
+        }
+        #[cfg(feature = "renderer-gdi")]
         Self { hwnd, hdc }
     }
 
+    #[cfg(feature = "renderer-gdi")]
     pub(crate) fn hwnd(self) -> HWND {
         self.hwnd
     }
 
+    #[cfg(feature = "renderer-gdi")]
     pub(crate) fn hdc(self) -> HDC {
         self.hdc
     }
@@ -91,7 +96,7 @@ pub trait Win32RendererFactory: Send + Sync + 'static {
     fn create(&self, hwnd: HWND) -> Result<Box<Win32SceneRenderer>>;
 
     fn text_system(&self) -> crate::text::TextSystemHandle {
-        super::super::portable_text_system_handle()
+        super::super::super::portable_text_system_handle()
     }
 }
 

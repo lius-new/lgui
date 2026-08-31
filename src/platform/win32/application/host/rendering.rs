@@ -1,4 +1,6 @@
-fn paint(hwnd: HWND) {
+use super::*;
+
+pub(super) fn paint(hwnd: HWND) {
     let mut paint = PAINTSTRUCT::default();
     let target = unsafe { BeginPaint(hwnd, &mut paint) };
     render_window(hwnd, target);
@@ -7,7 +9,7 @@ fn paint(hwnd: HWND) {
     }
 }
 
-fn render_window(hwnd: HWND, target: HDC) {
+pub(super) fn render_window(hwnd: HWND, target: HDC) {
     let retry = STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(state) = state.get_mut(&(hwnd.0 as isize)) else {
@@ -287,7 +289,7 @@ fn render_window(hwnd: HWND, target: HDC) {
 }
 
 #[cfg(feature = "diagnostics")]
-fn rect_pixels(rects: &[PhysicalRect]) -> u64 {
+pub(super) fn rect_pixels(rects: &[PhysicalRect]) -> u64 {
     rects.iter().fold(0_u64, |total, rect| {
         total.saturating_add(
             (rect.width().max(0) as u64).saturating_mul(rect.height().max(0) as u64),
@@ -296,23 +298,23 @@ fn rect_pixels(rects: &[PhysicalRect]) -> u64 {
 }
 
 #[cfg(feature = "diagnostics")]
-fn reset_frame_present_metrics(renderer: &'static str) {
+pub(super) fn reset_frame_present_metrics(renderer: &'static str) {
     #[cfg(all(feature = "advanced-rendering", feature = "renderer-gdi"))]
     if renderer == "gdi" {
-        super::super::enhanced::reset_gdi_frame_blit_metrics();
+        super::super::super::enhanced::reset_gdi_frame_blit_metrics();
     }
     #[cfg(not(all(feature = "advanced-rendering", feature = "renderer-gdi")))]
     let _ = renderer;
 }
 
 #[cfg(feature = "diagnostics")]
-fn take_frame_present_metrics(
+pub(super) fn take_frame_present_metrics(
     renderer: &'static str,
     submitted_pixels: u64,
 ) -> FramePresentMetrics {
     #[cfg(all(feature = "advanced-rendering", feature = "renderer-gdi"))]
     if renderer == "gdi" {
-        let metrics = super::super::enhanced::take_gdi_frame_blit_metrics();
+        let metrics = super::super::super::enhanced::take_gdi_frame_blit_metrics();
         return FramePresentMetrics {
             submitted_pixels,
             blit_count: metrics.blit_count,
@@ -340,8 +342,8 @@ fn take_frame_present_metrics(
     feature = "advanced-rendering",
     feature = "renderer-gdi"
 ))]
-fn frame_blit_metrics(
-    metrics: super::super::enhanced::GdiFrameBlitSourceMetrics,
+pub(super) fn frame_blit_metrics(
+    metrics: super::super::super::enhanced::GdiFrameBlitSourceMetrics,
 ) -> FrameBlitSourceMetrics {
     FrameBlitSourceMetrics {
         blit_count: metrics.blit_count,
@@ -353,7 +355,7 @@ fn frame_blit_metrics(
 }
 
 #[cfg(feature = "diagnostics")]
-fn damage_reason_label(reason: &DamageReason) -> &'static str {
+pub(super) fn damage_reason_label(reason: &DamageReason) -> &'static str {
     match reason {
         DamageReason::FirstCommit => "first-commit",
         DamageReason::Explicit => "explicit",
@@ -367,7 +369,7 @@ fn damage_reason_label(reason: &DamageReason) -> &'static str {
     }
 }
 
-fn report_render_error(
+pub(super) fn report_render_error(
     state: &WindowState,
     stage: RenderErrorStage,
     operation: &'static str,
@@ -383,7 +385,7 @@ fn report_render_error(
     ));
 }
 
-fn schedule_render_retry(state: &mut WindowState) -> bool {
+pub(super) fn schedule_render_retry(state: &mut WindowState) -> bool {
     state.session.invalidate_all();
     if state.render_retry_used {
         return false;

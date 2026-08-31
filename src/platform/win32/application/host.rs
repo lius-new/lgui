@@ -109,12 +109,33 @@ use crate::{
 };
 
 use super::super::ico::create_icon_from_ico_bytes;
+#[cfg(feature = "tray")]
+use super::super::Win32TrayHost;
+use super::super::{
+    dispatcher::{DEFAULT_FRAME_INTERVAL_MS, WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
+    set_scale_preference, DpiContext, Win32Dispatcher,
+};
 
-include!("host/contract.rs");
-include!("host/state.rs");
-include!("host/backend.rs");
-include!("host/window.rs");
-include!("host/message_loop.rs");
-include!("host/rendering.rs");
-include!("host/input.rs");
-include!("host/tests.rs");
+mod backend;
+mod contract;
+mod input;
+mod message_loop;
+mod rendering;
+mod state;
+mod window;
+
+pub use contract::{
+    GdiRendererFactory, Win32RenderError, Win32RenderTarget, Win32RendererFactory,
+    Win32SceneRenderer,
+};
+pub use state::{Win32Application, Win32WindowOptions};
+
+use contract::*;
+use input::*;
+use message_loop::*;
+use rendering::*;
+use state::*;
+use window::*;
+
+#[cfg(test)]
+mod tests;

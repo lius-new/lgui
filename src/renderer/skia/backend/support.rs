@@ -1,13 +1,30 @@
+use super::*;
+
 pub(crate) const DEFAULT_CACHE_BUDGET: usize = 96 * 1024 * 1024;
 
+#[cfg(any(
+    feature = "renderer-skia-gl",
+    feature = "renderer-skia-vulkan",
+    feature = "renderer-skia-metal"
+))]
 pub(crate) const fn gpu_cache_budget(total: usize) -> usize {
     total.saturating_mul(2) / 3
 }
 
+#[cfg(any(
+    feature = "renderer-skia-gl",
+    feature = "renderer-skia-vulkan",
+    feature = "renderer-skia-metal"
+))]
 pub(crate) const fn cpu_cache_budget(total: usize) -> usize {
     total.saturating_sub(gpu_cache_budget(total))
 }
 
+#[cfg(any(
+    feature = "renderer-skia-gl",
+    feature = "renderer-skia-vulkan",
+    feature = "renderer-skia-metal"
+))]
 pub(crate) fn with_gpu_cache_usage(
     mut stats: SkiaCacheStats,
     context: &skia_safe::gpu::DirectContext,

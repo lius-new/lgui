@@ -557,6 +557,31 @@ fn physical_projection_scales_nested_raster_commands_and_cache_keys() {
     assert_eq!(style.tracking, 3.0);
 }
 
+#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+#[test]
+fn backend_translation_preserves_nested_static_layer_local_commands() {
+    let command = ScenePrimitive::StaticLayer {
+        id: id("static"),
+        rect: UiRect::new(10.0, 20.0, 110.0, 120.0),
+        spec: StaticLayerSpec::new(StaticLayerSource::runtime()),
+        commands: vec![ScenePrimitive::Rect {
+            id: id("child"),
+            rect: UiRect::new(2.0, 3.0, 12.0, 13.0),
+            style: VisualStyle::filled(Color::WHITE),
+            phase: RenderPhase::Content,
+        }],
+        child_signature: 7,
+        phase: RenderPhase::Content,
+    };
+
+    let translated = translate_scene_primitive_for_backend(&command, 5.0, 6.0);
+    let ScenePrimitive::StaticLayer { rect, commands, .. } = translated else {
+        panic!("expected static layer");
+    };
+    assert_eq!(rect, UiRect::new(15.0, 26.0, 115.0, 126.0));
+    assert_eq!(commands[0].rect(), UiRect::new(2.0, 3.0, 12.0, 13.0));
+}
+
 #[test]
 fn physical_projection_scales_compositing_bounds_and_local_commands() {
     let child = ScenePrimitive::Rect {

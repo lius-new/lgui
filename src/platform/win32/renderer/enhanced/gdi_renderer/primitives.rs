@@ -1,4 +1,6 @@
-fn draw_line(hdc: HDC, start: Point, end: Point, stroke: Stroke) {
+use super::*;
+
+pub(super) fn draw_line(hdc: HDC, start: Point, end: Point, stroke: Stroke) {
     if stroke.alpha == 0 || stroke.width <= 0.0 {
         return;
     }
@@ -16,7 +18,7 @@ fn draw_line(hdc: HDC, start: Point, end: Point, stroke: Stroke) {
     }
 }
 
-fn draw_rect(hdc: HDC, rect: UiRect, style: VisualStyle) {
+pub(super) fn draw_rect(hdc: HDC, rect: UiRect, style: VisualStyle) {
     if style.fill_alpha == 0 && style.stroke.map(|stroke| stroke.alpha).unwrap_or(0) == 0 {
         return;
     }
@@ -75,7 +77,7 @@ fn draw_rect(hdc: HDC, rect: UiRect, style: VisualStyle) {
     }
 }
 
-fn draw_ellipse(hdc: HDC, rect: UiRect, style: VisualStyle) {
+pub(super) fn draw_ellipse(hdc: HDC, rect: UiRect, style: VisualStyle) {
     if style.fill_alpha == 0 && style.stroke.map(|stroke| stroke.alpha).unwrap_or(0) == 0 {
         return;
     }
@@ -103,7 +105,7 @@ fn draw_ellipse(hdc: HDC, rect: UiRect, style: VisualStyle) {
     }
 }
 
-fn draw_overlay(hdc: HDC, rect: UiRect, style: &OverlayStyle) {
+pub(super) fn draw_overlay(hdc: HDC, rect: UiRect, style: &OverlayStyle) {
     let start = Instant::now();
     let width = raster_length(rect.width());
     let height = raster_length(rect.height());
@@ -145,14 +147,14 @@ fn draw_overlay(hdc: HDC, rect: UiRect, style: &OverlayStyle) {
     trace_duration("gdi.draw_overlay", start.elapsed());
 }
 
-fn overlay_gdi_cache_key(key: &OverlayCacheKey) -> String {
+pub(super) fn overlay_gdi_cache_key(key: &OverlayCacheKey) -> String {
     format!(
         "overlay:{}:{}:{:016x}",
         key.width, key.height, key.style_signature
     )
 }
 
-fn rasterize_overlay(width: i32, height: i32, style: &OverlayStyle) -> Vec<u8> {
+pub(super) fn rasterize_overlay(width: i32, height: i32, style: &OverlayStyle) -> Vec<u8> {
     let mut pixels = vec![0u8; (width * height * 4) as usize];
     for layer in &style.vertical_layers {
         composite_vertical_gradient(&mut pixels, width, height, *layer);
@@ -163,7 +165,7 @@ fn rasterize_overlay(width: i32, height: i32, style: &OverlayStyle) -> Vec<u8> {
     pixels
 }
 
-fn overlay_signature(style: &OverlayStyle) -> u64 {
+pub(super) fn overlay_signature(style: &OverlayStyle) -> u64 {
     let mut hasher = DefaultHasher::new();
     style.vertical_layers.len().hash(&mut hasher);
     for layer in &style.vertical_layers {
@@ -182,7 +184,7 @@ fn overlay_signature(style: &OverlayStyle) -> u64 {
     hasher.finish()
 }
 
-fn composite_vertical_gradient(
+pub(super) fn composite_vertical_gradient(
     pixels: &mut [u8],
     width: i32,
     height: i32,
@@ -213,7 +215,7 @@ fn composite_vertical_gradient(
     }
 }
 
-fn composite_radial_gradient(
+pub(super) fn composite_radial_gradient(
     pixels: &mut [u8],
     width: i32,
     height: i32,
@@ -246,7 +248,13 @@ fn composite_radial_gradient(
     }
 }
 
-fn composite_premultiplied_pixel(pixel: &mut [u8], red: u8, green: u8, blue: u8, alpha: u8) {
+pub(super) fn composite_premultiplied_pixel(
+    pixel: &mut [u8],
+    red: u8,
+    green: u8,
+    blue: u8,
+    alpha: u8,
+) {
     let alpha_f = alpha as f32 / 255.0;
     let inv_alpha = 1.0 - alpha_f;
     pixel[0] = ((blue as f32 * alpha_f) + (pixel[0] as f32 * inv_alpha)).round() as u8;
@@ -255,11 +263,7 @@ fn composite_premultiplied_pixel(pixel: &mut [u8], red: u8, green: u8, blue: u8,
     pixel[3] = ((alpha as f32) + (pixel[3] as f32 * inv_alpha)).round() as u8;
 }
 
-fn blit_premultiplied_bgra(hdc: HDC, rect: UiRect, width: i32, height: i32, pixels: &[u8]) {
-    blit_premultiplied_bgra_alpha(hdc, rect, width, height, pixels, 255);
-}
-
-fn blit_premultiplied_bgra_with_source(
+pub(super) fn blit_premultiplied_bgra_with_source(
     source_kind: GdiFrameBlitSource,
     hdc: HDC,
     rect: UiRect,
@@ -270,26 +274,7 @@ fn blit_premultiplied_bgra_with_source(
     blit_premultiplied_bgra_alpha_with_source(source_kind, hdc, rect, width, height, pixels, 255);
 }
 
-fn blit_premultiplied_bgra_alpha(
-    hdc: HDC,
-    rect: UiRect,
-    width: i32,
-    height: i32,
-    pixels: &[u8],
-    source_alpha: u8,
-) {
-    blit_premultiplied_bgra_alpha_with_source(
-        GdiFrameBlitSource::Other,
-        hdc,
-        rect,
-        width,
-        height,
-        pixels,
-        source_alpha,
-    );
-}
-
-fn blit_premultiplied_bgra_alpha_with_source(
+pub(super) fn blit_premultiplied_bgra_alpha_with_source(
     source_kind: GdiFrameBlitSource,
     hdc: HDC,
     rect: UiRect,
@@ -310,18 +295,7 @@ fn blit_premultiplied_bgra_alpha_with_source(
     );
 }
 
-fn blit_premultiplied_bgra_region(
-    hdc: HDC,
-    dest: UiRect,
-    source: UiRect,
-    width: i32,
-    height: i32,
-    pixels: &[u8],
-) {
-    blit_premultiplied_bgra_region_alpha(hdc, dest, source, width, height, pixels, 255);
-}
-
-fn blit_cached_gdi_bitmap(
+pub(super) fn blit_cached_gdi_bitmap(
     source_kind: GdiFrameBlitSource,
     hdc: HDC,
     cache_key: &str,
@@ -387,28 +361,7 @@ fn blit_cached_gdi_bitmap(
     })
 }
 
-fn blit_premultiplied_bgra_region_alpha(
-    hdc: HDC,
-    dest: UiRect,
-    source: UiRect,
-    width: i32,
-    height: i32,
-    pixels: &[u8],
-    source_alpha: u8,
-) {
-    blit_premultiplied_bgra_region_alpha_with_source(
-        GdiFrameBlitSource::Other,
-        hdc,
-        dest,
-        source,
-        width,
-        height,
-        pixels,
-        source_alpha,
-    );
-}
-
-fn blit_premultiplied_bgra_region_alpha_with_source(
+pub(super) fn blit_premultiplied_bgra_region_alpha_with_source(
     source_kind: GdiFrameBlitSource,
     hdc: HDC,
     dest: UiRect,
@@ -478,7 +431,7 @@ fn blit_premultiplied_bgra_region_alpha_with_source(
     }
 }
 
-fn with_dib_section<T>(
+pub(super) fn with_dib_section<T>(
     hdc: HDC,
     width: i32,
     height: i32,
@@ -524,7 +477,7 @@ fn with_dib_section<T>(
     }
 }
 
-fn clear_alpha_buffer(bits: *mut std::ffi::c_void, width: i32, height: i32) {
+pub(super) fn clear_alpha_buffer(bits: *mut std::ffi::c_void, width: i32, height: i32) {
     if bits.is_null() {
         return;
     }
@@ -533,7 +486,7 @@ fn clear_alpha_buffer(bits: *mut std::ffi::c_void, width: i32, height: i32) {
     pixels.fill(0);
 }
 
-fn prepare_alpha_buffer(
+pub(super) fn prepare_alpha_buffer(
     bits: *mut std::ffi::c_void,
     width: i32,
     height: i32,
@@ -547,7 +500,7 @@ fn prepare_alpha_buffer(
     }
 }
 
-fn set_opaque_alpha(bits: *mut std::ffi::c_void, width: i32, height: i32) {
+pub(super) fn set_opaque_alpha(bits: *mut std::ffi::c_void, width: i32, height: i32) {
     if bits.is_null() {
         return;
     }
@@ -558,7 +511,7 @@ fn set_opaque_alpha(bits: *mut std::ffi::c_void, width: i32, height: i32) {
     }
 }
 
-fn set_drawn_pixel_alpha(bits: *mut std::ffi::c_void, width: i32, height: i32) {
+pub(super) fn set_drawn_pixel_alpha(bits: *mut std::ffi::c_void, width: i32, height: i32) {
     if bits.is_null() {
         return;
     }
@@ -571,7 +524,7 @@ fn set_drawn_pixel_alpha(bits: *mut std::ffi::c_void, width: i32, height: i32) {
     }
 }
 
-fn color_components(color: Color) -> (u8, u8, u8) {
+pub(super) fn color_components(color: Color) -> (u8, u8, u8) {
     (
         ((color.0 >> 16) & 0xFF) as u8,
         ((color.0 >> 8) & 0xFF) as u8,
@@ -579,7 +532,7 @@ fn color_components(color: Color) -> (u8, u8, u8) {
     )
 }
 
-fn trace_duration(label: &str, duration: Duration) {
+pub(super) fn trace_duration(label: &str, duration: Duration) {
     if trace::duration_enabled(label) {
         eprintln!(
             "[ui-trace] {label}: {:.2}ms",

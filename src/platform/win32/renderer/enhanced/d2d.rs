@@ -52,10 +52,18 @@ use lgui::core::{
 use lgui::platform::win32::render_trace::{self as trace, TraceCategory};
 use lgui::platform::win32::{apply_dwrite_font_fallback, ui_font_family};
 
-include!("d2d/cache.rs");
-include!("d2d/renderer.rs");
-include!("d2d/collection.rs");
-include!("d2d/drawing.rs");
-include!("d2d/effects.rs");
-include!("d2d/resources.rs");
-include!("d2d/tests.rs");
+mod cache;
+mod collection;
+mod drawing;
+mod effects;
+mod renderer;
+mod resources;
+
+pub use cache::*;
+use collection::*;
+use drawing::*;
+use effects::*;
+use resources::*;
+
+#[cfg(test)]
+mod tests;

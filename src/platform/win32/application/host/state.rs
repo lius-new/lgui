@@ -1,8 +1,10 @@
+use super::*;
+
 pub struct Win32Application {
-    renderer_factory: Arc<dyn Win32RendererFactory>,
+    pub(super) renderer_factory: Arc<dyn Win32RendererFactory>,
 }
 
-struct OwnedIcon(HICON);
+pub(super) struct OwnedIcon(HICON);
 
 impl OwnedIcon {
     fn from_ico_bytes(bytes: &[u8], width: i32, height: i32) -> Result<Self> {
@@ -25,13 +27,13 @@ impl Drop for OwnedIcon {
 }
 
 #[derive(Default)]
-struct WindowClassIcons {
-    large: Option<OwnedIcon>,
-    small: Option<OwnedIcon>,
+pub(super) struct WindowClassIcons {
+    pub(super) large: Option<OwnedIcon>,
+    pub(super) small: Option<OwnedIcon>,
 }
 
 impl WindowClassIcons {
-    fn from_ico_bytes(bytes: Option<&[u8]>) -> Result<Self> {
+    pub(super) fn from_ico_bytes(bytes: Option<&[u8]>) -> Result<Self> {
         let Some(bytes) = bytes else {
             return Ok(Self::default());
         };
@@ -49,23 +51,23 @@ impl WindowClassIcons {
         })
     }
 
-    fn large(&self) -> HICON {
+    pub(super) fn large(&self) -> HICON {
         self.large
             .as_ref()
             .map_or_else(HICON::default, OwnedIcon::handle)
     }
 
-    fn small(&self) -> HICON {
+    pub(super) fn small(&self) -> HICON {
         self.small
             .as_ref()
             .map_or_else(HICON::default, OwnedIcon::handle)
     }
 }
 
-struct RegisteredWindowClass {
-    instance: HINSTANCE,
-    class_name: Vec<u16>,
-    icons: WindowClassIcons,
+pub(super) struct RegisteredWindowClass {
+    pub(super) instance: HINSTANCE,
+    pub(super) class_name: Vec<u16>,
+    pub(super) icons: WindowClassIcons,
 }
 
 impl Drop for RegisteredWindowClass {
@@ -95,47 +97,47 @@ impl Default for Win32Application {
     }
 }
 
-struct WindowState {
-    id: WindowId,
-    view: AppView,
-    context: ApplicationContext,
-    session: UiSession,
-    renderer: Option<Box<Win32SceneRenderer>>,
-    renderer_factory: Arc<dyn Win32RendererFactory>,
-    logical_size: Size,
-    minimum_size: Option<Size>,
-    maximum_size: Option<Size>,
-    resizable: bool,
-    native_titlebar: bool,
-    corner_radius: i32,
-    titlebar_drag_height: Option<f32>,
-    drag_exclusion: Option<WindowDragExclusion>,
-    windowed_style: WINDOW_STYLE,
-    windowed_placement: Option<WINDOWPLACEMENT>,
-    mode: WindowMode,
-    owner: Option<HWND>,
-    position: WindowPosition,
-    hide_on_deactivate: bool,
-    background_memory_optimization: bool,
-    rendering_suspended: bool,
-    interaction_mode: WindowInteractionMode,
-    resize_frame_throttle: ResizeFrameThrottle,
-    visibility: OwnerVisibility,
-    close_policy: ClosePolicy,
-    close_handler: Option<WindowCloseHandler>,
-    dispatcher: Win32Dispatcher,
+pub(super) struct WindowState {
+    pub(super) id: WindowId,
+    pub(super) view: AppView,
+    pub(super) context: ApplicationContext,
+    pub(super) session: UiSession,
+    pub(super) renderer: Option<Box<Win32SceneRenderer>>,
+    pub(super) renderer_factory: Arc<dyn Win32RendererFactory>,
+    pub(super) logical_size: Size,
+    pub(super) minimum_size: Option<Size>,
+    pub(super) maximum_size: Option<Size>,
+    pub(super) resizable: bool,
+    pub(super) native_titlebar: bool,
+    pub(super) corner_radius: i32,
+    pub(super) titlebar_drag_height: Option<f32>,
+    pub(super) drag_exclusion: Option<WindowDragExclusion>,
+    pub(super) windowed_style: WINDOW_STYLE,
+    pub(super) windowed_placement: Option<WINDOWPLACEMENT>,
+    pub(super) mode: WindowMode,
+    pub(super) owner: Option<HWND>,
+    pub(super) position: WindowPosition,
+    pub(super) hide_on_deactivate: bool,
+    pub(super) background_memory_optimization: bool,
+    pub(super) rendering_suspended: bool,
+    pub(super) interaction_mode: WindowInteractionMode,
+    pub(super) resize_frame_throttle: ResizeFrameThrottle,
+    pub(super) visibility: OwnerVisibility,
+    pub(super) close_policy: ClosePolicy,
+    pub(super) close_handler: Option<WindowCloseHandler>,
+    pub(super) dispatcher: Win32Dispatcher,
     #[cfg(feature = "diagnostics")]
-    diagnostics: Option<Arc<DiagnosticsRegistration>>,
-    render_retry_used: bool,
+    pub(super) diagnostics: Option<Arc<DiagnosticsRegistration>>,
+    pub(super) render_retry_used: bool,
     #[cfg(feature = "diagnostics")]
-    frame_index: u64,
-    suppressed_ime_char_units: VecDeque<u16>,
-    pending_high_surrogate: Option<u16>,
-    pointer_inside: bool,
+    pub(super) frame_index: u64,
+    pub(super) suppressed_ime_char_units: VecDeque<u16>,
+    pub(super) pending_high_surrogate: Option<u16>,
+    pub(super) pointer_inside: bool,
 }
 
 impl WindowState {
-    fn can_advance_animations(&self) -> bool {
+    pub(super) fn can_advance_animations(&self) -> bool {
         can_advance_window_animations(
             self.rendering_suspended,
             self.visibility,
@@ -145,7 +147,7 @@ impl WindowState {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum WindowInteractionMode {
+pub(super) enum WindowInteractionMode {
     #[default]
     Idle,
     MoveResize,
@@ -153,7 +155,7 @@ enum WindowInteractionMode {
     Sizing,
 }
 
-fn can_advance_window_animations(
+pub(super) fn can_advance_window_animations(
     rendering_suspended: bool,
     visibility: OwnerVisibility,
     interaction_mode: WindowInteractionMode,
@@ -165,22 +167,22 @@ fn can_advance_window_animations(
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct ResizeFrameThrottle {
-    pending: bool,
-    elapsed_ms: f32,
+pub(super) struct ResizeFrameThrottle {
+    pub(super) pending: bool,
+    pub(super) elapsed_ms: f32,
 }
 
 impl ResizeFrameThrottle {
-    fn begin(&mut self) {
+    pub(super) fn begin(&mut self) {
         self.pending = false;
         self.elapsed_ms = INTERACTIVE_RESIZE_FRAME_INTERVAL_MS as f32;
     }
 
-    fn request(&mut self) {
+    pub(super) fn request(&mut self) {
         self.pending = true;
     }
 
-    fn advance(&mut self, elapsed_ms: f32) -> bool {
+    pub(super) fn advance(&mut self, elapsed_ms: f32) -> bool {
         self.elapsed_ms = (self.elapsed_ms + elapsed_ms.max(0.0))
             .min(INTERACTIVE_RESIZE_FRAME_INTERVAL_MS as f32);
         if !self.pending || self.elapsed_ms < INTERACTIVE_RESIZE_FRAME_INTERVAL_MS as f32 {
@@ -191,15 +193,15 @@ impl ResizeFrameThrottle {
         true
     }
 
-    fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         *self = Self::default();
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct OwnerVisibility {
-    desired_visible: bool,
-    hidden_for_owner: bool,
+pub(super) struct OwnerVisibility {
+    pub(super) desired_visible: bool,
+    pub(super) hidden_for_owner: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,21 +233,21 @@ impl Default for Win32WindowOptions {
 
 impl OwnerVisibility {
     #[cfg(test)]
-    fn visible() -> Self {
+    pub(super) fn visible() -> Self {
         Self {
             desired_visible: true,
             hidden_for_owner: false,
         }
     }
 
-    fn set_desired(&mut self, visible: bool) {
+    pub(super) fn set_desired(&mut self, visible: bool) {
         self.desired_visible = visible;
         if !visible {
             self.hidden_for_owner = false;
         }
     }
 
-    fn hide_for_owner(&mut self) -> bool {
+    pub(super) fn hide_for_owner(&mut self) -> bool {
         if !self.desired_visible {
             return false;
         }
@@ -253,7 +255,7 @@ impl OwnerVisibility {
         true
     }
 
-    fn restore_for_owner(&mut self) -> bool {
+    pub(super) fn restore_for_owner(&mut self) -> bool {
         if !self.desired_visible || !self.hidden_for_owner {
             return false;
         }
