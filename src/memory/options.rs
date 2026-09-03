@@ -219,6 +219,16 @@ impl MemoryOptions {
         if self.budget.max_decoded_resource_bytes > self.budget.transient_hard_bytes {
             return Err("decoded resource limit exceeds transient hard budget");
         }
+        if self.domains.encoded_image_bytes != 0
+            && self.domains.encoded_image_bytes < self.budget.max_encoded_resource_bytes
+        {
+            return Err("encoded image domain budget is below the resource limit");
+        }
+        if self.domains.decoded_image_bytes != 0
+            && self.domains.decoded_image_bytes < self.budget.max_decoded_resource_bytes
+        {
+            return Err("decoded image domain budget is below the resource limit");
+        }
         if self.default_image_cache_policy == ImageCachePolicy::ApplicationDefault {
             return Err("application default image policy must be concrete");
         }

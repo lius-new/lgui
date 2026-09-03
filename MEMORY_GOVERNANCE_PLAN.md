@@ -283,14 +283,15 @@ Governor 只执行应用注入的数值，不推导档位或比例：
 `lgui` 没有 LowMemory、Balanced 或 Performance，也没有任何默认数值。下面仅记录
 Liuguang Windows 应用在 `windows/src/memory_policy.rs` 中定义的当前策略：
 
-| Windows 档位 | 缓存软限额 | 缓存硬限额 | 临时硬限额 | 活跃域合计 | 默认图片策略 |
+| Windows 档位 | 缓存软限额 | 缓存硬限额 | 临时硬限额 | 可治理域上限合计 | 默认图片策略 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| LowMemory | 32 MiB | 48 MiB | 16 MiB | 约 30 MiB | WhileVisible |
-| Balanced | 48 MiB | 64 MiB | 24 MiB | 约 47 MiB | Scene |
-| Performance | 64 MiB | 96 MiB | 32 MiB | 64 MiB | Session |
+| LowMemory | 128 MiB | 160 MiB | 32 MiB | 160 MiB | WhileVisible |
+| Balanced | 256 MiB | 320 MiB | 64 MiB | 320 MiB | Scene |
+| Performance | 512 MiB | 640 MiB | 128 MiB | 640 MiB | Session |
 
-其中 GDI、D2D、Skia 域是互斥渲染器选项，不同时计入活跃域合计。三档的编码资源上限分别为
-8/12/16 MiB，解码资源上限为 16/24/32 MiB，并行大任务数为 1/1/2。磁盘缓存由应用单独
+其中 GDI、D2D、Skia 域是互斥渲染器选项，只取 GDI 代表 renderer 域；HostScene 是受保护
+状态，不计入普通缓存治理合计。三档的编码资源上限分别为 16/32/32 MiB，解码资源上限为
+32/64/64 MiB，并行大任务数为 1/2/2。非零图片域预算不得小于对应的单资源上限。磁盘缓存由应用单独
 开关，当前固定配额为 512 MiB；它不计入内存驻留限额。这些值由 Windows 构建时嵌入的
 `client.toml` 选择，不是用户设置。其他 `lgui` 使用者可以选择完全不同的数值、档位名称，
 或者直接构造不带档位概念的策略。
@@ -490,7 +491,8 @@ Application::new()
 Liuguang Windows 的 `client.toml` 必须显式提供 `[memory]`，其中包含 `profile`、
 `persistent_cache_enabled` 和 `persistent_cache_limit_mib`。该文件在构建时嵌入应用，属于软件
 发布配置，不写入 `settings.toml`，也不在设置页面提供覆盖入口。当前发布配置选择
-`low-memory`；若软件维护者需要其他档位或关闭持久缓存，应修改 `client.toml` 后重新构建。
+`balanced`；`low-memory` 只用于受限设备验证。若软件维护者需要其他档位或关闭持久缓存，
+应修改 `client.toml` 后重新构建。
 逐资源策略仍由组件作者声明。是否依据设备状态动态改变策略也只能由应用代码明确实现，
 `lgui` 不检测后替应用改写策略。
 

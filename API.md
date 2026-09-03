@@ -62,8 +62,10 @@ explicit scoped Trim target. Backends report events, but the application decides
 During lifecycle notification the Governor enforces a configured global budget only when the
 selected action requests it; `set_options()` also rebalances and enforces the new policy immediately.
 `MemoryOptions::validate()` rejects an empty policy name, soft limits above hard limits, zero
-large-task concurrency, single-resource limits above the transient hard limit, and an unresolved
-`ApplicationDefault` image policy.
+large-task concurrency, single-resource limits above the transient hard limit, nonzero encoded or
+decoded image domain budgets below their corresponding single-resource limits, and an unresolved
+`ApplicationDefault` image policy. A zero image-domain budget remains the explicit way to disable
+that reusable cache.
 
 At runtime, `ApplicationContext::memory()` returns the application Governor. Use `snapshot()` for
 domain-level diagnostics, `set_options()` only when application-owned policy changes at runtime,

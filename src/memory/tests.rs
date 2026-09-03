@@ -54,6 +54,27 @@ fn application_policy_validation_rejects_framework_defaults_and_invalid_limits()
         decoded_too_large.validate(),
         Err("decoded resource limit exceeds transient hard budget")
     );
+
+    let mut encoded_domain_too_small = options;
+    encoded_domain_too_small.domains.encoded_image_bytes =
+        encoded_domain_too_small.budget.max_encoded_resource_bytes - 1;
+    assert_eq!(
+        encoded_domain_too_small.validate(),
+        Err("encoded image domain budget is below the resource limit")
+    );
+
+    let mut decoded_domain_too_small = options;
+    decoded_domain_too_small.domains.decoded_image_bytes =
+        decoded_domain_too_small.budget.max_decoded_resource_bytes - 1;
+    assert_eq!(
+        decoded_domain_too_small.validate(),
+        Err("decoded image domain budget is below the resource limit")
+    );
+
+    let mut disabled_image_domains = options;
+    disabled_image_domains.domains.encoded_image_bytes = 0;
+    disabled_image_domains.domains.decoded_image_bytes = 0;
+    assert!(disabled_image_domains.validate().is_ok());
 }
 
 #[test]

@@ -67,6 +67,12 @@ backends do not clamp that value or raise zero to a framework minimum. Window, S
 pressure, and shutdown events enter one path, then execute the action selected by the
 application's `MemoryEventPolicy`.
 
+Frame budget enforcement reads lightweight domain usage at a bounded interval and trims only when
+evictable bytes cross the hard limit, targeting the soft limit for hysteresis. Pinned resources and
+HostScene state are reported but excluded from ordinary cache enforcement. Win32 owner-thread Trim
+requests are coalesced per adapter, retaining the strictest pending target so repeated notifications
+cannot flood the UI dispatcher.
+
 Scene image reachability is aggregated by window instance. `ImageRequest` carries retention,
 decode, priority, namespace, version, and sensitivity metadata through Scene primitives to each
 backend. Encoded and decoded image caches coalesce in-flight work, apply failure backoff, validate
