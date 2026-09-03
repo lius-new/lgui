@@ -245,7 +245,13 @@ impl MemoryGovernor {
         match self.options().event_action(event) {
             MemoryAction::None => {}
             MemoryAction::EnforceBudget => {
-                self.enforce_budget(event != MemoryEvent::FrameCommitted);
+                if event == MemoryEvent::FrameCommitted {
+                    if self.begin_frame_budget_check() {
+                        self.finish_frame_budget_check();
+                    }
+                } else {
+                    self.enforce_budget(true);
+                }
             }
             MemoryAction::Trim {
                 scope,
@@ -347,9 +353,6 @@ impl MemoryGovernor {
     }
 
     fn enforce_budget(&self, include_soft_limit: bool) {
-        if !include_soft_limit && !self.begin_frame_budget_check() {
-            return;
-        }
         let options = self.options();
         let usage = self.budget_usage();
         let evictable = usage.managed_bytes.saturating_sub(usage.protected_bytes);
@@ -365,7 +368,10 @@ impl MemoryGovernor {
         }
     }
 
-    fn begin_frame_budget_check(&self) -> bool {
+    pub(crate) fn begin_frame_budget_check(&self) -> bool {
+        if self.options().event_action(MemoryEvent::FrameCommitted) != MemoryAction::EnforceBudget {
+            return false;
+        }
         let now = Instant::now();
         let mut last = self
             .inner
@@ -379,6 +385,10 @@ impl MemoryGovernor {
         }
         *last = Some(now);
         true
+    }
+
+    pub(crate) fn finish_frame_budget_check(&self) {
+        self.enforce_budget(false);
     }
 
     fn budget_usage(&self) -> BudgetUsage {

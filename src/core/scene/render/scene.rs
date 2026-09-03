@@ -109,6 +109,10 @@ impl Scene {
         self.commands.as_slice()
     }
 
+    pub(crate) fn shares_command_storage_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.commands, &other.commands)
+    }
+
     pub fn image_requests(&self) -> Vec<ImageRequest> {
         let mut requests = Vec::new();
         collect_image_requests(self.commands(), &mut requests);

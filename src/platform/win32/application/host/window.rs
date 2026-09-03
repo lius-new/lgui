@@ -243,6 +243,8 @@ pub(super) fn create_window(
                 renderer_budget: trim_budget,
                 #[cfg(feature = "images-win32")]
                 memory_instance,
+                #[cfg(feature = "images-win32")]
+                image_reachability_scene: None,
                 _renderer_memory_registration: renderer_memory_registration,
                 component_memory,
                 host_scene_memory,
@@ -555,7 +557,10 @@ pub(super) fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
             .expect("renderer memory usage poisoned") = crate::memory::CacheUsage::default();
         window.session.suspend_rendering();
         #[cfg(feature = "images")]
-        crate::assets::update_image_reachability(window.memory_instance, &[]);
+        {
+            crate::assets::update_image_reachability(window.memory_instance, &[]);
+            window.image_reachability_scene = None;
+        }
         window.rendering_suspended = true;
         update_session_memory_usage(window);
         Some(window.context.memory().clone())

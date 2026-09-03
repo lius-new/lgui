@@ -107,6 +107,8 @@ pub(super) struct WindowState {
     pub(super) renderer_budget: Arc<AtomicUsize>,
     #[cfg(feature = "images-win32")]
     pub(super) memory_instance: crate::memory::DomainInstanceId,
+    #[cfg(feature = "images-win32")]
+    pub(super) image_reachability_scene: Option<crate::core::Scene>,
     pub(super) _renderer_memory_registration: crate::memory::CacheRegistration,
     pub(super) component_memory: Arc<Mutex<crate::memory::CacheUsage>>,
     pub(super) host_scene_memory: Arc<Mutex<crate::memory::CacheUsage>>,

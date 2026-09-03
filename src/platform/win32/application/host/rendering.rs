@@ -48,9 +48,19 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
                     .intersect(PhysicalRect::new(0, 0, physical.width, physical.height))
             })
             .collect::<Vec<_>>();
-        let scene = commit.scene.project_to_physical(dpi.scale);
         #[cfg(feature = "images")]
-        crate::assets::update_image_reachability(state.memory_instance, &scene.image_requests());
+        if !state
+            .image_reachability_scene
+            .as_ref()
+            .is_some_and(|previous| previous.shares_command_storage_with(&commit.scene))
+        {
+            crate::assets::update_image_reachability(
+                state.memory_instance,
+                &commit.scene.image_requests(),
+            );
+            state.image_reachability_scene = Some(commit.scene.clone());
+        }
+        let scene = commit.scene.project_to_physical(dpi.scale);
         let physical_viewport = PhysicalRect::new(0, 0, physical.width, physical.height);
         if state.renderer.is_none() {
             match state.renderer_factory.create(hwnd) {
@@ -145,13 +155,16 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
         match result {
             Ok(_stats) => {
                 state.render_retry_used = false;
-                if let Some(renderer) = state.renderer.as_ref() {
-                    *state
-                        .renderer_memory
-                        .lock()
-                        .expect("renderer memory usage poisoned") = renderer.memory_usage();
+                if state.context.memory().begin_frame_budget_check() {
+                    if let Some(renderer) = state.renderer.as_ref() {
+                        *state
+                            .renderer_memory
+                            .lock()
+                            .expect("renderer memory usage poisoned") = renderer.memory_usage();
+                    }
+                    update_session_memory_usage(state);
+                    committed_memory = Some(state.context.memory().clone());
                 }
-                update_session_memory_usage(state);
                 state.session.runtime().run_effects();
                 #[cfg(feature = "diagnostics")]
                 if let Some(diagnostics) = state.diagnostics.clone() {
@@ -278,7 +291,6 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
                         viewport,
                     );
                 }
-                committed_memory = Some(state.context.memory().clone());
                 false
             }
             Err(error) => {
@@ -296,7 +308,7 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
         }
     });
     if let Some(memory) = committed_memory {
-        memory.notify(crate::memory::MemoryEvent::FrameCommitted);
+        memory.finish_frame_budget_check();
     }
     if retry {
         unsafe {

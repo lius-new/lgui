@@ -557,6 +557,21 @@ fn physical_projection_scales_nested_raster_commands_and_cache_keys() {
     assert_eq!(style.tracking, 3.0);
 }
 
+#[test]
+fn cloned_scenes_share_command_storage_until_mutated() {
+    let mut scene = Scene::new();
+    let cloned = scene.clone();
+    assert!(scene.shares_command_storage_with(&cloned));
+
+    scene.push(ScenePrimitive::Rect {
+        id: id("changed"),
+        rect: UiRect::new(0.0, 0.0, 1.0, 1.0),
+        style: VisualStyle::filled(Color::WHITE),
+        phase: RenderPhase::Content,
+    });
+    assert!(!scene.shares_command_storage_with(&cloned));
+}
+
 #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
 #[test]
 fn backend_translation_preserves_nested_static_layer_local_commands() {
