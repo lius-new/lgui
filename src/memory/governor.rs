@@ -3,7 +3,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use super::registry::RegistryState;
@@ -15,6 +15,8 @@ use super::{
 
 #[cfg(feature = "persistent-cache")]
 use super::PersistentCacheStore;
+
+const FRAME_BUDGET_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub struct MemoryGovernor {
@@ -28,6 +30,7 @@ struct MemoryGovernorInner {
     transient_reserved: Arc<AtomicUsize>,
     large_tasks_in_flight: Arc<AtomicUsize>,
     last_trim: Mutex<Option<TrimSnapshot>>,
+    last_frame_budget_check: Mutex<Option<Instant>>,
     #[cfg(feature = "persistent-cache")]
     persistent: Option<Arc<dyn PersistentCacheStore>>,
 }
@@ -56,6 +59,7 @@ impl MemoryGovernor {
                 transient_reserved: Arc::new(AtomicUsize::new(0)),
                 large_tasks_in_flight: Arc::new(AtomicUsize::new(0)),
                 last_trim: Mutex::new(None),
+                last_frame_budget_check: Mutex::new(None),
                 #[cfg(feature = "persistent-cache")]
                 persistent,
             }),
@@ -73,7 +77,7 @@ impl MemoryGovernor {
         *self.inner.options.lock().expect("memory options poisoned") = options;
         self.bump_epoch();
         self.rebalance_budgets();
-        self.enforce_budget();
+        self.enforce_budget(true);
         #[cfg(feature = "persistent-cache")]
         if let Some(store) = self.persistent_cache() {
             let _ = store.trim_to(options.budget.persistent_bytes);
@@ -240,7 +244,9 @@ impl MemoryGovernor {
     pub fn notify(&self, event: MemoryEvent) {
         match self.options().event_action(event) {
             MemoryAction::None => {}
-            MemoryAction::EnforceBudget => self.enforce_budget(),
+            MemoryAction::EnforceBudget => {
+                self.enforce_budget(event != MemoryEvent::FrameCommitted);
+            }
             MemoryAction::Trim {
                 scope,
                 target_bytes,
@@ -340,23 +346,67 @@ impl MemoryGovernor {
         Ok(super::PersistentCacheStats::default())
     }
 
-    fn enforce_budget(&self) {
-        let snapshot = self.snapshot();
-        let options = snapshot.options;
-        let managed = snapshot.usage.managed_bytes();
-        if managed > options.budget.cache_hard_bytes {
-            self.trim(
-                TrimReason::HardBudget,
-                CacheScope::Memory,
-                options.budget.cache_soft_bytes,
-            );
-        } else if managed > options.budget.cache_soft_bytes {
-            self.trim(
-                TrimReason::SoftBudget,
-                CacheScope::Memory,
-                options.budget.cache_soft_bytes,
-            );
+    fn enforce_budget(&self, include_soft_limit: bool) {
+        if !include_soft_limit && !self.begin_frame_budget_check() {
+            return;
         }
+        let options = self.options();
+        let usage = self.budget_usage();
+        let evictable = usage.managed_bytes.saturating_sub(usage.protected_bytes);
+        let reason = if evictable > options.budget.cache_hard_bytes {
+            Some(TrimReason::HardBudget)
+        } else if include_soft_limit && evictable > options.budget.cache_soft_bytes {
+            Some(TrimReason::SoftBudget)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            self.trim(reason, CacheScope::Memory, options.budget.cache_soft_bytes);
+        }
+    }
+
+    fn begin_frame_budget_check(&self) -> bool {
+        let now = Instant::now();
+        let mut last = self
+            .inner
+            .last_frame_budget_check
+            .lock()
+            .expect("memory budget check state poisoned");
+        if last.is_some_and(|previous| {
+            now.saturating_duration_since(previous) < FRAME_BUDGET_CHECK_INTERVAL
+        }) {
+            return false;
+        }
+        *last = Some(now);
+        true
+    }
+
+    fn budget_usage(&self) -> BudgetUsage {
+        let probes = self.registered_usage_probes();
+        let mut result = BudgetUsage::default();
+        for (domain, adapter) in probes {
+            let usage = adapter.usage();
+            let managed = usage.managed_bytes();
+            result.managed_bytes = result.managed_bytes.saturating_add(managed);
+            let protected = if domain == CacheDomain::HostScene {
+                managed
+            } else {
+                usage.pinned_bytes.min(managed)
+            };
+            result.protected_bytes = result.protected_bytes.saturating_add(protected);
+        }
+        result
+    }
+
+    fn registered_usage_probes(&self) -> Vec<(CacheDomain, super::CacheAdapter)> {
+        self.inner
+            .registry
+            .lock()
+            .expect("memory registry poisoned")
+            .entries
+            .values()
+            .map(|registration| (registration.domain, registration.adapter.clone()))
+            .collect()
     }
 
     fn registered_entries(&self) -> Vec<(u64, DomainRegistration)> {
@@ -395,6 +445,12 @@ impl MemoryGovernor {
     fn bump_epoch(&self) -> u64 {
         self.inner.epoch.fetch_add(1, Ordering::AcqRel) + 1
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BudgetUsage {
+    managed_bytes: usize,
+    protected_bytes: usize,
 }
 
 pub struct MemoryReservation {

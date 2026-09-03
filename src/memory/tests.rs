@@ -276,6 +276,142 @@ fn lifecycle_actions_are_selected_by_the_application_policy() {
 }
 
 #[test]
+fn frame_budget_enforcement_uses_hysteresis_and_is_rate_limited() {
+    let mut options = test_memory_options();
+    options.budget.cache_soft_bytes = 100;
+    options.budget.cache_hard_bytes = 120;
+    options.events.frame_committed = MemoryAction::EnforceBudget;
+    let usage = Arc::new(AtomicUsize::new(110));
+    let trim_calls = Arc::new(AtomicUsize::new(0));
+    let usage_probe = Arc::clone(&usage);
+    let observed = Arc::clone(&trim_calls);
+    let governor = MemoryGovernor::new(options);
+    let _registration = governor.register(DomainRegistration::new(
+        CacheDomain::Text,
+        governor.next_instance_id(),
+        "frame-budget",
+        CacheAdapter::new(
+            move || CacheUsage {
+                cache_bytes: usage_probe.load(Ordering::Acquire),
+                ..Default::default()
+            },
+            move |_| {
+                observed.fetch_add(1, Ordering::AcqRel);
+                TrimResult::default()
+            },
+        ),
+    ));
+
+    governor.notify(MemoryEvent::FrameCommitted);
+    assert_eq!(trim_calls.load(Ordering::Acquire), 0);
+
+    usage.store(121, Ordering::Release);
+    governor.notify(MemoryEvent::FrameCommitted);
+    assert_eq!(
+        trim_calls.load(Ordering::Acquire),
+        0,
+        "the next frame inside the check interval must not rescan or trim"
+    );
+}
+
+#[test]
+fn frame_budget_enforcement_ignores_unavoidable_pinned_overflow() {
+    let mut options = test_memory_options();
+    options.budget.cache_soft_bytes = 100;
+    options.budget.cache_hard_bytes = 120;
+    options.events.frame_committed = MemoryAction::EnforceBudget;
+    let trim_calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&trim_calls);
+    let governor = MemoryGovernor::new(options);
+    let _registration = governor.register(DomainRegistration::new(
+        CacheDomain::DecodedImage,
+        governor.next_instance_id(),
+        "visible-images",
+        CacheAdapter::new(
+            || CacheUsage {
+                cache_bytes: 256,
+                pinned_bytes: 256,
+                ..Default::default()
+            },
+            move |_| {
+                observed.fetch_add(1, Ordering::AcqRel);
+                TrimResult::default()
+            },
+        ),
+    ));
+
+    governor.notify(MemoryEvent::FrameCommitted);
+    assert_eq!(trim_calls.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn frame_budget_enforcement_does_not_target_protected_host_scene() {
+    let mut options = test_memory_options();
+    options.budget.cache_soft_bytes = 100;
+    options.budget.cache_hard_bytes = 120;
+    options.events.frame_committed = MemoryAction::EnforceBudget;
+    let trim_calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&trim_calls);
+    let governor = MemoryGovernor::new(options);
+    let _registration = governor.register(DomainRegistration::new(
+        CacheDomain::HostScene,
+        governor.next_instance_id(),
+        "visible-host-scene",
+        CacheAdapter::new(
+            || CacheUsage {
+                rebuildable_bytes: 256,
+                ..Default::default()
+            },
+            move |_| {
+                observed.fetch_add(1, Ordering::AcqRel);
+                TrimResult::default()
+            },
+        ),
+    ));
+
+    governor.notify(MemoryEvent::FrameCommitted);
+    assert_eq!(trim_calls.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn frame_budget_enforcement_trims_evictable_bytes_above_hard_limit() {
+    let mut options = test_memory_options();
+    options.budget.cache_soft_bytes = 100;
+    options.budget.cache_hard_bytes = 120;
+    options.domains.text_bytes = 100;
+    options.events.frame_committed = MemoryAction::EnforceBudget;
+    let trim_requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&trim_requests);
+    let governor = MemoryGovernor::new(options);
+    let _registration = governor.register(DomainRegistration::new(
+        CacheDomain::Text,
+        governor.next_instance_id(),
+        "evictable-text",
+        CacheAdapter::new(
+            || CacheUsage {
+                cache_bytes: 121,
+                ..Default::default()
+            },
+            move |request| {
+                observed.lock().unwrap().push(request);
+                TrimResult::default()
+            },
+        ),
+    ));
+
+    governor.notify(MemoryEvent::FrameCommitted);
+    governor.notify(MemoryEvent::FrameCommitted);
+    assert_eq!(
+        trim_requests.lock().unwrap().as_slice(),
+        &[TrimRequest {
+            reason: TrimReason::HardBudget,
+            scope: CacheScope::Memory,
+            target_bytes: 100,
+        }]
+    );
+}
+
+#[test]
 fn finite_trim_targets_follow_active_application_domain_budgets() {
     let mut options = test_memory_options();
     options.budget.cache_soft_bytes = 100;
