@@ -134,71 +134,7 @@ pub(super) fn draw_backdrop_blur(
     style: lgui::core::BackdropBlurStyle,
     clip: Option<UiRect>,
 ) {
-    let _ = with_backdrop_blur_bgra(rect, style, |pixels, width, height, opacity| {
-        let source_alpha = (opacity * 255.0).round() as u8;
-        if source_alpha == 0 {
-            return;
-        }
-        if let Some(clip) = clip {
-            let Some(dest) = rect.intersect(clip) else {
-                return;
-            };
-            let source = UiRect::new(
-                dest.left - rect.left,
-                dest.top - rect.top,
-                dest.right - rect.left,
-                dest.bottom - rect.top,
-            );
-            let key = backdrop_gdi_cache_key(rect, style);
-            if blit_cached_gdi_bitmap(
-                GdiFrameBlitSource::Backdrop,
-                hdc,
-                &key,
-                dest,
-                source,
-                width,
-                height,
-                pixels,
-                source_alpha,
-            ) {
-                return;
-            }
-            blit_premultiplied_bgra_region_alpha_with_source(
-                GdiFrameBlitSource::Backdrop,
-                hdc,
-                dest,
-                source,
-                width,
-                height,
-                pixels,
-                source_alpha,
-            );
-        } else {
-            let key = backdrop_gdi_cache_key(rect, style);
-            if blit_cached_gdi_bitmap(
-                GdiFrameBlitSource::Backdrop,
-                hdc,
-                &key,
-                rect,
-                UiRect::new(0.0, 0.0, width as f32, height as f32),
-                width,
-                height,
-                pixels,
-                source_alpha,
-            ) {
-                return;
-            }
-            blit_premultiplied_bgra_alpha_with_source(
-                GdiFrameBlitSource::Backdrop,
-                hdc,
-                rect,
-                width,
-                height,
-                pixels,
-                source_alpha,
-            );
-        }
-    });
+    draw_cached_backdrop_blur(hdc, rect, style, clip);
 }
 
 pub(super) fn draw_backdrop_blur_path(
@@ -208,80 +144,47 @@ pub(super) fn draw_backdrop_blur_path(
     style: lgui::core::BackdropBlurStyle,
     clip: Option<UiRect>,
 ) {
-    let _ = with_backdrop_blur_bgra(rect, style, |pixels, width, height, opacity| {
-        let source_alpha = (opacity * 255.0).round() as u8;
-        if source_alpha == 0 {
-            return;
-        }
-        let Some(_clip_guard) = PolygonClipGuard::new(hdc, path, clip) else {
-            if let Some(clip) = clip {
-                let Some(dest) = rect.intersect(clip) else {
-                    return;
-                };
-                let source = UiRect::new(
-                    dest.left - rect.left,
-                    dest.top - rect.top,
-                    dest.right - rect.left,
-                    dest.bottom - rect.top,
-                );
-                let key = backdrop_gdi_cache_key(rect, style);
-                if blit_cached_gdi_bitmap(
-                    GdiFrameBlitSource::Backdrop,
-                    hdc,
-                    &key,
-                    dest,
-                    source,
-                    width,
-                    height,
-                    pixels,
-                    source_alpha,
-                ) {
-                    return;
-                }
-                blit_premultiplied_bgra_region_alpha_with_source(
-                    GdiFrameBlitSource::Backdrop,
-                    hdc,
-                    dest,
-                    source,
-                    width,
-                    height,
-                    pixels,
-                    source_alpha,
-                );
-            } else {
-                let key = backdrop_gdi_cache_key(rect, style);
-                if blit_cached_gdi_bitmap(
-                    GdiFrameBlitSource::Backdrop,
-                    hdc,
-                    &key,
-                    rect,
-                    UiRect::new(0.0, 0.0, width as f32, height as f32),
-                    width,
-                    height,
-                    pixels,
-                    source_alpha,
-                ) {
-                    return;
-                }
-                blit_premultiplied_bgra_alpha_with_source(
-                    GdiFrameBlitSource::Backdrop,
-                    hdc,
-                    rect,
-                    width,
-                    height,
-                    pixels,
-                    source_alpha,
-                );
-            }
-            return;
-        };
-        let key = backdrop_gdi_cache_key(rect, style);
+    let path_clip = PolygonClipGuard::new(hdc, path, clip);
+    let fallback_clip = if path_clip.is_some() { None } else { clip };
+    draw_cached_backdrop_blur(hdc, rect, style, fallback_clip);
+}
+
+fn draw_cached_backdrop_blur(
+    hdc: HDC,
+    rect: UiRect,
+    style: lgui::core::BackdropBlurStyle,
+    clip: Option<UiRect>,
+) {
+    let source_alpha = (style.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    if source_alpha == 0 {
+        return;
+    }
+
+    let width = raster_length(rect.width());
+    let height = raster_length(rect.height());
+    let Some((dest, source)) = backdrop_blit_region(rect, clip, width, height) else {
+        return;
+    };
+    let key = backdrop_gdi_cache_key(rect, style);
+    if blit_existing_gdi_bitmap(
+        GdiFrameBlitSource::Backdrop,
+        hdc,
+        &key,
+        dest,
+        source,
+        (width, height),
+        source_alpha,
+    ) {
+        return;
+    }
+
+    let _ = with_backdrop_blur_bgra(rect, style, |pixels, width, height, _| {
         if blit_cached_gdi_bitmap(
             GdiFrameBlitSource::Backdrop,
             hdc,
             &key,
-            rect,
-            UiRect::new(0.0, 0.0, width as f32, height as f32),
+            dest,
+            source,
             width,
             height,
             pixels,
@@ -289,16 +192,37 @@ pub(super) fn draw_backdrop_blur_path(
         ) {
             return;
         }
-        blit_premultiplied_bgra_alpha_with_source(
+        blit_premultiplied_bgra_region_alpha_with_source(
             GdiFrameBlitSource::Backdrop,
             hdc,
-            rect,
+            dest,
+            source,
             width,
             height,
             pixels,
             source_alpha,
         );
     });
+}
+
+fn backdrop_blit_region(
+    rect: UiRect,
+    clip: Option<UiRect>,
+    width: i32,
+    height: i32,
+) -> Option<(UiRect, UiRect)> {
+    let dest = clip.map_or(Some(rect), |clip| rect.intersect(clip))?;
+    let source = if clip.is_some() {
+        UiRect::new(
+            dest.left - rect.left,
+            dest.top - rect.top,
+            dest.right - rect.left,
+            dest.bottom - rect.top,
+        )
+    } else {
+        UiRect::new(0.0, 0.0, width as f32, height as f32)
+    };
+    Some((dest, source))
 }
 
 pub(super) fn backdrop_gdi_cache_key(rect: UiRect, style: lgui::core::BackdropBlurStyle) -> String {

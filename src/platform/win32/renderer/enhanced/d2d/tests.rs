@@ -140,6 +140,50 @@ fn overlay_brush_cache_reachability_tracks_style_and_rect() {
 }
 
 #[test]
+fn path_blur_cache_reachability_tracks_path_but_reuses_opacity() {
+    let rect = UiRect::new(0.0, 0.0, 320.0, 180.0);
+    let style = lgui::core::BackdropBlurStyle::new(
+        "background",
+        ImageFit::Cover,
+        UiRect::new(0.0, 0.0, 640.0, 360.0),
+    )
+    .radius(20.0)
+    .opacity(0.4);
+    let path = UiPath::new([
+        UiPathCommand::MoveTo(lgui::core::Point::new(0.0, 0.0)),
+        UiPathCommand::LineTo(lgui::core::Point::new(320.0, 0.0)),
+        UiPathCommand::LineTo(lgui::core::Point::new(320.0, 180.0)),
+        UiPathCommand::Close,
+    ]);
+    let changed_path = UiPath::new([
+        UiPathCommand::MoveTo(lgui::core::Point::new(0.0, 0.0)),
+        UiPathCommand::LineTo(lgui::core::Point::new(280.0, 0.0)),
+        UiPathCommand::LineTo(lgui::core::Point::new(320.0, 180.0)),
+        UiPathCommand::Close,
+    ]);
+    let key = backdrop_blur_path_cache_key(rect, &path, style);
+
+    assert_eq!(
+        key,
+        backdrop_blur_path_cache_key(rect, &path, style.opacity(0.9))
+    );
+    assert_ne!(
+        key,
+        backdrop_blur_path_cache_key(rect, &changed_path, style)
+    );
+
+    let keys = bitmap_cache_keys(&[ScenePrimitive::BackdropBlurPath {
+        id: UiId::owned("path-blur".to_string()),
+        rect,
+        path,
+        style,
+        phase: lgui::core::RenderPhase::Content,
+    }]);
+    assert_eq!(keys.len(), 1);
+    assert!(keys.contains(&key));
+}
+
+#[test]
 fn transparent_pure_image_static_layer_reuses_the_image_cache_key() {
     let rect = UiRect::new(0.0, 0.0, 320.0, 180.0);
     let spec = StaticLayerSpec::new(StaticLayerSource::hybrid(

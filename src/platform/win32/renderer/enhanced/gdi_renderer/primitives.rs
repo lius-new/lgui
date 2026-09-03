@@ -335,47 +335,83 @@ pub(super) fn blit_cached_gdi_bitmap(
         let Some(entry) = cache.entry(hdc, cache_key, width, height, pixels) else {
             return false;
         };
-        let dest_px = pixel_rect_outward(dest);
-        let source_px = pixel_rect_outward(source);
-        unsafe {
-            if source_alpha == 255 && entry.opaque {
-                record_gdi_frame_blit(source_kind, GdiFrameBlitKind::BitBlt, dest);
-                let _ = BitBlt(
-                    hdc,
-                    dest_px.left,
-                    dest_px.top,
-                    dest_px.width(),
-                    dest_px.height(),
-                    Some(entry.memory_dc),
-                    source_px.left,
-                    source_px.top,
-                    SRCCOPY,
-                );
-                return true;
-            }
-            record_gdi_frame_blit(source_kind, GdiFrameBlitKind::AlphaBlend, dest);
-            let blend = BLENDFUNCTION {
-                BlendOp: AC_SRC_OVER as u8,
-                BlendFlags: 0,
-                SourceConstantAlpha: source_alpha,
-                AlphaFormat: AC_SRC_ALPHA as u8,
-            };
-            let _ = AlphaBlend(
+        blit_gdi_bitmap_entry(source_kind, hdc, entry, dest, source, source_alpha)
+    })
+}
+
+pub(super) fn blit_existing_gdi_bitmap(
+    source_kind: GdiFrameBlitSource,
+    hdc: HDC,
+    cache_key: &str,
+    dest: UiRect,
+    source: UiRect,
+    raster_size: (i32, i32),
+    source_alpha: u8,
+) -> bool {
+    if dest.width() <= 0.0
+        || dest.height() <= 0.0
+        || source.width() <= 0.0
+        || source.height() <= 0.0
+    {
+        return true;
+    }
+    GDI_BITMAP_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(entry) = cache.existing_entry(cache_key, raster_size.0, raster_size.1) else {
+            return false;
+        };
+        blit_gdi_bitmap_entry(source_kind, hdc, entry, dest, source, source_alpha)
+    })
+}
+
+fn blit_gdi_bitmap_entry(
+    source_kind: GdiFrameBlitSource,
+    hdc: HDC,
+    entry: &GdiBitmapEntry,
+    dest: UiRect,
+    source: UiRect,
+    source_alpha: u8,
+) -> bool {
+    let dest_px = pixel_rect_outward(dest);
+    let source_px = pixel_rect_outward(source);
+    unsafe {
+        if source_alpha == 255 && entry.opaque {
+            record_gdi_frame_blit(source_kind, GdiFrameBlitKind::BitBlt, dest);
+            let _ = BitBlt(
                 hdc,
                 dest_px.left,
                 dest_px.top,
                 dest_px.width(),
                 dest_px.height(),
-                entry.memory_dc,
+                Some(entry.memory_dc),
                 source_px.left,
                 source_px.top,
-                source_px.width(),
-                source_px.height(),
-                blend,
+                SRCCOPY,
             );
+            return true;
         }
-        true
-    })
+        record_gdi_frame_blit(source_kind, GdiFrameBlitKind::AlphaBlend, dest);
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: source_alpha,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        let _ = AlphaBlend(
+            hdc,
+            dest_px.left,
+            dest_px.top,
+            dest_px.width(),
+            dest_px.height(),
+            entry.memory_dc,
+            source_px.left,
+            source_px.top,
+            source_px.width(),
+            source_px.height(),
+            blend,
+        );
+    }
+    true
 }
 
 pub(super) fn blit_premultiplied_bgra_region_alpha_with_source(

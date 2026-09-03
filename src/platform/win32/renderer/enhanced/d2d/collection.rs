@@ -54,6 +54,11 @@ pub(super) fn collect_bitmap_cache_keys(
             ScenePrimitive::BackdropBlur { rect, style, .. } => {
                 keys.insert(backdrop_blur_cache_key(*rect, *style));
             }
+            ScenePrimitive::BackdropBlurPath {
+                rect, path, style, ..
+            } => {
+                keys.insert(backdrop_blur_path_cache_key(*rect, path, *style));
+            }
             ScenePrimitive::StaticLayer {
                 id,
                 rect,
@@ -93,7 +98,6 @@ pub(super) fn collect_bitmap_cache_keys(
             | ScenePrimitive::Line { .. }
             | ScenePrimitive::Path { .. }
             | ScenePrimitive::Glow { .. }
-            | ScenePrimitive::BackdropBlurPath { .. }
             | ScenePrimitive::Overlay { .. } => {}
         }
     }

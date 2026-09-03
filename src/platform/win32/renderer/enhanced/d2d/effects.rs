@@ -149,18 +149,20 @@ pub(super) fn draw_backdrop_blur(
     rect: UiRect,
     style: lgui::core::BackdropBlurStyle,
 ) -> Result<()> {
+    let opacity = style.opacity.clamp(0.0, 1.0);
+    if opacity <= 0.0 {
+        return Ok(());
+    }
+
+    let key = backdrop_blur_cache_key(rect, style);
+    if let Some(bitmap) = resources.bitmap_cache.get(&key) {
+        draw_bitmap_opacity(&resources.context, rect, &bitmap, opacity);
+        return Ok(());
+    }
+
     let Some(result) = with_backdrop_blur_bgra(rect, style, |pixels, width, height, opacity| {
-        if opacity <= 0.0 {
-            return Ok(());
-        }
-        let key = backdrop_blur_cache_key(rect, style);
-        let bitmap = if let Some(bitmap) = resources.bitmap_cache.get(&key) {
-            bitmap
-        } else {
-            let bitmap = create_bgra_bitmap(&resources.context, width, height, pixels)?;
-            resources.bitmap_cache.insert(key, bitmap.clone());
-            bitmap
-        };
+        let bitmap = create_bgra_bitmap(&resources.context, width, height, pixels)?;
+        resources.bitmap_cache.insert(key, bitmap.clone());
         draw_bitmap_opacity(&resources.context, rect, &bitmap, opacity);
         Ok(())
     }) else {
@@ -187,15 +189,24 @@ pub(super) fn draw_backdrop_blur_path(
     path: &UiPath,
     style: lgui::core::BackdropBlurStyle,
 ) -> Result<()> {
+    let opacity = style.opacity.clamp(0.0, 1.0);
+    if opacity <= 0.0 {
+        return Ok(());
+    }
+
+    let key = backdrop_blur_path_cache_key(rect, path, style);
+    if let Some(bitmap) = resources.bitmap_cache.get(&key) {
+        draw_bitmap_opacity(&resources.context, rect, &bitmap, opacity);
+        return Ok(());
+    }
+
     let Some(result) = with_backdrop_blur_bgra(rect, style, |pixels, width, height, opacity| {
-        if opacity <= 0.0 {
-            return Ok(());
-        }
         let mut masked = pixels.to_vec();
         if let Some(points) = polygon_points(path) {
             mask_polygon(&mut masked, width, height, rect, &points);
         }
         let bitmap = create_bgra_bitmap(&resources.context, width, height, &masked)?;
+        resources.bitmap_cache.insert(key, bitmap.clone());
         draw_bitmap_opacity(&resources.context, rect, &bitmap, opacity);
         Ok(())
     }) else {
@@ -371,4 +382,54 @@ pub(super) fn backdrop_blur_signature(rect: UiRect, style: lgui::core::BackdropB
     style.tint.0.hash(&mut hasher);
     style.tint_alpha.to_bits().hash(&mut hasher);
     hasher.finish()
+}
+
+pub(super) fn backdrop_blur_path_cache_key(
+    rect: UiRect,
+    path: &UiPath,
+    style: lgui::core::BackdropBlurStyle,
+) -> D2dBitmapCacheKey {
+    let (width, height) = raster_size(rect);
+    let mut hasher = DefaultHasher::new();
+    "backdrop-blur-path-bitmap".hash(&mut hasher);
+    backdrop_blur_signature(rect, style).hash(&mut hasher);
+    path.commands().len().hash(&mut hasher);
+    for command in path.commands() {
+        match command {
+            UiPathCommand::MoveTo(point) => {
+                "move".hash(&mut hasher);
+                hash_point(point, &mut hasher);
+            }
+            UiPathCommand::LineTo(point) => {
+                "line".hash(&mut hasher);
+                hash_point(point, &mut hasher);
+            }
+            UiPathCommand::QuadraticTo { control, to } => {
+                "quadratic".hash(&mut hasher);
+                hash_point(control, &mut hasher);
+                hash_point(to, &mut hasher);
+            }
+            UiPathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                "cubic".hash(&mut hasher);
+                hash_point(control1, &mut hasher);
+                hash_point(control2, &mut hasher);
+                hash_point(to, &mut hasher);
+            }
+            UiPathCommand::Close => "close".hash(&mut hasher),
+        }
+    }
+    D2dBitmapCacheKey::BackdropBlurPath {
+        signature: hasher.finish(),
+        width,
+        height,
+    }
+}
+
+fn hash_point(point: &lgui::core::Point, hasher: &mut DefaultHasher) {
+    point.x.to_bits().hash(hasher);
+    point.y.to_bits().hash(hasher);
 }

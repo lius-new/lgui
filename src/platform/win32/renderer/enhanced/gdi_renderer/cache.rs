@@ -317,6 +317,28 @@ impl GdiBitmapCache {
         Some(entry)
     }
 
+    pub(super) fn existing_entry(
+        &mut self,
+        key: &str,
+        width: i32,
+        height: i32,
+    ) -> Option<&mut GdiBitmapEntry> {
+        let matches = self
+            .entries
+            .get(key)
+            .is_some_and(|entry| entry.width == width && entry.height == height);
+        if !matches {
+            return None;
+        }
+
+        let tick = self.next_tick();
+        self.hits = self.hits.saturating_add(1);
+        self.publish();
+        let entry = self.entries.get_mut(key)?;
+        entry.last_used = tick;
+        Some(entry)
+    }
+
     fn evict_to_budget(&mut self) {
         while self.bytes > self.budget_bytes {
             let Some(oldest_key) = self

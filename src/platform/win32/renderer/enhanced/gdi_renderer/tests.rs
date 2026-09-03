@@ -45,6 +45,28 @@ fn transformed_destination_points_follow_layer_origin() {
 }
 
 #[test]
+fn gdi_bitmap_cache_probes_an_existing_entry_without_source_pixels() {
+    let seed = unsafe { CreateCompatibleDC(None) };
+    assert!(!seed.is_invalid());
+    let mut cache = GdiBitmapCache::default();
+    cache.budget_bytes = 4096;
+    let pixels = vec![255; 8 * 8 * 4];
+
+    assert!(cache.entry(seed, "blur", 8, 8, &pixels).is_some());
+    let misses = cache.misses;
+    assert!(cache.existing_entry("blur", 8, 8).is_some());
+    assert_eq!(cache.hits, 1);
+    assert_eq!(cache.misses, misses);
+    assert!(cache.existing_entry("blur", 9, 8).is_none());
+    assert_eq!(cache.misses, misses);
+
+    drop(cache);
+    unsafe {
+        let _ = DeleteDC(seed);
+    }
+}
+
+#[test]
 fn transparent_gdi_layer_updates_only_changed_black_content() {
     let seed = unsafe { CreateCompatibleDC(None) };
     assert!(!seed.is_invalid());

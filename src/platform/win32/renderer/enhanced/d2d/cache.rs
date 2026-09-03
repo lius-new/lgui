@@ -219,6 +219,11 @@ pub(super) enum D2dBitmapCacheKey {
         width: i32,
         height: i32,
     },
+    BackdropBlurPath {
+        signature: u64,
+        width: i32,
+        height: i32,
+    },
     StaticLayer {
         raster_key: String,
         id: UiId,
@@ -235,6 +240,7 @@ impl D2dBitmapCacheKey {
             Self::Image { width, height, .. }
             | Self::Icon { width, height, .. }
             | Self::BackdropBlur { width, height, .. }
+            | Self::BackdropBlurPath { width, height, .. }
             | Self::StaticLayer { width, height, .. } => (*width, *height),
         };
         (width.max(1) as usize)
