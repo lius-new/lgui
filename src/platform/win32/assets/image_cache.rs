@@ -177,7 +177,7 @@ struct ImageCache {
 
 struct CachedImage {
     status: CachedImageStatus,
-    bytes: Option<Vec<u8>>,
+    bytes: Option<crate::assets::AssetBytes>,
     width: i32,
     height: i32,
     resident_bytes: usize,
@@ -404,7 +404,7 @@ pub(crate) fn portable_image_cache_handle() -> crate::assets::ImageCacheHandle {
                 crate::core::UiImageSource::Static(_)
                 | crate::core::UiImageSource::Bytes { .. } => return None,
             };
-            cached_image_data(&source).map(|(bytes, _, _)| Arc::<[u8]>::from(bytes))
+            cached_image_data(&source).map(|(bytes, _, _)| bytes)
         },
         || {
             let cache = IMAGE_CACHE.lock().expect("image cache poisoned");
@@ -541,7 +541,7 @@ fn portable_status(status: CachedImageStatus) -> crate::assets::ImageStatus {
     }
 }
 
-pub fn cached_image_data(source: &ImageSource) -> Option<(Vec<u8>, i32, i32)> {
+pub fn cached_image_data(source: &ImageSource) -> Option<(crate::assets::AssetBytes, i32, i32)> {
     let key = source.key();
     let entry = {
         let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
@@ -567,27 +567,7 @@ pub fn cached_image_data(source: &ImageSource) -> Option<(Vec<u8>, i32, i32)> {
         }
         result
     };
-    let request = IMAGE_REQUESTS
-        .lock()
-        .expect("image request registry poisoned")
-        .get(&key)
-        .cloned();
-    let governor = IMAGE_MEMORY_GOVERNOR
-        .lock()
-        .expect("image memory governor poisoned")
-        .clone();
-    let (Some(request), Some(governor)) = (request, governor) else {
-        return Some(entry);
-    };
-    let budget = governor.options().budget;
-    let _reservation = governor.try_reserve_task(
-        budget
-            .max_decoded_resource_bytes
-            .min(budget.transient_hard_bytes),
-    )?;
-    let bytes = crate::assets::prepare_image_bytes(Arc::from(entry.0), &request, budget).ok()?;
-    let (width, height) = image_dimensions(bytes.as_ref())?;
-    Some((bytes.to_vec(), width, height))
+    Some(entry)
 }
 
 pub fn draw_cached_image(hdc: HDC, rect: RECT, source: &ImageSource, fit: ImageFit) -> bool {
@@ -622,7 +602,7 @@ pub fn draw_cached_image(hdc: HDC, rect: RECT, source: &ImageSource, fit: ImageF
 
 fn start_image_load(key: String, source: ImageSource, request_key: String, epoch: u64) {
     if let ImageSource::Asset { bytes, .. } = &source {
-        finish_image_load(key, request_key, bytes.to_vec(), epoch);
+        finish_image_load(key, request_key, Arc::from(*bytes), epoch);
         return;
     }
     let request = IMAGE_REQUESTS
@@ -680,7 +660,7 @@ fn start_image_load(key: String, source: ImageSource, request_key: String, epoch
                 ImageSource::Asset { .. } => unreachable!(),
             };
             match result {
-                Ok(bytes) => finish_image_load(key, request_key, bytes.to_vec(), epoch),
+                Ok(bytes) => finish_image_load(key, request_key, bytes, epoch),
                 Err(_) => fail_image_load(key, request_key, epoch),
             }
             drop(_task_reservation);
@@ -719,7 +699,12 @@ fn start_next_queued_image_load() {
     start_image_load(next.key, next.source, next.request_key, next.epoch);
 }
 
-fn finish_image_load(key: String, request_key: String, bytes: Vec<u8>, epoch: u64) {
+fn finish_image_load(
+    key: String,
+    request_key: String,
+    bytes: crate::assets::AssetBytes,
+    epoch: u64,
+) {
     if !is_current_epoch(epoch) {
         return;
     }
@@ -744,8 +729,8 @@ fn finish_image_load(key: String, request_key: String, bytes: Vec<u8>, epoch: u6
         ),
         _ => crate::core::ImageRequest::new(crate::core::UiImageSource::file(&key)),
     });
-    let bytes = match crate::assets::prepare_image_bytes(Arc::from(bytes), &request, budget) {
-        Ok(bytes) => bytes.to_vec(),
+    let bytes = match crate::assets::prepare_image_bytes(bytes, &request, budget) {
+        Ok(bytes) => bytes,
         Err(_) => {
             fail_image_load(key, request_key, epoch);
             return;
@@ -1051,9 +1036,10 @@ mod tests {
             .expect("image cache test lock poisoned");
         let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start()
             .expect("start GDI+ for image cache test");
-        let _memory = install_image_memory_governor(crate::memory::MemoryGovernor::new(
-            crate::memory::test_memory_options(),
-        ));
+        let mut options = crate::memory::test_memory_options();
+        options.budget.max_parallel_large_tasks = 1;
+        let governor = crate::memory::MemoryGovernor::new(options);
+        let _memory = install_image_memory_governor(governor.clone());
         trim_cached_image_cache(0);
         let cache = portable_image_cache_handle();
         cache.set_budget(0);
@@ -1071,8 +1057,16 @@ mod tests {
         }
 
         assert_eq!(request_cached_image(&source), CachedImageStatus::Ready);
-        let (_, width, height) = cached_image_data(&source).expect("cached remote image");
+        while governor.snapshot().large_tasks_in_flight != 0 && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        let _occupied_task = governor
+            .try_reserve_task(1)
+            .expect("image loading task slot should be available after load");
+        let (first_bytes, width, height) = cached_image_data(&source).expect("cached remote image");
+        let (second_bytes, _, _) = cached_image_data(&source).expect("cached remote image hit");
         assert_eq!((width, height), (1, 1));
+        assert!(Arc::ptr_eq(&first_bytes, &second_bytes));
         assert_eq!(cache.stats().pinned_bytes, ONE_PIXEL_PNG.len());
         trim_cached_image_cache(0);
     }
