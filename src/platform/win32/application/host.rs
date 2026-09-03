@@ -113,7 +113,7 @@ use super::super::ico::create_icon_from_ico_bytes;
 #[cfg(feature = "tray-win32")]
 use super::super::services::Win32TrayHost;
 use super::super::{
-    dispatcher::{DEFAULT_FRAME_INTERVAL_MS, WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
+    dispatcher::{CoalescedTrim, DEFAULT_FRAME_INTERVAL_MS, WM_LGUI_DISPATCH, WM_LGUI_FRAME_TICK},
     set_scale_preference, DpiContext, Win32Dispatcher,
 };
 

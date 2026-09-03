@@ -21,6 +21,23 @@ pub struct Win32Dispatcher {
     inner: Arc<DispatcherInner>,
 }
 
+#[derive(Clone)]
+pub(super) struct CoalescedTrim {
+    inner: Arc<CoalescedTrimInner>,
+}
+
+struct CoalescedTrimInner {
+    dispatcher: Win32Dispatcher,
+    pending: Mutex<PendingTrim>,
+    trim: Arc<dyn Fn(usize) + Send + Sync>,
+}
+
+#[derive(Default)]
+struct PendingTrim {
+    target_bytes: Option<usize>,
+    scheduled: bool,
+}
+
 #[derive(Default)]
 struct DispatcherInner {
     window: AtomicIsize,
@@ -237,6 +254,66 @@ impl Win32Dispatcher {
     }
 }
 
+impl CoalescedTrim {
+    pub(super) fn new(
+        dispatcher: Win32Dispatcher,
+        trim: impl Fn(usize) + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            inner: Arc::new(CoalescedTrimInner {
+                dispatcher,
+                pending: Mutex::new(PendingTrim::default()),
+                trim: Arc::new(trim),
+            }),
+        }
+    }
+
+    pub(super) fn request(&self, target_bytes: usize) {
+        let should_schedule = {
+            let mut pending = self
+                .inner
+                .pending
+                .lock()
+                .expect("coalesced trim state poisoned");
+            pending.target_bytes = Some(
+                pending
+                    .target_bytes
+                    .map_or(target_bytes, |current| current.min(target_bytes)),
+            );
+            if pending.scheduled {
+                false
+            } else {
+                pending.scheduled = true;
+                true
+            }
+        };
+        if should_schedule {
+            let pending = self.clone();
+            self.inner.dispatcher.post(move || pending.drain());
+        }
+    }
+
+    fn drain(&self) {
+        loop {
+            let target_bytes = {
+                let mut pending = self
+                    .inner
+                    .pending
+                    .lock()
+                    .expect("coalesced trim state poisoned");
+                match pending.target_bytes.take() {
+                    Some(target_bytes) => target_bytes,
+                    None => {
+                        pending.scheduled = false;
+                        return;
+                    }
+                }
+            };
+            (self.inner.trim)(target_bytes);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -279,5 +356,31 @@ mod tests {
 
         assert_eq!(dispatcher.frame_interval(), Duration::from_millis(33));
         dispatcher.stop_frame_driver();
+    }
+
+    #[test]
+    fn coalesced_trim_keeps_the_strictest_pending_target_and_can_be_reused() {
+        let dispatcher = Win32Dispatcher::new();
+        let targets = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&targets);
+        let trim = CoalescedTrim::new(dispatcher.clone(), move |target_bytes| {
+            observed
+                .lock()
+                .expect("trim targets poisoned")
+                .push(target_bytes);
+        });
+
+        trim.request(64);
+        trim.request(32);
+        trim.request(48);
+        dispatcher.drain();
+        assert_eq!(*targets.lock().expect("trim targets poisoned"), vec![32]);
+
+        trim.request(40);
+        dispatcher.drain();
+        assert_eq!(
+            *targets.lock().expect("trim targets poisoned"),
+            vec![32, 40]
+        );
     }
 }

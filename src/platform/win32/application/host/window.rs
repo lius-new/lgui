@@ -83,9 +83,23 @@ pub(super) fn create_window(
     let trim_memory = Arc::clone(&renderer_memory);
     let trim_budget = Arc::clone(&renderer_budget);
     let set_budget = Arc::clone(&renderer_budget);
-    let trim_dispatcher = dispatcher.clone();
     let budget_dispatcher = dispatcher.clone();
     let raw_hwnd = hwnd.0 as isize;
+    let trim = CoalescedTrim::new(dispatcher.clone(), move |target_bytes| {
+        STATE.with(|state| {
+            let mut windows = state.borrow_mut();
+            let Some(window) = windows.get_mut(&raw_hwnd) else {
+                return;
+            };
+            if let Some(renderer) = window.renderer.as_mut() {
+                renderer.trim_to(target_bytes);
+                *window
+                    .renderer_memory
+                    .lock()
+                    .expect("renderer memory usage poisoned") = renderer.memory_usage();
+            }
+        });
+    });
     let memory_instance = context.memory().next_instance_id();
     let renderer_memory_registration =
         context
@@ -101,22 +115,7 @@ pub(super) fn create_window(
                             .lock()
                             .expect("renderer memory usage poisoned")
                             .resident_bytes();
-                        trim_dispatcher.post(move || {
-                            STATE.with(|state| {
-                                let mut windows = state.borrow_mut();
-                                let Some(window) = windows.get_mut(&raw_hwnd) else {
-                                    return;
-                                };
-                                if let Some(renderer) = window.renderer.as_mut() {
-                                    renderer.trim_to(request.target_bytes);
-                                    *window
-                                        .renderer_memory
-                                        .lock()
-                                        .expect("renderer memory usage poisoned") =
-                                        renderer.memory_usage();
-                                }
-                            });
-                        });
+                        trim.request(request.target_bytes);
                         crate::memory::TrimResult {
                             before_bytes: before,
                             after_bytes: before,
@@ -153,7 +152,16 @@ pub(super) fn create_window(
     let component_memory_registration = {
         let usage = Arc::clone(&component_memory);
         let trim_usage = Arc::clone(&component_memory);
-        let trim_dispatcher = dispatcher.clone();
+        let trim = CoalescedTrim::new(dispatcher.clone(), move |target_bytes| {
+            STATE.with(|state| {
+                let mut windows = state.borrow_mut();
+                let Some(window) = windows.get_mut(&raw_hwnd) else {
+                    return;
+                };
+                window.session.trim_component_outputs(target_bytes);
+                update_session_memory_usage(window);
+            });
+        });
         context
             .memory()
             .register(crate::memory::DomainRegistration::new(
@@ -167,16 +175,7 @@ pub(super) fn create_window(
                             .lock()
                             .expect("component memory usage poisoned")
                             .resident_bytes();
-                        trim_dispatcher.post(move || {
-                            STATE.with(|state| {
-                                let mut windows = state.borrow_mut();
-                                let Some(window) = windows.get_mut(&raw_hwnd) else {
-                                    return;
-                                };
-                                window.session.trim_component_outputs(request.target_bytes);
-                                update_session_memory_usage(window);
-                            });
-                        });
+                        trim.request(request.target_bytes);
                         crate::memory::TrimResult {
                             before_bytes: before,
                             after_bytes: before,
@@ -188,7 +187,16 @@ pub(super) fn create_window(
     let host_scene_memory_registration = {
         let usage = Arc::clone(&host_scene_memory);
         let trim_usage = Arc::clone(&host_scene_memory);
-        let trim_dispatcher = dispatcher.clone();
+        let trim = CoalescedTrim::new(dispatcher.clone(), move |_target_bytes| {
+            STATE.with(|state| {
+                let mut windows = state.borrow_mut();
+                let Some(window) = windows.get_mut(&raw_hwnd) else {
+                    return;
+                };
+                window.session.trim_host_scene();
+                update_session_memory_usage(window);
+            });
+        });
         context
             .memory()
             .register(crate::memory::DomainRegistration::new(
@@ -203,16 +211,7 @@ pub(super) fn create_window(
                             .expect("host scene memory usage poisoned")
                             .resident_bytes();
                         if should_trim_host_scene(request) {
-                            trim_dispatcher.post(move || {
-                                STATE.with(|state| {
-                                    let mut windows = state.borrow_mut();
-                                    let Some(window) = windows.get_mut(&raw_hwnd) else {
-                                        return;
-                                    };
-                                    window.session.trim_host_scene();
-                                    update_session_memory_usage(window);
-                                });
-                            });
+                            trim.request(request.target_bytes);
                         }
                         crate::memory::TrimResult {
                             before_bytes: before,
