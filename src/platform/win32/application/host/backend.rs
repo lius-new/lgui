@@ -91,10 +91,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before =
                                 super::super::super::decoded_image_cache_usage().resident_bytes();
-                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                            trim.request(request.target_bytes);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before.saturating_sub(released),
+                                after_bytes: before,
                             }
                         },
                         move |budget| {
@@ -123,10 +123,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before = super::super::super::enhanced::image::decoded_image_cache_usage()
                                 .resident_bytes();
-                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                            trim.request(request.target_bytes);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before.saturating_sub(released),
+                                after_bytes: before,
                             }
                         },
                         move |budget| {
@@ -157,10 +157,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before = super::super::super::enhanced::blur::blur_cache_usage()
                                 .resident_bytes();
-                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                            trim.request(request.target_bytes);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before.saturating_sub(released),
+                                after_bytes: before,
                             }
                         },
                         move |budget| {
@@ -201,10 +201,10 @@ impl ApplicationBackend for Win32Application {
                         },
                         move |request| {
                             let before = super::super::super::enhanced::static_layer::static_layer_memory_cache_stats().bytes;
-                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                            trim.request(request.target_bytes);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before.saturating_sub(released),
+                                after_bytes: before,
                             }
                         },
                         move |budget| {
@@ -233,10 +233,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before = super::super::super::enhanced::gdi_renderer_cache_usage()
                                 .resident_bytes();
-                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                            trim.request(request.target_bytes);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before.saturating_sub(released),
+                                after_bytes: before,
                             }
                         },
                         move |budget| {
@@ -283,10 +283,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before =
                                 super::super::super::svg::svg_bitmap_cache_usage().resident_bytes();
-                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                            trim.request(request.target_bytes);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before.saturating_sub(released),
+                                after_bytes: before,
                             }
                         },
                         move |budget| {

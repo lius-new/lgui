@@ -2,7 +2,6 @@ use std::sync::{
     atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering},
     Arc, Mutex,
 };
-use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
 use windows::Win32::{
@@ -42,7 +41,6 @@ struct PendingTrim {
 #[derive(Default)]
 struct DispatcherInner {
     window: AtomicIsize,
-    owner_thread: Mutex<Option<ThreadId>>,
     frame_requested: AtomicBool,
     frame_driver_running: AtomicBool,
     frame_tick_pending: AtomicBool,
@@ -64,11 +62,6 @@ impl Win32Dispatcher {
     }
 
     pub fn attach(&self, hwnd: HWND) {
-        *self
-            .inner
-            .owner_thread
-            .lock()
-            .expect("dispatcher owner thread poisoned") = Some(std::thread::current().id());
         self.inner.window.store(hwnd.0 as isize, Ordering::Release);
     }
 
@@ -259,15 +252,6 @@ impl Win32Dispatcher {
         }
         unsafe { PostMessageW(Some(HWND(hwnd as _)), message, WPARAM(0), LPARAM(0)).is_ok() }
     }
-
-    fn is_owner_thread(&self) -> bool {
-        self.inner
-            .owner_thread
-            .lock()
-            .expect("dispatcher owner thread poisoned")
-            .as_ref()
-            .is_some_and(|owner| *owner == std::thread::current().id())
-    }
 }
 
 impl CoalescedTrim {
@@ -307,25 +291,6 @@ impl CoalescedTrim {
             let pending = self.clone();
             self.inner.dispatcher.post(move || pending.drain());
         }
-    }
-
-    pub(super) fn run_or_request(&self, target_bytes: usize) -> Option<usize> {
-        if !self.inner.dispatcher.is_owner_thread() {
-            self.request(target_bytes);
-            return None;
-        }
-        let target_bytes = {
-            let mut pending = self
-                .inner
-                .pending
-                .lock()
-                .expect("coalesced trim state poisoned");
-            pending
-                .target_bytes
-                .take()
-                .map_or(target_bytes, |current| current.min(target_bytes))
-        };
-        Some((self.inner.trim)(target_bytes))
     }
 
     fn drain(&self) {
@@ -418,15 +383,5 @@ mod tests {
             *targets.lock().expect("trim targets poisoned"),
             vec![32, 40]
         );
-    }
-
-    #[test]
-    fn coalesced_trim_runs_inline_on_the_owner_thread() {
-        let dispatcher = Win32Dispatcher::new();
-        dispatcher.attach(HWND(1 as _));
-        let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| target_bytes + 7);
-
-        assert_eq!(trim.run_or_request(25), Some(32));
-        assert_eq!(dispatcher.drain(), Win32DispatchResult::default());
     }
 }

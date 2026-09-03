@@ -70,9 +70,8 @@ that reusable cache.
 At runtime, `ApplicationContext::memory()` returns the application Governor. Use `snapshot()` for
 domain-level diagnostics, `set_options()` only when application-owned policy changes at runtime,
 `notify()` for a real lifecycle or pressure event, and `trim()` for an explicit scoped request. Do not call
-cache-specific clear functions. Win32 adapters execute immediately and report released bytes when
-called on their owning UI thread; cross-thread native Trim may complete asynchronously, so refresh
-the snapshot after the UI event has run.
+cache-specific clear functions. Win32 adapters post and coalesce native Trim work onto their owning
+UI thread, so refresh the snapshot after the UI event has run.
 `CacheScope::Memory` and `AllRebuildable` target registered in-memory domains; `Persistent`
 targets only the application-injected persistent store, including when normal persistent reads are
 disabled. Scope selection never crosses that boundary implicitly.

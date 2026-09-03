@@ -120,10 +120,10 @@ pub(super) fn create_window(
                             .lock()
                             .expect("renderer memory usage poisoned")
                             .resident_bytes();
-                        let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                        trim.request(request.target_bytes);
                         crate::memory::TrimResult {
                             before_bytes: before,
-                            after_bytes: before.saturating_sub(released),
+                            after_bytes: before,
                         }
                     },
                     move |budget| {
@@ -181,10 +181,10 @@ pub(super) fn create_window(
                             .lock()
                             .expect("component memory usage poisoned")
                             .resident_bytes();
-                        let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
+                        trim.request(request.target_bytes);
                         crate::memory::TrimResult {
                             before_bytes: before,
-                            after_bytes: before.saturating_sub(released),
+                            after_bytes: before,
                         }
                     },
                 ),
@@ -217,12 +217,12 @@ pub(super) fn create_window(
                             .lock()
                             .expect("host scene memory usage poisoned")
                             .resident_bytes();
-                        let released = should_trim_host_scene(request)
-                            .then(|| trim.run_or_request(request.target_bytes).unwrap_or(0))
-                            .unwrap_or(0);
+                        if should_trim_host_scene(request) {
+                            trim.request(request.target_bytes);
+                        }
                         crate::memory::TrimResult {
                             before_bytes: before,
-                            after_bytes: before.saturating_sub(released),
+                            after_bytes: before,
                         }
                     },
                 ),
