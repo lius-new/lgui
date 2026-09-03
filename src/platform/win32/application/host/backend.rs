@@ -77,7 +77,7 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "images-win32")]
         {
             let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| {
-                super::super::super::trim_decoded_image_cache(target_bytes);
+                super::super::super::trim_decoded_image_cache(target_bytes)
             });
             let budget_dispatcher = dispatcher.clone();
             let registration = context
@@ -91,10 +91,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before =
                                 super::super::super::decoded_image_cache_usage().resident_bytes();
-                            trim.request(request.target_bytes);
+                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before,
+                                after_bytes: before.saturating_sub(released),
                             }
                         },
                         move |budget| {
@@ -109,7 +109,7 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "renderer-d2d")]
         {
             let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| {
-                super::super::super::enhanced::image::trim_decoded_image_cache(target_bytes);
+                super::super::super::enhanced::image::trim_decoded_image_cache(target_bytes)
             });
             let budget_dispatcher = dispatcher.clone();
             let registration = context
@@ -123,10 +123,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before = super::super::super::enhanced::image::decoded_image_cache_usage()
                                 .resident_bytes();
-                            trim.request(request.target_bytes);
+                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before,
+                                after_bytes: before.saturating_sub(released),
                             }
                         },
                         move |budget| {
@@ -143,7 +143,7 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "renderer-d2d")]
         {
             let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| {
-                super::super::super::enhanced::blur::trim_blur_caches(target_bytes);
+                super::super::super::enhanced::blur::trim_blur_caches(target_bytes)
             });
             let budget_dispatcher = dispatcher.clone();
             let registration = context
@@ -157,10 +157,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before = super::super::super::enhanced::blur::blur_cache_usage()
                                 .resident_bytes();
-                            trim.request(request.target_bytes);
+                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before,
+                                after_bytes: before.saturating_sub(released),
                             }
                         },
                         move |budget| {
@@ -177,7 +177,7 @@ impl ApplicationBackend for Win32Application {
             let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| {
                 super::super::super::enhanced::static_layer::trim_static_layer_memory_cache(
                     target_bytes,
-                );
+                )
             });
             let budget_dispatcher = dispatcher.clone();
             let registration = context
@@ -201,10 +201,10 @@ impl ApplicationBackend for Win32Application {
                         },
                         move |request| {
                             let before = super::super::super::enhanced::static_layer::static_layer_memory_cache_stats().bytes;
-                            trim.request(request.target_bytes);
+                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before,
+                                after_bytes: before.saturating_sub(released),
                             }
                         },
                         move |budget| {
@@ -219,7 +219,7 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "advanced-rendering")]
         {
             let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| {
-                super::super::super::enhanced::trim_gdi_renderer_caches(target_bytes);
+                super::super::super::enhanced::trim_gdi_renderer_caches(target_bytes)
             });
             let budget_dispatcher = dispatcher.clone();
             let registration = context
@@ -233,10 +233,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before = super::super::super::enhanced::gdi_renderer_cache_usage()
                                 .resident_bytes();
-                            trim.request(request.target_bytes);
+                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before,
+                                after_bytes: before.saturating_sub(released),
                             }
                         },
                         move |budget| {
@@ -269,7 +269,7 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "svg")]
         {
             let trim = CoalescedTrim::new(dispatcher.clone(), |target_bytes| {
-                super::super::super::svg::trim_svg_bitmap_cache(target_bytes);
+                super::super::super::svg::trim_svg_bitmap_cache(target_bytes)
             });
             let budget_dispatcher = dispatcher.clone();
             let registration = context
@@ -283,10 +283,10 @@ impl ApplicationBackend for Win32Application {
                         move |request| {
                             let before =
                                 super::super::super::svg::svg_bitmap_cache_usage().resident_bytes();
-                            trim.request(request.target_bytes);
+                            let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                             crate::memory::TrimResult {
                                 before_bytes: before,
-                                after_bytes: before,
+                                after_bytes: before.saturating_sub(released),
                             }
                         },
                         move |budget| {

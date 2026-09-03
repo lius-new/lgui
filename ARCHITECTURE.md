@@ -51,10 +51,11 @@ instances divide only their common domain total; dropping a registration removes
 snapshots and rebalances the survivors. Zero is a valid domain budget and is forwarded unchanged.
 
 The Governor does not own cache entries or native handles. Portable caches may trim inline.
-Win32 adapters post work through `Win32Dispatcher`, and Winit adapters send a user event, so GDI,
-D2D, Skia, Component, Host, Scene, and other native or retained objects are released on their
-owning UI thread. A synchronous Trim result may therefore report only immediately confirmed
-bytes; a later snapshot observes releases completed by the owner thread.
+Win32 adapters trim inline when called on their owning UI thread and otherwise post coalesced work
+through `Win32Dispatcher`; Winit adapters send a user event. GDI, D2D, Skia, Component, Host,
+Scene, and other native or retained objects are therefore released on their owning UI thread. A
+synchronous Trim result reports immediately confirmed bytes; a later snapshot observes work that
+had to cross a thread boundary.
 
 Usage separates live, rebuildable, cache, CPU, estimated GPU, pinned, transient-reserved, and
 persistent bytes. `lgui` defines no profile, budget values, domain weights, lifecycle defaults, or

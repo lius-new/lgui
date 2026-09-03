@@ -89,16 +89,21 @@ pub(super) fn create_window(
         STATE.with(|state| {
             let mut windows = state.borrow_mut();
             let Some(window) = windows.get_mut(&raw_hwnd) else {
-                return;
+                return 0;
             };
             if let Some(renderer) = window.renderer.as_mut() {
+                let before = renderer.memory_usage().resident_bytes();
                 renderer.trim_to(target_bytes);
+                let usage = renderer.memory_usage();
                 *window
                     .renderer_memory
                     .lock()
-                    .expect("renderer memory usage poisoned") = renderer.memory_usage();
+                    .expect("renderer memory usage poisoned") = usage;
+                before.saturating_sub(usage.resident_bytes())
+            } else {
+                0
             }
-        });
+        })
     });
     let memory_instance = context.memory().next_instance_id();
     let renderer_memory_registration =
@@ -115,10 +120,10 @@ pub(super) fn create_window(
                             .lock()
                             .expect("renderer memory usage poisoned")
                             .resident_bytes();
-                        trim.request(request.target_bytes);
+                        let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                         crate::memory::TrimResult {
                             before_bytes: before,
-                            after_bytes: before,
+                            after_bytes: before.saturating_sub(released),
                         }
                     },
                     move |budget| {
@@ -156,11 +161,12 @@ pub(super) fn create_window(
             STATE.with(|state| {
                 let mut windows = state.borrow_mut();
                 let Some(window) = windows.get_mut(&raw_hwnd) else {
-                    return;
+                    return 0;
                 };
-                window.session.trim_component_outputs(target_bytes);
+                let released = window.session.trim_component_outputs(target_bytes);
                 update_session_memory_usage(window);
-            });
+                released
+            })
         });
         context
             .memory()
@@ -175,10 +181,10 @@ pub(super) fn create_window(
                             .lock()
                             .expect("component memory usage poisoned")
                             .resident_bytes();
-                        trim.request(request.target_bytes);
+                        let released = trim.run_or_request(request.target_bytes).unwrap_or(0);
                         crate::memory::TrimResult {
                             before_bytes: before,
-                            after_bytes: before,
+                            after_bytes: before.saturating_sub(released),
                         }
                     },
                 ),
@@ -191,11 +197,12 @@ pub(super) fn create_window(
             STATE.with(|state| {
                 let mut windows = state.borrow_mut();
                 let Some(window) = windows.get_mut(&raw_hwnd) else {
-                    return;
+                    return 0;
                 };
-                window.session.trim_host_scene();
+                let released = window.session.trim_host_scene();
                 update_session_memory_usage(window);
-            });
+                released
+            })
         });
         context
             .memory()
@@ -210,12 +217,12 @@ pub(super) fn create_window(
                             .lock()
                             .expect("host scene memory usage poisoned")
                             .resident_bytes();
-                        if should_trim_host_scene(request) {
-                            trim.request(request.target_bytes);
-                        }
+                        let released = should_trim_host_scene(request)
+                            .then(|| trim.run_or_request(request.target_bytes).unwrap_or(0))
+                            .unwrap_or(0);
                         crate::memory::TrimResult {
                             before_bytes: before,
-                            after_bytes: before,
+                            after_bytes: before.saturating_sub(released),
                         }
                     },
                 ),
@@ -533,13 +540,13 @@ pub(super) fn show_window(hwnd: HWND) {
 }
 
 pub(super) fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
-    STATE.with(|state| {
+    let memory = STATE.with(|state| {
         let mut windows = state.borrow_mut();
         let Some(window) = windows.get_mut(&(hwnd.0 as isize)) else {
-            return false;
+            return None;
         };
         if window.rendering_suspended || (!force && !window.background_memory_optimization) {
-            return false;
+            return None;
         }
         window.renderer.take();
         *window
@@ -551,12 +558,13 @@ pub(super) fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
         crate::assets::update_image_reachability(window.memory_instance, &[]);
         window.rendering_suspended = true;
         update_session_memory_usage(window);
-        window
-            .context
-            .memory()
-            .notify(crate::memory::MemoryEvent::WindowHidden);
-        true
-    })
+        Some(window.context.memory().clone())
+    });
+    let Some(memory) = memory else {
+        return false;
+    };
+    memory.notify(crate::memory::MemoryEvent::WindowHidden);
+    true
 }
 
 pub(super) fn update_session_memory_usage(window: &WindowState) {

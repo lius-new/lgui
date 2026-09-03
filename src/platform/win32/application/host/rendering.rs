@@ -10,6 +10,7 @@ pub(super) fn paint(hwnd: HWND) {
 }
 
 pub(super) fn render_window(hwnd: HWND, target: HDC) {
+    let mut committed_memory = None;
     let retry = STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(state) = state.get_mut(&(hwnd.0 as isize)) else {
@@ -151,10 +152,6 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
                         .expect("renderer memory usage poisoned") = renderer.memory_usage();
                 }
                 update_session_memory_usage(state);
-                state
-                    .context
-                    .memory()
-                    .notify(crate::memory::MemoryEvent::FrameCommitted);
                 state.session.runtime().run_effects();
                 #[cfg(feature = "diagnostics")]
                 if let Some(diagnostics) = state.diagnostics.clone() {
@@ -281,6 +278,7 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
                         viewport,
                     );
                 }
+                committed_memory = Some(state.context.memory().clone());
                 false
             }
             Err(error) => {
@@ -297,6 +295,9 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
             }
         }
     });
+    if let Some(memory) = committed_memory {
+        memory.notify(crate::memory::MemoryEvent::FrameCommitted);
+    }
     if retry {
         unsafe {
             let _ = InvalidateRect(Some(hwnd), None, false);
