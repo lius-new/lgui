@@ -138,9 +138,6 @@ fn draw_bytes_image(hdc: HDC, rect: UiRect, key: &str, version: u64, bytes: &[u8
 }
 
 fn draw_cached_source(hdc: HDC, rect: UiRect, source: &cached_image::ImageSource, fit: ImageFit) {
-    let Some((bytes, width, height)) = cached_image::cached_image_data(source) else {
-        return;
-    };
     let key = match source {
         cached_image::ImageSource::Url(url) => format!("url:{url}"),
         cached_image::ImageSource::File(path) => format!("file:{}", path.display()),
@@ -148,7 +145,10 @@ fn draw_cached_source(hdc: HDC, rect: UiRect, source: &cached_image::ImageSource
     };
     let _ = with_cached_decoded(
         key,
-        || decode_image_bytes(&bytes, width, height),
+        || {
+            let (bytes, width, height) = cached_image::cached_image_data(source)?;
+            decode_image_bytes(&bytes, width, height)
+        },
         |image| draw_decoded_image(hdc, rect, image, fit),
     );
 }

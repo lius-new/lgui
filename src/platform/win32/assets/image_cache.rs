@@ -304,6 +304,25 @@ pub(crate) fn set_decoded_image_cache_budget(budget_bytes: usize) {
     DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
 }
 
+fn with_cached_decoded<T>(
+    key: String,
+    create: impl FnOnce() -> Option<DecodedImage>,
+    read: impl FnOnce(&DecodedImage) -> T,
+) -> Option<T> {
+    DECODED_IMAGE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.contains_touch(&key) {
+            let image = create()?;
+            let image_bytes = decoded_image_bytes(&image)?;
+            if !cache.can_store(image_bytes) {
+                return Some(read(&image));
+            }
+            cache.insert(key.clone(), image, image_bytes);
+        }
+        cache.get(&key).map(read)
+    })
+}
+
 pub fn request_cached_image(source: &ImageSource) -> CachedImageStatus {
     let key = source.key();
     let request_key = IMAGE_REQUESTS
@@ -572,32 +591,16 @@ pub fn cached_image_data(source: &ImageSource) -> Option<(crate::assets::AssetBy
 
 pub fn draw_cached_image(hdc: HDC, rect: RECT, source: &ImageSource, fit: ImageFit) -> bool {
     let key = source.key();
-    let entry = {
-        let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
-        let tick = cache.next_tick();
-        let Some(entry) = cache.entries.get_mut(&key) else {
-            drop(cache);
-            let _ = request_cached_image(source);
-            return false;
-        };
-        if entry.status != CachedImageStatus::Ready {
-            return false;
-        }
-        let Some(bytes) = entry.bytes.as_ref() else {
-            return false;
-        };
-        entry.last_used = tick;
-        let result = (bytes.clone(), entry.width, entry.height);
-        if entry.policy == crate::core::ImageCachePolicy::NoStore {
-            if let Some(entry) = cache.entries.remove(&key) {
-                cache.resident_bytes = cache.resident_bytes.saturating_sub(entry.resident_bytes);
-                cache.evictions = cache.evictions.saturating_add(1);
-            }
-        }
-        result
-    };
-
-    draw_image_bytes(hdc, rect, &key, &entry.0, entry.1, entry.2, fit)
+    with_cached_decoded(
+        key,
+        || {
+            let (bytes, expected_width, expected_height) = cached_image_data(source)?;
+            let image = decode_image(&bytes)?;
+            (image.width == expected_width && image.height == expected_height).then_some(image)
+        },
+        |image| draw_decoded_image(hdc, rect, image, image.width, image.height, fit),
+    )
+    .unwrap_or(false)
 }
 
 fn start_image_load(key: String, source: ImageSource, request_key: String, epoch: u64) {
@@ -868,46 +871,6 @@ fn image_dimensions(bytes: &[u8]) -> Option<(i32, i32)> {
     Some((i32::try_from(width).ok()?, i32::try_from(height).ok()?))
 }
 
-fn draw_image_bytes(
-    hdc: HDC,
-    rect: RECT,
-    key: &str,
-    bytes: &[u8],
-    source_width: i32,
-    source_height: i32,
-    fit: ImageFit,
-) -> bool {
-    if source_width <= 0 || source_height <= 0 {
-        return false;
-    }
-
-    DECODED_IMAGE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let key = key.to_string();
-        if !cache.contains_touch(&key) {
-            let Some(image) = decode_image(bytes) else {
-                return false;
-            };
-            let Some(image_bytes) = decoded_image_bytes(&image) else {
-                return false;
-            };
-            if !cache.can_store(image_bytes) {
-                return draw_decoded_image(hdc, rect, &image, source_width, source_height, fit);
-            }
-            cache.insert(key.clone(), image, image_bytes);
-        }
-
-        let Some(image) = cache.get(&key) else {
-            return false;
-        };
-        if image.width != source_width || image.height != source_height || image.image.is_null() {
-            return false;
-        }
-
-        draw_decoded_image(hdc, rect, image, source_width, source_height, fit)
-    })
-}
-
 fn decoded_image_bytes(image: &DecodedImage) -> Option<usize> {
     usize::try_from(image.width)
         .ok()?
@@ -993,7 +956,10 @@ fn decode_image(bytes: &[u8]) -> Option<DecodedImage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::{
+        cell::Cell,
+        time::{Duration, Instant},
+    };
 
     static IMAGE_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1027,6 +993,34 @@ mod tests {
             }
             Ok(Arc::from(ONE_PIXEL_PNG))
         }
+    }
+
+    #[test]
+    fn decoded_image_hit_does_not_recreate_the_image() {
+        let _serial = IMAGE_CACHE_TEST_LOCK
+            .lock()
+            .expect("image cache test lock poisoned");
+        let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start()
+            .expect("start GDI+ for image cache test");
+        trim_decoded_image_cache(0);
+        set_decoded_image_cache_budget(4);
+        let creations = Cell::new(0);
+
+        for _ in 0..2 {
+            assert!(with_cached_decoded(
+                "decoded-hit-does-not-read-encoded".to_owned(),
+                || {
+                    creations.set(creations.get() + 1);
+                    decode_image(ONE_PIXEL_PNG)
+                },
+                |_| true,
+            )
+            .unwrap_or(false));
+        }
+
+        assert_eq!(creations.get(), 1);
+        trim_decoded_image_cache(0);
+        set_decoded_image_cache_budget(0);
     }
 
     #[test]
