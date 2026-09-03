@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     io::Cursor,
     path::PathBuf,
@@ -42,6 +42,8 @@ static IMAGE_MEMORY_GOVERNOR: LazyLock<Mutex<Option<crate::memory::MemoryGoverno
     LazyLock::new(|| Mutex::new(None));
 static IMAGE_REQUESTS: LazyLock<Mutex<HashMap<String, crate::core::ImageRequest>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static IMAGE_LOAD_QUEUE: LazyLock<Mutex<VecDeque<PendingImageLoad>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::new()));
 static IMAGE_REACHABILITY: LazyLock<
     Mutex<HashMap<crate::memory::DomainInstanceId, HashSet<String>>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -184,6 +186,13 @@ struct CachedImage {
     policy: crate::core::ImageCachePolicy,
     priority: crate::memory::CachePriority,
     reachable: bool,
+}
+
+struct PendingImageLoad {
+    key: String,
+    source: ImageSource,
+    request_key: String,
+    epoch: u64,
 }
 
 impl Default for ImageCache {
@@ -515,6 +524,10 @@ fn trim_cached_image_cache(target_bytes: usize) -> usize {
             .lock()
             .expect("image request registry poisoned")
             .clear();
+        IMAGE_LOAD_QUEUE
+            .lock()
+            .expect("image load queue poisoned")
+            .clear();
         IMAGE_REPAINT_PENDING.store(false, Ordering::Release);
     }
     released
@@ -627,7 +640,15 @@ fn start_image_load(key: String, source: ImageSource, request_key: String, epoch
     };
     let limit = governor.options().budget.max_encoded_resource_bytes;
     let Some(task_reservation) = governor.try_reserve_task(limit) else {
-        fail_image_load(key, request_key, epoch);
+        IMAGE_LOAD_QUEUE
+            .lock()
+            .expect("image load queue poisoned")
+            .push_back(PendingImageLoad {
+                key,
+                source,
+                request_key,
+                epoch,
+            });
         return;
     };
     let loader = REMOTE_IMAGE_LOADER
@@ -662,11 +683,40 @@ fn start_image_load(key: String, source: ImageSource, request_key: String, epoch
                 Ok(bytes) => finish_image_load(key, request_key, bytes.to_vec(), epoch),
                 Err(_) => fail_image_load(key, request_key, epoch),
             }
+            drop(_task_reservation);
+            start_next_queued_image_load();
         })
         .is_err()
     {
         fail_image_load(failure_key, failure_request_key, epoch);
+        start_next_queued_image_load();
     }
+}
+
+fn start_next_queued_image_load() {
+    let next = loop {
+        let Some(pending) = IMAGE_LOAD_QUEUE
+            .lock()
+            .expect("image load queue poisoned")
+            .pop_front()
+        else {
+            return;
+        };
+        let current = pending.epoch == IMAGE_CACHE_EPOCH.load(Ordering::Acquire)
+            && IMAGE_CACHE
+                .lock()
+                .expect("image cache poisoned")
+                .entries
+                .get(&pending.key)
+                .is_some_and(|entry| {
+                    entry.status == CachedImageStatus::Loading
+                        && entry.request_key == pending.request_key
+                });
+        if current {
+            break pending;
+        }
+    };
+    start_image_load(next.key, next.source, next.request_key, next.epoch);
 }
 
 fn finish_image_load(key: String, request_key: String, bytes: Vec<u8>, epoch: u64) {
@@ -960,6 +1010,8 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    static IMAGE_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     const ONE_PIXEL_PNG: &[u8] = &[
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
         0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xB5,
@@ -976,8 +1028,27 @@ mod tests {
         }
     }
 
+    struct BlockingRemoteLoader {
+        first_started: Arc<AtomicBool>,
+        release_first: Arc<AtomicBool>,
+    }
+
+    impl crate::assets::RemoteImageLoader for BlockingRemoteLoader {
+        fn load(&self, _url: &str) -> Result<crate::assets::AssetBytes, crate::assets::AssetError> {
+            if !self.first_started.swap(true, Ordering::AcqRel) {
+                while !self.release_first.load(Ordering::Acquire) {
+                    std::thread::yield_now();
+                }
+            }
+            Ok(Arc::from(ONE_PIXEL_PNG))
+        }
+    }
+
     #[test]
     fn zero_budget_win32_cache_still_delivers_a_reachable_image() {
+        let _serial = IMAGE_CACHE_TEST_LOCK
+            .lock()
+            .expect("image cache test lock poisoned");
         let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start()
             .expect("start GDI+ for image cache test");
         let _memory = install_image_memory_governor(crate::memory::MemoryGovernor::new(
@@ -1003,6 +1074,59 @@ mod tests {
         let (_, width, height) = cached_image_data(&source).expect("cached remote image");
         assert_eq!((width, height), (1, 1));
         assert_eq!(cache.stats().pinned_bytes, ONE_PIXEL_PNG.len());
+        trim_cached_image_cache(0);
+    }
+
+    #[test]
+    fn images_waiting_for_a_task_slot_are_loaded_in_order() {
+        let _serial = IMAGE_CACHE_TEST_LOCK
+            .lock()
+            .expect("image cache test lock poisoned");
+        let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start()
+            .expect("start GDI+ for image cache test");
+        let mut options = crate::memory::test_memory_options();
+        options.budget.max_parallel_large_tasks = 1;
+        let _memory = install_image_memory_governor(crate::memory::MemoryGovernor::new(options));
+        trim_cached_image_cache(0);
+        let cache = portable_image_cache_handle();
+        cache.set_budget(options.domains.encoded_image_bytes);
+        let first_started = Arc::new(AtomicBool::new(false));
+        let release_first = Arc::new(AtomicBool::new(false));
+        let _loader = install_remote_image_loader(crate::assets::RemoteImageLoaderHandle::new(
+            BlockingRemoteLoader {
+                first_started: Arc::clone(&first_started),
+                release_first: Arc::clone(&release_first),
+            },
+        ));
+        let sources = [
+            ImageSource::url("https://example.invalid/avatar-1.png"),
+            ImageSource::url("https://example.invalid/avatar-2.png"),
+            ImageSource::url("https://example.invalid/avatar-3.png"),
+        ];
+
+        for source in &sources {
+            assert_eq!(request_cached_image(source), CachedImageStatus::Loading);
+        }
+        assert_eq!(
+            request_cached_image(&sources[1]),
+            CachedImageStatus::Loading,
+            "a saturated task limit must queue the image instead of failing it"
+        );
+        release_first.store(true, Ordering::Release);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while sources
+            .iter()
+            .any(|source| request_cached_image(source) != CachedImageStatus::Ready)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(first_started.load(Ordering::Acquire));
+        for source in &sources {
+            assert_eq!(request_cached_image(source), CachedImageStatus::Ready);
+        }
         trim_cached_image_cache(0);
     }
 }
