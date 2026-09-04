@@ -3,14 +3,19 @@ use crate::{
     application::ApplicationContext,
     core::{
         component, content_text, context_provider, ComponentTree, HostTree, HostTreeBuilder,
-        RootComponent, UiRect, UiRuntime, UiScale,
+        RootComponent, UiRect, UiRuntime, UiScale, UiTask,
     },
-    events::Event,
+    events::{Event, EventKey},
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    task::{Context, Poll, Waker},
+};
 
 #[derive(Clone)]
 struct HookEvent;
+
+const HOOK_EVENT: EventKey<HookEvent> = EventKey::new("test.hook");
 
 impl Event for HookEvent {
     const NAME: &'static str = "test.hook";
@@ -19,6 +24,7 @@ impl Event for HookEvent {
 #[allow(dead_code)]
 fn async_event_hook_is_part_of_the_portable_api(cx: &mut RenderCx<'_, '_>) {
     cx.use_event_async_once::<HookEvent>(|_, _| async {});
+    cx.listen_async(HOOK_EVENT.clone(), |_| async {});
 }
 
 struct EventRoot {
@@ -31,9 +37,9 @@ impl RootComponent for EventRoot {
     fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         let content = if self.mounted {
             let deliveries = Arc::clone(&self.deliveries);
-            component((), move |cx, _| {
+            component((), move |_cx, _| {
                 let deliveries = Arc::clone(&deliveries);
-                cx.use_event_once::<HookEvent>(move |_| {
+                crate::events::listen(HOOK_EVENT.clone(), move |_| {
                     deliveries.fetch_add(1, Ordering::SeqCst);
                 });
                 content_text("mounted")
@@ -45,7 +51,7 @@ impl RootComponent for EventRoot {
     }
 }
 
-fn mount_event_root(ui: &UiRuntime, tree: HostTree, root: EventRoot) -> HostTree {
+fn mount_event_root(ui: &UiRuntime, tree: HostTree, root: impl RootComponent) -> HostTree {
     let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
     let interaction = ui.interaction_state();
     let mut builder = HostTreeBuilder::from_retained(tree);
@@ -64,6 +70,33 @@ fn mount_event_root(ui: &UiRuntime, tree: HostTree, root: EventRoot) -> HostTree
         UiScale::ONE,
     );
     builder.finish()
+}
+
+const ASYNC_SOURCE: EventKey<usize> = EventKey::new("test.async.source");
+const ASYNC_RESULT: EventKey<usize> = EventKey::new("test.async.result");
+
+struct AsyncEventRoot {
+    application: ApplicationContext,
+    total: Arc<AtomicUsize>,
+}
+
+impl RootComponent for AsyncEventRoot {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
+        let total = Arc::clone(&self.total);
+        context_provider(
+            self.application,
+            component((), move |_cx, _| {
+                crate::events::listen_async(ASYNC_SOURCE.clone(), |value| async move {
+                    crate::events::emit(ASYNC_RESULT.clone(), value).await;
+                });
+                let total = Arc::clone(&total);
+                crate::events::listen(ASYNC_RESULT.clone(), move |value| {
+                    total.fetch_add(value, Ordering::SeqCst);
+                });
+                content_text("async listeners")
+            }),
+        )
+    }
 }
 
 #[test]
@@ -140,7 +173,7 @@ fn event_hook_unsubscribes_when_its_component_unmounts() {
         },
     );
     ui.run_effects();
-    assert_eq!(application.emit(HookEvent), 1);
+    assert_eq!(application.emit_keyed(&HOOK_EVENT, HookEvent), 1);
     assert_eq!(deliveries.load(Ordering::SeqCst), 1);
 
     ui.component_tree().mark_all_dirty();
@@ -155,6 +188,31 @@ fn event_hook_unsubscribes_when_its_component_unmounts() {
     );
     ui.run_effects();
 
-    assert_eq!(application.emit(HookEvent), 0);
+    assert_eq!(application.emit_keyed(&HOOK_EVENT, HookEvent), 0);
     assert_eq!(deliveries.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn async_listener_tasks_inherit_their_application_scope() {
+    let ui = UiRuntime::new();
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
+    application.set_executor(Arc::new(|mut task: UiTask| {
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(matches!(task.as_mut().poll(&mut context), Poll::Ready(())));
+    }));
+    let total = Arc::new(AtomicUsize::new(0));
+
+    let _tree = mount_event_root(
+        &ui,
+        HostTree::new(),
+        AsyncEventRoot {
+            application: application.clone(),
+            total: Arc::clone(&total),
+        },
+    );
+    ui.run_effects();
+
+    assert_eq!(application.emit_keyed(&ASYNC_SOURCE, 4), 1);
+    assert_eq!(total.load(Ordering::SeqCst), 4);
 }

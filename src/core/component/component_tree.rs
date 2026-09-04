@@ -34,6 +34,7 @@ pub enum HookSlotKind {
     Stable,
     State,
     Effect,
+    Listener,
     Context,
     Store,
 }

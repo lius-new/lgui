@@ -61,15 +61,30 @@ impl EffectRegistry {
         F: FnOnce() -> R + 'static,
         R: IntoEffectCleanup,
     {
+        self.register_erased(
+            id,
+            Box::new(deps),
+            deps_equal::<D>,
+            Box::new(move || effect().into_cleanup()),
+        );
+    }
+
+    pub(super) fn register_erased(
+        &self,
+        id: HookId,
+        deps: Box<dyn Any>,
+        deps_equal: fn(&dyn Any, &dyn Any) -> bool,
+        run: Box<dyn FnOnce() -> Option<UiEffect> + 'static>,
+    ) {
         let mut staged = self.staged.borrow_mut();
         if staged.iter().any(|candidate| candidate.id == id) {
             panic!("effect hook `{id}` was registered more than once in one render");
         }
         staged.push(StagedEffect {
             id,
-            deps: Box::new(deps),
-            deps_equal: deps_equal::<D>,
-            run: Box::new(move || effect().into_cleanup()),
+            deps,
+            deps_equal,
+            run,
         });
     }
 

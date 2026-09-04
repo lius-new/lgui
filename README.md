@@ -14,9 +14,11 @@ Application resources are ordinary typed data. Asset resolvers and custom paint 
 provided to `Application`, while renderers own their native caches and device resources. Business
 crates do not create a second runtime, dispatcher, presenter, WndProc, or window registry.
 
-Commands and Events are typed, Application-scoped capabilities. They provide an `invoke` and
-`emit` programming model without string dispatch, serialization, IPC, or a Store dependency.
-Applications define the concrete contracts and register service-backed command handlers.
+Commands and Events are typed, Application-scoped capabilities. Commands use receiver-free
+`invoke::<C>(args).await`; Events use a stable `EventKey<T>` with
+`emit(key, payload).await`, `listen(key, listener)`, and `listen_async(key, listener)`.
+Neither path requires serialization, IPC, or a Store dependency. Applications define the
+concrete contracts and register service-backed command handlers.
 
 ```rust,ignore
 fn app(cx: &mut RenderCx<'_, '_>) -> Element {

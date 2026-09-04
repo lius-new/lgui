@@ -7,17 +7,19 @@ use std::{
     },
 };
 
-use super::{Event, EventSubscription};
+use super::{EventKey, EventSubscription};
 
 type EventListener = Arc<dyn Fn(&dyn Any) + Send + Sync + 'static>;
 
 pub(super) struct EventTopic {
+    pub(super) payload_type: TypeId,
+    pub(super) payload_name: &'static str,
     pub(super) listeners: HashMap<u64, EventListener>,
 }
 
 #[derive(Default)]
 pub(super) struct EventBusInner {
-    pub(super) topics: Mutex<HashMap<TypeId, EventTopic>>,
+    pub(super) topics: Mutex<HashMap<Arc<str>, EventTopic>>,
     next_subscription: AtomicU64,
 }
 
@@ -27,30 +29,36 @@ pub(crate) struct EventBus {
 }
 
 impl EventBus {
-    pub(crate) fn emit<E>(&self, event: E) -> usize
+    pub(crate) fn emit<T>(&self, key: &EventKey<T>, payload: T) -> usize
     where
-        E: Event,
+        T: Clone + Send + Sync + 'static,
     {
-        let listeners = self
-            .inner
-            .topics
-            .lock()
-            .expect("event bus poisoned")
-            .get(&TypeId::of::<E>())
-            .map(|topic| topic.listeners.values().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
+        let (listeners, mismatched_payload) = {
+            let topics = self.inner.topics.lock().expect("event bus poisoned");
+            match topics.get(key.as_str()) {
+                Some(topic) if topic.payload_type != TypeId::of::<T>() => {
+                    (Vec::new(), Some(topic.payload_name))
+                }
+                Some(topic) => (topic.listeners.values().cloned().collect::<Vec<_>>(), None),
+                None => (Vec::new(), None),
+            }
+        };
+        if let Some(expected) = mismatched_payload {
+            panic_payload_type::<T>(key.as_str(), expected);
+        }
         for listener in &listeners {
-            listener(&event);
+            listener(&payload);
         }
         listeners.len()
     }
 
-    pub(crate) fn subscribe<E>(
+    pub(crate) fn subscribe<T>(
         &self,
-        listener: impl Fn(E) + Send + Sync + 'static,
+        key: EventKey<T>,
+        listener: impl Fn(T) + Send + Sync + 'static,
     ) -> EventSubscription
     where
-        E: Event,
+        T: Clone + Send + Sync + 'static,
     {
         let id = self
             .inner
@@ -59,20 +67,44 @@ impl EventBus {
             .wrapping_add(1);
         let listener = Arc::new(move |event: &dyn Any| {
             let event = event
-                .downcast_ref::<E>()
-                .unwrap_or_else(|| panic!("event `{}` payload type mismatch", E::NAME));
+                .downcast_ref::<T>()
+                .unwrap_or_else(|| panic!("event payload type mismatch"));
             listener(event.clone());
         }) as EventListener;
-        self.inner
-            .topics
-            .lock()
-            .expect("event bus poisoned")
-            .entry(TypeId::of::<E>())
+        let name = key.shared_name();
+        let mut topics = self.inner.topics.lock().expect("event bus poisoned");
+        let mismatched_payload = topics.get(key.as_str()).and_then(|topic| {
+            (topic.payload_type != TypeId::of::<T>()).then_some(topic.payload_name)
+        });
+        if let Some(expected) = mismatched_payload {
+            drop(topics);
+            panic_payload_type::<T>(key.as_str(), expected);
+        }
+        let topic = topics
+            .entry(Arc::clone(&name))
             .or_insert_with(|| EventTopic {
+                payload_type: TypeId::of::<T>(),
+                payload_name: std::any::type_name::<T>(),
                 listeners: HashMap::new(),
-            })
-            .listeners
-            .insert(id, listener);
-        EventSubscription::new(&self.inner, TypeId::of::<E>(), id)
+            });
+        topic.listeners.insert(id, listener);
+        drop(topics);
+        EventSubscription::new(&self.inner, name, id)
     }
+
+    #[cfg(test)]
+    pub(crate) fn topic_count(&self) -> usize {
+        self.inner.topics.lock().expect("event bus poisoned").len()
+    }
+}
+
+fn panic_payload_type<T>(key: &str, expected: &'static str) -> !
+where
+    T: 'static,
+{
+    panic!(
+        "event key `{key}` is already bound to payload type `{}` and cannot be used with `{}`",
+        expected,
+        std::any::type_name::<T>()
+    );
 }

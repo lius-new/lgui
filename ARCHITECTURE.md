@@ -16,9 +16,14 @@ present and clean up when dependencies change or the component unmounts.
 
 Stores are Application-scoped data. Selector equality controls component invalidation. Router
 history and declarative route trees are also Application-scoped; nested Outlets retain independent
-component boundaries. Commands are typed request/response contracts, and Events are typed
-broadcasts. Neither subsystem depends on Store, Router, a platform backend, or application
-business types.
+component boundaries. Commands are typed request/response contracts. Events are keyed broadcasts:
+the stable string in `EventKey<T>` is the routing identity and `T` is the payload contract. Neither
+subsystem depends on Store, Router, a platform backend, or application business types.
+
+Receiver-free `invoke` and `emit` resolve the active Application from a poll-scoped context. LGUI
+task entry points restore that context on every Future poll, so executor thread migration cannot
+cross Application boundaries. Futures submitted to an external executor must be wrapped once by
+their owning `ApplicationContext::scope`; no process-global Application singleton is used.
 
 `WindowManager` owns typed IDs, owner relationships, visibility, close policy, DPI changes,
 input, and native resource release. Auxiliary windows share the same Application Context, Store,

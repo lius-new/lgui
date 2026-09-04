@@ -55,3 +55,13 @@ fn duplicate_command_registration_is_rejected() {
         .command_registry()
         .register::<Add>(|_, _| async { Ok(1) }));
 }
+
+#[test]
+fn free_invoke_routes_through_the_scoped_application() {
+    let application = ApplicationContext::empty(crate::memory::test_memory_options());
+    assert!(application
+        .command_registry()
+        .register::<Add>(|_, (left, right)| async move { Ok(left + right) }));
+
+    assert_eq!(run_ready(application.scope(invoke::<Add>((4, 5)))), Ok(9));
+}

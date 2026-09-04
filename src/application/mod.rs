@@ -6,6 +6,7 @@ mod context;
 mod error;
 mod handle;
 mod renderer_selection;
+mod scope;
 #[cfg(all(
     feature = "tray-win32",
     any(feature = "backend-win32", feature = "backend-winit")
@@ -41,6 +42,7 @@ pub use handle::{ApplicationHandle, ApplicationTask};
 ))]
 pub use renderer_selection::RendererKind;
 pub use renderer_selection::{GraphicsPreference, RendererProbeError};
+pub(crate) use scope::{current_application, ApplicationScopeFuture};
 #[cfg(all(
     feature = "tray-win32",
     any(feature = "backend-win32", feature = "backend-winit")

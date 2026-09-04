@@ -248,6 +248,7 @@ impl HostTreeBuilder {
                     .component_boundary(root),
             )
         };
+        contexts.validate_listener_hooks();
         component_states.end_frame();
         component_tree.end_render();
         self.fresh_owners
@@ -260,6 +261,7 @@ impl HostTreeBuilder {
         if self.structure_changed {
             self.tree.reorder_by_hierarchy();
         }
+        contexts.commit_listener_effects(component_tree, effects);
         contexts.end_render(component_tree);
         hook_states.end_render(component_tree);
         effects.end_frame(component_tree);

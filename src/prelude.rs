@@ -16,7 +16,9 @@ pub use crate::assets::{
     ImageLoader, ImageSource, ImageStatus, RemoteImageLoader, RemoteImageLoaderHandle,
     RenderResources,
 };
-pub use crate::command::{Command, CommandContext, CommandFuture, CommandHandle, CommandHandler};
+pub use crate::command::{
+    invoke, Command, CommandContext, CommandFuture, CommandHandle, CommandHandler,
+};
 pub use crate::core::{
     async_handler, async_handler_with, component, context_provider, group, Align, Axis, Color,
     EdgeInsets, Element, ElementKey, ImageCachePolicy, ImageDecodePolicy, ImageRequest, RenderCx,
@@ -34,7 +36,10 @@ pub use crate::diagnostics::{
 pub use crate::dialogs::{
     FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
 };
-pub use crate::events::{AsyncEventHandler, Event, EventFuture, EventSubscription};
+pub use crate::events::{
+    emit, listen, listen_async, listen_async_with, listen_with, AsyncEventHandler, Event,
+    EventFuture, EventKey, EventSubscription, InvalidEventKey,
+};
 pub use crate::memory::{
     CacheDomain, CachePriority, CacheScope, MemoryAction, MemoryBudget, MemoryDomainBudgets,
     MemoryEventPolicy, MemoryOptions, MemorySnapshot, RetentionClass, TrimReason,

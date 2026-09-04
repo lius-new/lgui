@@ -31,11 +31,12 @@ where
 
     pub async fn invoke(&self, args: C::Args) -> Result<C::Output, C::Error> {
         let handler = self.application.command_registry().handler::<C>();
-        let result = handler
-            .invoke(
+        let result = self
+            .application
+            .scope(handler.invoke(
                 CommandContext::new(self.application.clone()),
                 Box::new(args),
-            )
+            ))
             .await;
         match result {
             Ok(output) => Ok(output

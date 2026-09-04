@@ -27,7 +27,7 @@ use crate::services::NotificationHandle;
 #[cfg(feature = "store")]
 use crate::store::StoreRuntime;
 
-use super::{RenderError, RenderErrorRegistration, WindowManager};
+use super::{ApplicationScopeFuture, RenderError, RenderErrorRegistration, WindowManager};
 
 #[derive(Clone)]
 pub struct ApplicationContext {
@@ -181,21 +181,39 @@ impl ApplicationContext {
     where
         C: Command,
     {
-        self.command::<C>().invoke(args).await
+        self.scope(self.command::<C>().invoke(args)).await
     }
 
     pub fn emit<E>(&self, event: E) -> usize
     where
         E: Event,
     {
-        self.inner.events.emit(event)
+        self.emit_keyed(&crate::events::EventKey::new(E::NAME), event)
     }
 
     pub fn subscribe<E>(&self, listener: impl Fn(E) + Send + Sync + 'static) -> EventSubscription
     where
         E: Event,
     {
-        self.inner.events.subscribe(listener)
+        self.subscribe_keyed(crate::events::EventKey::new(E::NAME), listener)
+    }
+
+    pub fn subscribe_keyed<T>(
+        &self,
+        key: crate::events::EventKey<T>,
+        listener: impl Fn(T) + Send + Sync + 'static,
+    ) -> EventSubscription
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.inner.events.subscribe(key, listener)
+    }
+
+    pub(crate) fn emit_keyed<T>(&self, key: &crate::events::EventKey<T>, payload: T) -> usize
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.inner.events.emit(key, payload)
     }
 
     pub(crate) fn command_registry(&self) -> &CommandRegistry {
@@ -257,8 +275,19 @@ impl ApplicationContext {
         else {
             return false;
         };
-        executor.spawn(Box::pin(task));
+        executor.spawn(Box::pin(self.scope(task)));
         true
+    }
+
+    /// Runs a Future with this Application as the active context on every poll.
+    ///
+    /// LGUI task APIs apply this automatically. Use `scope` when an
+    /// application-owned Future is submitted to an external executor.
+    pub fn scope<F>(&self, future: F) -> impl Future<Output = F::Output>
+    where
+        F: Future,
+    {
+        ApplicationScopeFuture::new(self.clone(), future)
     }
 
     pub fn windows(&self) -> WindowManager {
@@ -294,11 +323,20 @@ impl ApplicationContext {
     }
 
     pub(crate) fn task_spawner(&self) -> Option<UiTaskSpawner> {
-        self.inner
+        let executor = self
+            .inner
             .executor
             .read()
             .expect("UI executor poisoned")
-            .clone()
+            .clone()?;
+        let application = Arc::downgrade(&self.inner);
+        Some(Arc::new(move |task: crate::core::UiTask| {
+            let Some(inner) = application.upgrade() else {
+                return;
+            };
+            let application = ApplicationContext { inner };
+            executor.spawn(Box::pin(application.scope(task)));
+        }))
     }
 }
 

@@ -5,7 +5,9 @@ use std::{
     rc::Rc,
 };
 
-use super::{ComponentId, ComponentTree};
+use super::{
+    ComponentId, ComponentTree, EffectRegistry, HookId, HookSlotKind, IntoEffectCleanup, UiEffect,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ProviderKey {
@@ -23,6 +25,14 @@ struct CurrentContext {
     consumer: ComponentId,
 }
 
+struct StagedListenerEffect {
+    component: ComponentId,
+    index: usize,
+    deps: Box<dyn Any>,
+    deps_equal: fn(&dyn Any, &dyn Any) -> bool,
+    run: Box<dyn FnOnce() -> Option<UiEffect> + 'static>,
+}
+
 #[derive(Clone, Default)]
 pub struct ContextRegistry {
     inner: Rc<ContextRegistryState>,
@@ -35,6 +45,11 @@ struct ContextRegistryState {
     consumers: RefCell<HashMap<ProviderKey, HashSet<ComponentId>>>,
     provider_rollback: RefCell<HashMap<ProviderKey, Option<Box<dyn Any>>>>,
     consumer_rollback: RefCell<Option<HashMap<ProviderKey, HashSet<ComponentId>>>>,
+    listener_counts: RefCell<HashMap<ComponentId, usize>>,
+    listener_count_rollback: RefCell<Option<HashMap<ComponentId, usize>>>,
+    listener_rendered: RefCell<HashSet<ComponentId>>,
+    listener_next: RefCell<HashMap<ComponentId, usize>>,
+    staged_listener_effects: RefCell<Vec<StagedListenerEffect>>,
     render_active: Cell<bool>,
 }
 
@@ -78,6 +93,11 @@ impl ContextRegistry {
         self.restore_render_state();
         self.inner.active.borrow_mut().clear();
         *self.inner.consumer_rollback.borrow_mut() = Some(self.inner.consumers.borrow().clone());
+        *self.inner.listener_count_rollback.borrow_mut() =
+            Some(self.inner.listener_counts.borrow().clone());
+        self.inner.listener_rendered.borrow_mut().clear();
+        self.inner.listener_next.borrow_mut().clear();
+        self.inner.staged_listener_effects.borrow_mut().clear();
         self.inner.render_active.set(true);
     }
 
@@ -86,6 +106,44 @@ impl ContextRegistry {
             consumers.remove(&component);
             !consumers.is_empty()
         });
+        self.inner.listener_rendered.borrow_mut().insert(component);
+        self.inner.listener_next.borrow_mut().insert(component, 0);
+    }
+
+    pub(crate) fn validate_listener_hooks(&self) {
+        let rendered = self.inner.listener_rendered.borrow();
+        let next = self.inner.listener_next.borrow();
+        let counts = self.inner.listener_counts.borrow();
+        for component in rendered.iter().copied() {
+            let current = next.get(&component).copied().unwrap_or_default();
+            if let Some(previous) = counts.get(&component) {
+                assert_eq!(
+                    *previous, current,
+                    "component {component} changed its receiver-free listener hook count from {previous} to {current}"
+                );
+            }
+        }
+        drop(counts);
+        drop(next);
+        drop(rendered);
+    }
+
+    pub(crate) fn commit_listener_effects(
+        &self,
+        components: &ComponentTree,
+        effects: &EffectRegistry,
+    ) {
+        for staged in self.inner.staged_listener_effects.borrow_mut().drain(..) {
+            if !components.is_alive(staged.component) {
+                continue;
+            }
+            effects.register_erased(
+                HookId::new(staged.component, staged.index, HookSlotKind::Listener),
+                staged.deps,
+                staged.deps_equal,
+                staged.run,
+            );
+        }
     }
 
     pub fn end_render(&self, components: &ComponentTree) {
@@ -107,11 +165,30 @@ impl ContextRegistry {
         });
         self.inner.provider_rollback.borrow_mut().clear();
         self.inner.consumer_rollback.borrow_mut().take();
+        {
+            let rendered = self.inner.listener_rendered.borrow();
+            let next = self.inner.listener_next.borrow();
+            let mut counts = self.inner.listener_counts.borrow_mut();
+            for component in rendered.iter().copied() {
+                counts.insert(component, next.get(&component).copied().unwrap_or_default());
+            }
+            counts.retain(|component, _| components.is_alive(*component));
+        }
+        self.inner.listener_count_rollback.borrow_mut().take();
+        self.inner.listener_rendered.borrow_mut().clear();
+        self.inner.listener_next.borrow_mut().clear();
+        self.inner.staged_listener_effects.borrow_mut().clear();
         self.inner.render_active.set(false);
     }
 
     pub fn abort_render(&self, _components: &ComponentTree) {
         self.inner.active.borrow_mut().clear();
+        self.inner.staged_listener_effects.borrow_mut().clear();
+        self.inner.listener_rendered.borrow_mut().clear();
+        self.inner.listener_next.borrow_mut().clear();
+        if let Some(counts) = self.inner.listener_count_rollback.borrow_mut().take() {
+            *self.inner.listener_counts.borrow_mut() = counts;
+        }
         self.restore_render_state();
         self.inner.render_active.set(false);
     }
@@ -222,7 +299,40 @@ impl ContextRegistry {
         self.inner.consumers.borrow_mut().clear();
         self.inner.provider_rollback.borrow_mut().clear();
         self.inner.consumer_rollback.borrow_mut().take();
+        self.inner.listener_counts.borrow_mut().clear();
+        self.inner.listener_count_rollback.borrow_mut().take();
+        self.inner.listener_rendered.borrow_mut().clear();
+        self.inner.listener_next.borrow_mut().clear();
+        self.inner.staged_listener_effects.borrow_mut().clear();
         self.inner.render_active.set(false);
+    }
+
+    fn stage_current_listener<D, F, R>(&self, component: ComponentId, deps: D, effect: F)
+    where
+        D: Clone + PartialEq + 'static,
+        F: FnOnce() -> R + 'static,
+        R: IntoEffectCleanup,
+    {
+        assert!(
+            self.inner.render_active.get(),
+            "receiver-free `listen` may only be called while rendering a component"
+        );
+        let index = {
+            let mut next = self.inner.listener_next.borrow_mut();
+            let index = next.get(&component).copied().unwrap_or_default();
+            next.insert(component, index + 1);
+            index
+        };
+        self.inner
+            .staged_listener_effects
+            .borrow_mut()
+            .push(StagedListenerEffect {
+                component,
+                index,
+                deps: Box::new(deps),
+                deps_equal: listener_deps_equal::<D>,
+                run: Box::new(move || effect().into_cleanup()),
+            });
     }
 
     pub(crate) fn enter_current(&self, consumer: ComponentId) -> CurrentContextGuard {
@@ -274,6 +384,35 @@ impl Drop for CurrentContextGuard {
                 .expect("current context stack underflow");
         });
     }
+}
+
+pub(crate) fn stage_current_listener<D, F, R>(deps: D, effect: F)
+where
+    D: Clone + PartialEq + 'static,
+    F: FnOnce() -> R + 'static,
+    R: IntoEffectCleanup,
+{
+    let current = CURRENT_CONTEXT
+        .with(|stack| stack.borrow().last().cloned())
+        .unwrap_or_else(|| {
+            panic!("receiver-free `listen` may only be called while rendering a component")
+        });
+    current
+        .registry
+        .stage_current_listener(current.consumer, deps, effect);
+}
+
+fn listener_deps_equal<D>(left: &dyn Any, right: &dyn Any) -> bool
+where
+    D: PartialEq + 'static,
+{
+    let left = left
+        .downcast_ref::<D>()
+        .unwrap_or_else(|| panic!("listener dependency type changed between renders"));
+    let right = right
+        .downcast_ref::<D>()
+        .unwrap_or_else(|| panic!("listener dependency type changed during render"));
+    left == right
 }
 
 #[cfg(test)]

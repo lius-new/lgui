@@ -75,6 +75,7 @@ pub use component_tree::{
 };
 pub use compositing_layer::{CompositingLayerBackground, CompositingLayerSpec, LayerTransform};
 pub use context::UiRenderContext;
+pub(crate) use context_value::stage_current_listener;
 pub use context_value::{try_use_context, use_context, ContextProviderGuard, ContextRegistry};
 pub use declarative::{
     animated_compositing_layer, clip, clip_path, component, compositing_layer, content_text,

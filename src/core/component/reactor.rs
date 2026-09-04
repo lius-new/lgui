@@ -1,11 +1,9 @@
 use std::{
     any::type_name,
+    future::Future,
     ops::Deref,
     sync::{Arc, Mutex},
 };
-
-#[cfg(feature = "async")]
-use std::future::Future;
 
 #[cfg(feature = "router")]
 use super::{Back, Navigate, Replace, RouterContext};
@@ -15,7 +13,7 @@ use super::{
 };
 use crate::{
     command::{Command, CommandHandle},
-    events::{AsyncEventHandler, Event},
+    events::{AsyncEventHandler, Event, EventKey},
 };
 
 pub struct RenderCx<'a, 'ctx> {
@@ -131,11 +129,7 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
     ) where
         E: Event,
     {
-        let application = self.application();
-        self.use_effect(deps, move || {
-            let subscription = application.subscribe::<E>(handler);
-            move || drop(subscription)
-        });
+        self.listen_with(EventKey::new(E::NAME), deps, handler);
     }
 
     pub fn use_event_once<E>(&mut self, handler: impl Fn(E) + Send + Sync + 'static)
@@ -154,9 +148,10 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
     {
         let application = self.application();
         let handler = Arc::new(handler);
+        let key = EventKey::new(E::NAME);
         self.use_effect(deps, move || {
             let task_application = application.clone();
-            let subscription = application.subscribe::<E>(move |event| {
+            let subscription = application.subscribe_keyed(key, move |event| {
                 let context = super::UiAsyncContext::application_only(task_application.clone());
                 let _ = task_application.spawn(handler.call(context, event));
             });
@@ -169,6 +164,68 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         E: Event,
     {
         self.use_event_async::<E>((), handler);
+    }
+
+    /// Listens for a typed Event key for this component's mounted lifetime.
+    ///
+    /// The listener is installed only after a successful present and is
+    /// automatically removed when this component unmounts or the key changes.
+    pub fn listen<T>(&mut self, key: EventKey<T>, listener: impl Fn(T) + Send + Sync + 'static)
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.listen_with(key, (), listener);
+    }
+
+    /// Listens for a typed Event key and replaces the listener when `deps`
+    /// changes.
+    pub fn listen_with<T, D>(
+        &mut self,
+        key: EventKey<T>,
+        deps: D,
+        listener: impl Fn(T) + Send + Sync + 'static,
+    ) where
+        T: Clone + Send + Sync + 'static,
+        D: Clone + PartialEq + 'static,
+    {
+        let application = self.application();
+        let effect_deps = (key.clone(), deps);
+        self.use_effect(effect_deps, move || {
+            let subscription = application.subscribe_keyed(key, listener);
+            move || drop(subscription)
+        });
+    }
+
+    /// Listens for a typed Event key and schedules each callback Future on the
+    /// Application executor.
+    pub fn listen_async<T, F, Fut>(&mut self, key: EventKey<T>, listener: F)
+    where
+        T: Clone + Send + Sync + 'static,
+        F: Fn(T) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.listen_async_with(key, (), listener);
+    }
+
+    /// Asynchronously listens for a typed Event key and replaces the listener
+    /// when `deps` changes.
+    pub fn listen_async_with<T, D, F, Fut>(&mut self, key: EventKey<T>, deps: D, listener: F)
+    where
+        T: Clone + Send + Sync + 'static,
+        D: Clone + PartialEq + 'static,
+        F: Fn(T) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let application = self.application();
+        let effect_deps = (key.clone(), deps);
+        let listener = Arc::new(listener);
+        self.use_effect(effect_deps, move || {
+            let task_application = application.clone();
+            let subscription = application.subscribe_keyed(key, move |payload| {
+                let _ = task_application.spawn(listener(payload));
+            });
+            move || drop(subscription)
+        });
     }
 
     pub(crate) fn compile<V>(&self, view: V) -> UiElement

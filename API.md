@@ -150,15 +150,16 @@ Application::new()
     .run(app)?;
 ```
 
-Async UI handlers receive an owned `UiAsyncContext`, so they can await without retaining the
-synchronous input-dispatch borrow. The configured Application executor runs the handler.
+Async UI handlers run inside their owning Application scope, so they can call the receiver-free
+`invoke` and `emit` functions after an await or after moving between executor threads. The
+configured Application executor runs the handler.
 
 ```rust,ignore
-button(rect, "Login", style).on_click_async(move |ui| {
+button(rect, "Login", style).on_click_async(move |_ui| {
     let request = request.clone();
     let set_session = set_session.clone();
     async move {
-        set_session(ui.invoke::<Login>(request).await.ok());
+        set_session(invoke::<Login>(request).await.ok());
     }
 })
 ```
@@ -166,38 +167,43 @@ button(rect, "Login", style).on_click_async(move |ui| {
 Controlled widgets with value callbacks use the same adapter without a Store requirement:
 
 ```rust,ignore
-checkbox(rect, checked, async_handler_with(move |ui, checked| async move {
-    ui.invoke::<SetPreference>(checked).await.ok();
+checkbox(rect, checked, async_handler_with(move |_ui, checked| async move {
+    invoke::<SetPreference>(checked).await.ok();
 }))
 ```
 
-Effects can retain a cloneable command handle and await it independently of Store:
+Async Effects inherit the same Application scope:
 
 ```rust,ignore
-let load_profile = cx.command::<LoadProfile>();
 cx.use_async_effect(user_id.clone(), move || async move {
-    set_profile(load_profile.invoke(user_id).await.ok());
+    set_profile(invoke::<LoadProfile>(user_id).await.ok());
 });
 ```
 
-Events are typed Application broadcasts. `emit` is synchronous and returns the number of current
-listeners. `use_event` and `use_event_async` subscriptions are Effect-owned and unsubscribe when
-their dependencies change or their component unmounts.
+Events are keyed, typed Application broadcasts. `EventKey<T>` makes the key the real routing
+identity while preserving compile-time payload types. `emit(key, payload).await` returns the number
+of current listeners after synchronous listeners return and asynchronous listener tasks are
+scheduled; it does not await those tasks. `listen` and `listen_async` are Effect-owned and
+unsubscribe when their key changes or their component unmounts.
 
 ```rust,ignore
 #[derive(Clone)]
 struct DownloadProgress { received: u64, total: u64 }
 
-impl Event for DownloadProgress {
-    const NAME: &'static str = "download.progress";
-}
+const DOWNLOAD_PROGRESS: EventKey<DownloadProgress> =
+    EventKey::new("download.progress");
 
-cx.use_event::<DownloadProgress>((), move |progress| {
+listen(DOWNLOAD_PROGRESS, move |progress| {
     set_progress(progress.received as f32 / progress.total as f32);
 });
 
-ui.emit(DownloadProgress { received, total });
+emit(DOWNLOAD_PROGRESS, DownloadProgress { received, total }).await;
 ```
+
+Use `EventKey::dynamic(name)` for validated runtime keys. Emitting an unobserved dynamic key does
+not create a retained topic. A key name cannot be bound to conflicting payload types while it has
+active subscriptions. External executors do not implicitly inherit an Application; wrap their
+Future once with `application.scope(future)`.
 
 Use Commands for typed request/response work, Events for ephemeral broadcasts, State for local
 component values, and Store for shared renderable snapshots. None requires another.
