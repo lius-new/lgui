@@ -181,6 +181,7 @@ pub(super) fn bitmap_cache_eviction_plan(
 
 pub(super) struct D2dCompositingLayer {
     pub(super) content_signature: Option<u64>,
+    pub(super) shadow: Option<crate::core::ShadowStyle>,
     pub(super) background: CompositingLayerBackground,
     pub(super) width: i32,
     pub(super) height: i32,

@@ -71,6 +71,7 @@ impl HostRuntime {
             previous.parent != next.parent
                 || previous.kind != next.kind
                 || previous.render_phase != next.render_phase
+                || previous.shadow.is_some() != next.shadow.is_some()
         });
         let scene_structure_changed =
             changes.structure_changed || !changes.removed.is_empty() || scene_topology_changed;
@@ -91,6 +92,14 @@ impl HostRuntime {
         for (source, id) in &removed {
             let old_bounds = self.node(*id).paint_bounds;
             if let Some(owner) = self.scene_owner_source(*id) {
+                if let Some(bounds) = self
+                    .sources
+                    .get(&owner)
+                    .and_then(|id| self.scene.get(id))
+                    .and_then(|scene| super::scene::shadow_bounds(&scene.commands))
+                {
+                    invalidations.invalidate_rect(bounds);
+                }
                 dirty_scene_sources.insert(owner);
             }
             mutations.push(HostMutation::RemoveNode {
@@ -151,8 +160,9 @@ impl HostRuntime {
             let old_children = existing.children.clone();
             let old_interaction = existing.interaction;
             let next_paint = effective_node_paint_bounds(node);
-            let compositing_only =
-                was_mounted && compositing_spec_only_changed(&existing.node, node);
+            let compositing_only = was_mounted
+                && compositing_spec_only_changed(&existing.node, node)
+                && !tree.has_shadow_ancestor(&node.id);
 
             if !was_mounted {
                 mutations.push(HostMutation::InsertNode {
@@ -241,6 +251,7 @@ impl HostRuntime {
                 compositing_updates,
                 order_changed,
                 scene_structure_changed,
+                invalidations,
             );
         #[cfg(feature = "diagnostics-timing")]
         let scene_reconcile_ms =

@@ -13,6 +13,91 @@ use crate::{
 
 const TEST_CACHE_BUDGET: usize = 96 * 1024 * 1024;
 
+#[test]
+fn shadow_refreshes_when_an_async_image_finishes_without_scene_changes() {
+    use crate::assets::{ImageCacheHandle, ImageStatus};
+    use crate::core::{HostTree, ShadowStyle, UiNode, UiNodeKind};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let ready = Arc::new(AtomicBool::new(false));
+    let request_ready = ready.clone();
+    let bytes_ready = ready.clone();
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([255; 4]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let encoded: Arc<[u8]> = encoded.into_inner().into();
+    let _cache = crate::assets::install_image_cache(ImageCacheHandle::new(
+        move |_| {
+            if request_ready.load(Ordering::SeqCst) {
+                ImageStatus::Ready
+            } else {
+                ImageStatus::Loading
+            }
+        },
+        move |_| bytes_ready.load(Ordering::SeqCst).then(|| encoded.clone()),
+    ));
+    let mut tree = HostTree::new();
+    tree.push(
+        UiNode::new(
+            UiId::new("async-shadow"),
+            UiNodeKind::Image,
+            UiRect::new(8.0, 8.0, 24.0, 24.0),
+        )
+        .image(
+            UiImageSource::url("https://example.test/shadow.png"),
+            ImageFit::Fill,
+        )
+        .shadow(
+            ShadowStyle::default()
+                .alpha(255)
+                .blur(0.0)
+                .offset(32.0, 0.0),
+        ),
+    );
+    let scene = tree.scene();
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
+    let frame = FrameInfo::new(
+        PhysicalRect::new(0, 0, 64, 32),
+        &[],
+        UiScale::ONE,
+        FrameReason::SceneChange,
+        true,
+    );
+    surface.draw(&scene, &frame).unwrap();
+    assert!(surface.pixels().chunks_exact(4).all(|pixel| pixel[3] == 0));
+    ready.store(true, Ordering::SeqCst);
+    surface.draw(&scene, &frame).unwrap();
+    assert_eq!(pixel(&surface, 16, 16)[3], 255);
+    assert_eq!(pixel(&surface, 48, 16)[3], 255);
+}
+
+#[test]
+fn skia_shadow_uses_subtree_alpha_and_refreshes_cached_pixels() {
+    use crate::renderer::shadow::{assert_test_pixels, test_scene};
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
+    let frame = FrameInfo::new(
+        PhysicalRect::new(0, 0, 64, 64),
+        &[],
+        UiScale::ONE,
+        FrameReason::SceneChange,
+        true,
+    );
+    let scene = test_scene(128, 0.0);
+    surface.draw(&scene, &frame).unwrap();
+    assert_test_pixels(surface.pixels(), 64);
+    let snapshot = surface.pixels().to_vec();
+    surface.draw(&scene, &frame).unwrap();
+    assert_eq!(snapshot, surface.pixels());
+    surface.draw(&test_scene(128, 2.0), &frame).unwrap();
+    assert!(pixel(&surface, 44, 9)[3] > 0);
+    surface.draw(&test_scene(0, 2.0), &frame).unwrap();
+    assert_eq!(pixel(&surface, 44, 20), [0; 4]);
+    for (name, scene) in crate::renderer::shadow::test_shape_scenes() {
+        surface.draw(&scene, &frame).unwrap();
+        crate::renderer::shadow::assert_shape_shadow("skia", name, surface.pixels());
+    }
+}
+
 const PIXEL_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xB5, 0x1C, 0x0C,

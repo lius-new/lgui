@@ -442,6 +442,7 @@ pub(super) fn create_compositing_layer(
     let bitmap = create_scene_bitmap(&resources.context, width, height)?;
     Ok(D2dCompositingLayer {
         content_signature: None,
+        shadow: None,
         background,
         width,
         height,

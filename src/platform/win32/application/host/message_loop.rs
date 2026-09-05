@@ -40,8 +40,7 @@ pub(super) extern "system" fn window_proc(
                     .borrow_mut()
                     .iter_mut()
                     .map(|(raw, window)| {
-                        let bounds =
-                            image_repaint_bounds(window.session.tree().nodes(), &invalidated);
+                        let bounds = image_repaint_bounds(window.session.tree(), &invalidated);
                         for bound in &bounds {
                             window.session.invalidations_mut().invalidate_rect(*bound);
                         }
@@ -411,17 +410,21 @@ pub(super) extern "system" fn window_proc(
 
 #[cfg(feature = "images-win32")]
 pub(super) fn image_repaint_bounds(
-    nodes: &[Arc<crate::core::UiNode>],
+    tree: &crate::core::HostTree,
     invalidated: &std::collections::HashSet<String>,
 ) -> Vec<UiRect> {
     let mut bounds = Vec::new();
-    for node in nodes {
+    for node in tree.nodes() {
         let matches = node
             .image_request
             .as_ref()
             .is_some_and(|request| invalidated.contains(&request.cache_key()));
-        if matches && !bounds.contains(&node.paint_bounds) {
-            bounds.push(node.paint_bounds);
+        if matches {
+            if let Some(rect) = tree.paint_bounds([node.id.clone()]) {
+                if !bounds.contains(&rect) {
+                    bounds.push(rect);
+                }
+            }
         }
     }
     bounds

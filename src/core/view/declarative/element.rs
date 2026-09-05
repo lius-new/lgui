@@ -34,6 +34,7 @@ pub struct Element {
     animations: Vec<AnimationBinding>,
     animation_targets: Vec<(AnimProperty, bool)>,
     paint_bounds: Option<UiRect>,
+    shadow: Option<crate::core::ShadowStyle>,
     focus_scope: bool,
     defer_children: bool,
     children: Vec<Element>,
@@ -116,6 +117,7 @@ impl Element {
             animations: Vec::new(),
             animation_targets: Vec::new(),
             paint_bounds: None,
+            shadow: None,
             focus_scope: false,
             defer_children: false,
             children: Vec::new(),
@@ -184,6 +186,12 @@ impl Element {
 
     pub fn paint_bounds(mut self, rect: UiRect) -> Self {
         self.paint_bounds = Some(rect);
+        self
+    }
+
+    /// Applies one shadow to the composited element and subtree. Ancestor clips still apply.
+    pub fn shadow(mut self, style: crate::core::ShadowStyle) -> Self {
+        self.shadow = Some(style);
         self
     }
 
@@ -261,6 +269,9 @@ impl Element {
         }
         if self.focus_scope {
             element = element.focus_scope();
+        }
+        if let Some(shadow) = self.shadow {
+            element = element.shadow(shadow);
         }
         element
     }

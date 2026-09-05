@@ -5,6 +5,9 @@ pub(super) fn effective_node_paint_bounds(node: &UiNode) -> UiRect {
         .compositing_layer
         .map(|spec| spec.transform.transformed_bounds(node.layout_rect))
         .unwrap_or(node.paint_bounds);
+    let bounds = node
+        .shadow
+        .map_or(bounds, |shadow| shadow.paint_bounds(bounds));
     bounds.inflate(node.animation_outset.0, node.animation_outset.1)
 }
 
@@ -78,6 +81,7 @@ pub(super) fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.overlay_style != next.overlay_style
         || previous.custom_style != next.custom_style
         || previous.compositing_layer != next.compositing_layer
+        || previous.shadow != next.shadow
         || previous.static_layer != next.static_layer
         || previous.scroll_raster != next.scroll_raster
         || previous.clip_rect != next.clip_rect

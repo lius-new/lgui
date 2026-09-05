@@ -239,6 +239,19 @@ pub enum ImageFit {
 }
 
 impl ScenePrimitive {
+    pub(crate) fn contains_shadow(&self) -> bool {
+        match self {
+            Self::CompositingLayer { spec, commands, .. } => {
+                spec.shadow.is_some() || commands.iter().any(Self::contains_shadow)
+            }
+            Self::StaticLayer { commands, .. }
+            | Self::ScrollRaster { commands, .. }
+            | Self::Clip { commands, .. }
+            | Self::ClipPath { commands, .. } => commands.iter().any(Self::contains_shadow),
+            _ => false,
+        }
+    }
+
     pub const fn kind(&self) -> ScenePrimitiveKind {
         match self {
             Self::Rect { .. } => ScenePrimitiveKind::Rect,

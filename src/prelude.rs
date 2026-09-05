@@ -22,8 +22,8 @@ pub use crate::command::{
 pub use crate::core::{
     async_handler, async_handler_with, component, context_provider, group, Align, Axis, Color,
     EdgeInsets, Element, ElementKey, ImageCachePolicy, ImageDecodePolicy, ImageRequest, RenderCx,
-    RootComponent, Size, State, StateSetter, Stroke, TextAlign, TextStyle, UiAsyncContext,
-    UiEventContext, UiRect, VisualStyle,
+    RootComponent, ShadowStyle, Size, State, StateSetter, Stroke, TextAlign, TextStyle,
+    UiAsyncContext, UiEventContext, UiRect, VisualStyle,
 };
 #[cfg(feature = "open-url")]
 pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};

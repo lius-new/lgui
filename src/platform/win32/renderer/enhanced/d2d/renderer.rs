@@ -224,6 +224,12 @@ impl D2dRenderer {
                 content_signature,
                 ..
             } => {
+                let resolved_signature = crate::renderer::shadow::resolved_content_signature(
+                    commands,
+                    *content_signature,
+                );
+                let has_external_images = resolved_signature != *content_signature;
+                let content_signature = resolved_signature;
                 let (width, height) = raster_size(*rect);
                 let previous = self.compositing_layers.remove(id);
                 let mut layer = match previous {
@@ -236,12 +242,17 @@ impl D2dRenderer {
                     }
                     _ => create_compositing_layer(self, width, height, spec.background)?,
                 };
-                if layer.content_signature != Some(*content_signature) {
+                if layer.content_signature != Some(content_signature) || layer.shadow != spec.shadow
+                {
                     for command in commands {
                         self.ensure_static_layer_command(command, None)?;
                     }
                     let bounds = UiRect::new(0.0, 0.0, width as f32, height as f32);
-                    let damage = if layer.commands.is_empty() {
+                    let damage = if has_external_images
+                        || layer.commands.is_empty()
+                        || spec.shadow.is_some()
+                        || layer.shadow.is_some()
+                    {
                         vec![bounds]
                     } else {
                         compositing_layer_damage(&layer.commands, commands, bounds)
@@ -253,7 +264,25 @@ impl D2dRenderer {
                         commands,
                         &damage,
                     )?;
-                    layer.content_signature = Some(*content_signature);
+                    layer.content_signature = Some(content_signature);
+                    if let Some(shadow) = spec.shadow {
+                        let mut pixels =
+                            read_bitmap_bgra(&self.context, &layer.bitmap, width, height)?;
+                        crate::renderer::shadow::composite_shadow(
+                            &mut pixels,
+                            width as usize,
+                            height as usize,
+                            shadow,
+                        );
+                        layer.bitmap = create_bitmap_with_options(
+                            &self.context,
+                            width,
+                            height,
+                            D2D1_BITMAP_OPTIONS_TARGET,
+                            Some(&pixels),
+                        )?;
+                    }
+                    layer.shadow = spec.shadow;
                     layer.commands = commands.clone();
                 }
                 self.compositing_layers.insert(id.clone(), layer);
@@ -292,7 +321,8 @@ impl D2dRenderer {
                     self.bitmap_cache.insert(cache_key, bitmap);
                 }
             }
-            ScenePrimitive::Clip { rect, commands, .. } => {
+            ScenePrimitive::Clip { rect, commands, .. }
+            | ScenePrimitive::ClipPath { rect, commands, .. } => {
                 let nested_clip = clip.and_then(|clip| clip.intersect(*rect)).or(Some(*rect));
                 for command in commands {
                     self.ensure_static_layer_command(command, nested_clip)?;

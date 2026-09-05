@@ -221,6 +221,10 @@ pub(super) fn draw_gdi_compositing_layer(
     commands: &[ScenePrimitive],
     content_signature: u64,
 ) {
+    let resolved_signature =
+        crate::renderer::shadow::resolved_content_signature(commands, content_signature);
+    let has_external_images = resolved_signature != content_signature;
+    let content_signature = resolved_signature;
     let width = raster_length(rect.width());
     let height = raster_length(rect.height());
     let key = GdiCompositingLayerKey {
@@ -245,14 +249,30 @@ pub(super) fn draw_gdi_compositing_layer(
         }
     };
 
-    if layer.content_signature != Some(content_signature) {
+    if layer.content_signature != Some(content_signature) || layer.shadow != spec.shadow {
         let bounds = UiRect::new(0.0, 0.0, width as f32, height as f32);
-        let damage = if layer.commands.is_empty() {
+        let damage = if has_external_images
+            || layer.commands.is_empty()
+            || spec.shadow.is_some()
+            || layer.shadow.is_some()
+        {
             vec![bounds]
         } else {
             compositing_layer_damage(&layer.commands, commands, bounds)
         };
         layer.redraw(commands, &damage);
+        if let Some(shadow) = spec.shadow {
+            let pixels =
+                unsafe { std::slice::from_raw_parts_mut(layer.output.bits, layer.output.bytes) };
+            crate::renderer::shadow::composite_shadow(
+                pixels,
+                width as usize,
+                height as usize,
+                shadow,
+            );
+            layer.output.opaque = false;
+        }
+        layer.shadow = spec.shadow;
         layer.content_signature = Some(content_signature);
         layer.commands = commands.to_vec();
     }

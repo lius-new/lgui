@@ -187,6 +187,37 @@ pub(super) fn create_bitmap_with_options(
     }
 }
 
+pub(super) fn read_bitmap_bgra(
+    context: &ID2D1DeviceContext,
+    bitmap: &ID2D1Bitmap1,
+    width: i32,
+    height: i32,
+) -> Result<Vec<u8>> {
+    use windows::Win32::Graphics::Direct2D::{
+        D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_CPU_READ, D2D1_MAP_OPTIONS_READ,
+    };
+    let staging = create_bitmap_with_options(
+        context,
+        width,
+        height,
+        D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        None,
+    )?;
+    let row_bytes = width as usize * 4;
+    let mut pixels = vec![0; row_bytes * height as usize];
+    unsafe {
+        staging.CopyFromBitmap(None, bitmap, None)?;
+        let mapped = staging.Map(D2D1_MAP_OPTIONS_READ)?;
+        for y in 0..height as usize {
+            let row =
+                std::slice::from_raw_parts(mapped.bits.add(y * mapped.pitch as usize), row_bytes);
+            pixels[y * row_bytes..][..row_bytes].copy_from_slice(row);
+        }
+        staging.Unmap()?;
+    }
+    Ok(pixels)
+}
+
 pub(super) fn static_layer_cache_key(
     id: &UiId,
     spec: &StaticLayerSpec,

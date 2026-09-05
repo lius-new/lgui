@@ -264,6 +264,7 @@ pub struct UiNode {
     pub overlay_style: Option<OverlayStyle>,
     pub custom_style: Option<CustomPaintStyle>,
     pub compositing_layer: Option<CompositingLayerSpec>,
+    pub shadow: Option<super::ShadowStyle>,
     pub static_layer: Option<StaticLayerSpec>,
     pub scroll_raster: Option<ScrollRasterSpec>,
     pub clip_rect: Option<UiRect>,
@@ -313,6 +314,7 @@ impl UiNode {
             overlay_style: None,
             custom_style: None,
             compositing_layer: None,
+            shadow: None,
             static_layer: None,
             scroll_raster: None,
             clip_rect: None,
@@ -396,6 +398,7 @@ impl UiNode {
             && self.overlay_style == other.overlay_style
             && self.custom_style == other.custom_style
             && self.compositing_layer == other.compositing_layer
+            && self.shadow == other.shadow
             && self.static_layer == other.static_layer
             && self.scroll_raster == other.scroll_raster
             && self.clip_rect == other.clip_rect
@@ -642,6 +645,11 @@ impl UiNode {
 
     pub fn compositing_layer(mut self, spec: CompositingLayerSpec) -> Self {
         self.compositing_layer = Some(spec);
+        self
+    }
+
+    pub fn shadow(mut self, style: super::ShadowStyle) -> Self {
+        self.shadow = (style.alpha > 0).then_some(style);
         self
     }
 

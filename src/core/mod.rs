@@ -50,6 +50,8 @@ mod runtime;
 #[path = "component/scope.rs"]
 mod scope;
 mod semantics;
+#[path = "scene/shadow.rs"]
+mod shadow;
 #[path = "scene/static_layer.rs"]
 mod static_layer;
 #[path = "foundation/style.rs"]
@@ -140,6 +142,7 @@ pub use semantics::{
     SemanticAction, SemanticNode, SemanticRelationships, SemanticRole, SemanticState, SemanticText,
     SemanticUpdate, Semantics,
 };
+pub use shadow::ShadowStyle;
 pub use static_layer::{
     RasterCachePolicy, StaticLayerBackground, StaticLayerSource, StaticLayerSpec,
 };

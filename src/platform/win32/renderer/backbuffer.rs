@@ -1,4 +1,7 @@
-#[cfg(feature = "multi-window")]
+#[cfg(any(
+    feature = "multi-window",
+    all(feature = "renderer-gdi", not(feature = "advanced-rendering"))
+))]
 use std::ffi::c_void;
 
 #[cfg(feature = "multi-window")]
@@ -15,7 +18,10 @@ pub struct LayeredBackbuffer {
     hdc: HDC,
     bitmap: HBITMAP,
     old_bitmap: HGDIOBJ,
-    #[cfg(feature = "multi-window")]
+    #[cfg(any(
+        feature = "multi-window",
+        all(feature = "renderer-gdi", not(feature = "advanced-rendering"))
+    ))]
     bits: *mut c_void,
     width: i32,
     height: i32,
@@ -78,7 +84,10 @@ impl LayeredBackbuffer {
                 hdc,
                 bitmap,
                 old_bitmap,
-                #[cfg(feature = "multi-window")]
+                #[cfg(any(
+                    feature = "multi-window",
+                    all(feature = "renderer-gdi", not(feature = "advanced-rendering"))
+                ))]
                 bits,
                 width,
                 height,
@@ -114,7 +123,10 @@ impl LayeredBackbuffer {
         PhysicalRect::new(0, 0, self.width, self.height)
     }
 
-    #[cfg(feature = "multi-window")]
+    #[cfg(any(
+        feature = "multi-window",
+        all(feature = "renderer-gdi", not(feature = "advanced-rendering"))
+    ))]
     pub fn pixels(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
@@ -124,7 +136,10 @@ impl LayeredBackbuffer {
         }
     }
 
-    #[cfg(feature = "multi-window")]
+    #[cfg(any(
+        feature = "multi-window",
+        all(feature = "renderer-gdi", not(feature = "advanced-rendering"))
+    ))]
     pub fn copy_pixels_from(&mut self, pixels: &[u8]) -> bool {
         let expected_len = (self.width as usize)
             .saturating_mul(self.height as usize)

@@ -285,6 +285,32 @@ default. `.opacity(value)` controls composition opacity without invalidating ret
 is composited. Changing only these values reuses the existing surface pixels. Translation is in
 logical pixels and is projected through the current DPI scale.
 
+Every `Element`, `UiElement`, and `UiNode` accepts `.shadow(ShadowStyle)`:
+
+```rust,ignore
+group(bounds)
+    .content((background, avatar, name))
+    .shadow(ShadowStyle::new(Color::BLACK).alpha(72).offset(0.0, 4.0).blur(8.0).spread(0.0))
+```
+
+The shadow follows the alpha of the complete element and its subtree, including circles,
+paths, glyphs and transparent images supported by the selected renderer. Overlapping children
+produce one combined shadow. A child's own explicit shadow is included in its parent's content.
+Internal clips shape the source; ancestor clips constrain both content and shadow. Popup
+descendants retain their existing escape behavior.
+
+Offsets, blur and spread use logical pixels and follow DPI scaling. Blur is a Gaussian standard
+deviation, not a corner radius. Positive spread dilates the alpha mask and negative spread erodes
+it (a square kernel rounded outward to physical pixels). An alpha of zero disables the effect.
+Layout and hit bounds are unchanged; scene paint bounds and dirty regions include filter padding.
+
+Shadowed subtrees use transparent retained surfaces. GDI, Direct2D and Skia share the same alpha
+filter; Direct2D reads the source surface back only when its content or shadow changes. The
+filtered result is cached and reused when the subtree moves. Changing the source or filter
+rebuilds that surface, so large, continuously changing shadowed groups can be expensive.
+The basic GDI feature retains its existing primitive limitations; enable `advanced-rendering`
+for paths, images and antialiased alpha rendering.
+
 Do not use a full-window compositing layer only to preserve z-order. A regular `group` already
 keeps retained scene commands in order, and dirty-region rendering replays only commands that
 intersect the changed rectangles. Reserve compositing surfaces for content that must be

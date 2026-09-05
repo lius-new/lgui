@@ -89,7 +89,7 @@ notifications-win32 = [
   "windows/Win32_UI_Shell",
 ]
 router = []
-renderer-gdi = ["backend-win32"]
+renderer-gdi = ["backend-win32", "dep:image"]
 renderer-d2d = [
   "backend-win32",
   "dep:windows-numerics",

@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn gdi_shadow_uses_subtree_alpha_and_refreshes_cached_pixels() {
+    let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start().unwrap();
+    use crate::renderer::shadow::{assert_test_pixels, test_scene};
+    let seed = unsafe { CreateCompatibleDC(None) };
+    assert!(!seed.is_invalid());
+    let mut output =
+        GdiCompositingLayer::new(seed, 64, 64, CompositingLayerBackground::Transparent).unwrap();
+    let bounds = [UiRect::new(0.0, 0.0, 64.0, 64.0)];
+    let scene = test_scene(128, 0.0);
+    output.redraw(scene.commands(), &bounds);
+    let snapshot =
+        unsafe { std::slice::from_raw_parts(output.output.bits, output.output.bytes) }.to_vec();
+    assert_test_pixels(&snapshot, 64);
+    output.redraw(scene.commands(), &bounds);
+    assert_eq!(snapshot, unsafe {
+        std::slice::from_raw_parts(output.output.bits, output.output.bytes)
+    });
+    output.redraw(test_scene(128, 2.0).commands(), &bounds);
+    assert!(surface_pixel(&output.output, 44, 9)[3] > 0);
+    output.redraw(test_scene(0, 2.0).commands(), &bounds);
+    assert_eq!(surface_pixel(&output.output, 44, 20), [0; 4]);
+    for (name, scene) in crate::renderer::shadow::test_shape_scenes() {
+        output.redraw(scene.commands(), &bounds);
+        let pixels = unsafe { std::slice::from_raw_parts(output.output.bits, output.output.bytes) };
+        crate::renderer::shadow::assert_shape_shadow("gdi", name, pixels);
+    }
+    drop(output);
+    release_gdi_compositing_layer_scope(0);
+    unsafe {
+        let _ = DeleteDC(seed);
+    }
+}
+
+#[test]
 fn transparent_surface_reconstruction_preserves_black_and_partial_alpha() {
     assert_eq!(
         synthesize_transparent_pixel(&[0, 0, 0, 255], &[127, 127, 127, 255]),

@@ -231,8 +231,36 @@ fn completed_images_repaint_only_matching_node_bounds() {
             .paint_bounds(other_bounds),
     );
 
+    let mut tree = crate::core::HostTree::new();
+    tree.push(target.as_ref().clone());
+    tree.push(other.as_ref().clone());
     assert_eq!(
-        image_repaint_bounds(&[target, other], &HashSet::from([target_key])),
+        image_repaint_bounds(&tree, &HashSet::from([target_key])),
         vec![target_bounds]
     );
+}
+
+#[cfg(feature = "images-win32")]
+#[test]
+fn completed_images_repaint_their_ancestor_shadow() {
+    use crate::core::{
+        HostTree, ImageFit, ImageRequest, ShadowStyle, UiId, UiImageSource, UiNode, UiNodeKind,
+        UiRect,
+    };
+    let mut tree = HostTree::new();
+    let bounds = UiRect::new(100.0, 100.0, 140.0, 140.0);
+    tree.push(
+        UiNode::new(UiId::new("shadow"), UiNodeKind::Group, bounds).shadow(ShadowStyle::default()),
+    );
+    let request = ImageRequest::new(UiImageSource::url("https://example.test/avatar.png"));
+    let key = request.cache_key();
+    tree.push(
+        UiNode::new(UiId::new("image"), UiNodeKind::Image, bounds)
+            .parent(UiId::new("shadow"))
+            .image_request(request, ImageFit::Fill),
+    );
+    let damage = image_repaint_bounds(&tree, &std::collections::HashSet::from([key]));
+    assert_eq!(damage.len(), 1);
+    let shadow_bounds = tree.scene().commands()[0].paint_bounds();
+    assert_eq!(damage[0].intersect(shadow_bounds), Some(shadow_bounds));
 }

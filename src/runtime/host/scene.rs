@@ -3,7 +3,9 @@ use super::*;
 impl HostRuntime {
     pub(super) fn scene_owner_source(&self, id: HostNodeId) -> Option<UiId> {
         let mut current = id;
-        let mut owner = is_scene_drawable(self.node(current).kind).then_some(current);
+        let mut owner = (is_scene_drawable(self.node(current).kind)
+            || self.node(current).node.shadow.is_some())
+        .then_some(current);
         while let Some(parent) = self.node(current).parent {
             let current_node = self.node(current);
             let parent_node = self.node(parent);
@@ -12,7 +14,7 @@ impl HostRuntime {
             {
                 break;
             }
-            if is_scene_container(parent_node.kind) {
+            if is_scene_container(parent_node.kind) || parent_node.node.shadow.is_some() {
                 owner = Some(parent);
             }
             current = parent;
@@ -27,6 +29,7 @@ impl HostRuntime {
         compositing_updates: HashMap<UiId, CompositingLayerSpec>,
         host_order_changed: bool,
         scene_structure_changed: bool,
+        invalidations: &mut InvalidationSet,
     ) -> (Vec<SceneMutation>, Scene, usize, usize, f32) {
         let retained_order = !scene_structure_changed
             && self.initialized
@@ -59,7 +62,11 @@ impl HostRuntime {
             .map(SceneMutation::Remove)
             .collect::<Vec<_>>();
         for id in removed {
-            self.scene.remove(&id);
+            if let Some(scene) = self.scene.remove(&id) {
+                if let Some(bounds) = shadow_bounds(&scene.commands) {
+                    invalidations.invalidate_rect(bounds);
+                }
+            }
         }
 
         let mut dirty_roots = HashSet::new();
@@ -86,7 +93,14 @@ impl HostRuntime {
             let Some(scene) = self.scene.get_mut(&owner_id) else {
                 continue;
             };
+            let old_shadow_bounds = shadow_bounds(&scene.commands);
             if patch_compositing_layer_spec(&mut scene.commands, &source, spec) {
+                if let Some(bounds) = old_shadow_bounds {
+                    invalidations.invalidate_rect(bounds);
+                }
+                if let Some(bounds) = shadow_bounds(&scene.commands) {
+                    invalidations.invalidate_rect(bounds);
+                }
                 scene.signature = command_signature(&scene.commands);
                 if fast_updated.insert(owner_id) {
                     mutations.push(SceneMutation::Update(owner_id));
@@ -109,6 +123,15 @@ impl HostRuntime {
             compiled += 1;
             let commands = compiled_scene.commands().to_vec();
             let signature = command_signature(&commands);
+            let previous = self.scene.get(id);
+            if previous.is_none_or(|scene| scene.signature != signature) {
+                if let Some(bounds) = previous.and_then(|scene| shadow_bounds(&scene.commands)) {
+                    invalidations.invalidate_rect(bounds);
+                }
+                if let Some(bounds) = shadow_bounds(&commands) {
+                    invalidations.invalidate_rect(bounds);
+                }
+            }
             match self.scene.get_mut(id) {
                 Some(scene) if scene.signature == signature => reused += 1,
                 Some(scene) => {
@@ -207,9 +230,20 @@ fn command_signature(commands: &[ScenePrimitive]) -> u64 {
     })
 }
 
+pub(super) fn shadow_bounds(commands: &[ScenePrimitive]) -> Option<UiRect> {
+    if !commands.iter().any(ScenePrimitive::contains_shadow) {
+        return None;
+    }
+    commands
+        .iter()
+        .map(ScenePrimitive::paint_bounds)
+        .reduce(UiRect::union)
+}
+
 fn scene_owner_source_for_tree(tree: &HostTree, source: &UiId) -> Option<UiId> {
     let mut current = tree.node(source)?;
-    let mut owner = is_scene_drawable(current.kind).then(|| current.id.clone());
+    let mut owner =
+        (is_scene_drawable(current.kind) || current.shadow.is_some()).then(|| current.id.clone());
     while let Some(parent_id) = current.parent.as_ref() {
         let Some(parent) = tree.node(parent_id) else {
             break;
@@ -219,7 +253,7 @@ fn scene_owner_source_for_tree(tree: &HostTree, source: &UiId) -> Option<UiId> {
         {
             break;
         }
-        if is_scene_container(parent.kind) {
+        if is_scene_container(parent.kind) || parent.shadow.is_some() {
             owner = Some(parent.id.clone());
         }
         current = parent;

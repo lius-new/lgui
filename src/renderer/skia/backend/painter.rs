@@ -76,7 +76,18 @@ impl SkiaPainter<'_> {
                 content_signature,
                 ..
             } => {
-                let key = format!("composite:{}:{content_signature}", id.as_str());
+                let content_signature = crate::renderer::shadow::resolved_content_signature(
+                    commands,
+                    *content_signature,
+                );
+                let key = format!(
+                    "composite:{}:{content_signature}:{}x{}:{:?}:{:?}",
+                    id.as_str(),
+                    rect.width().ceil(),
+                    rect.height().ceil(),
+                    spec.background,
+                    spec.shadow
+                );
                 let image = if let Some(image) = self.cache.get(&key) {
                     image
                 } else {
@@ -86,6 +97,7 @@ impl SkiaPainter<'_> {
                         0.0,
                         0.0,
                         spec.background == CompositingLayerBackground::Opaque,
+                        spec.shadow,
                     )?;
                     self.cache.insert(key, image)
                 };
@@ -202,6 +214,7 @@ impl SkiaPainter<'_> {
         offset_x: f32,
         offset_y: f32,
         opaque: bool,
+        shadow: Option<crate::core::ShadowStyle>,
     ) -> Result<Image, String> {
         let mut surface = layer_surface(size.0, size.1)?;
         let canvas = surface.canvas();
@@ -212,6 +225,29 @@ impl SkiaPainter<'_> {
         });
         canvas.translate((-offset_x, -offset_y));
         self.draw_commands(canvas, commands, None)?;
+        if let Some(shadow) = shadow {
+            let width = surface.width();
+            let height = surface.height();
+            let info = ImageInfo::new(
+                (width, height),
+                ColorType::BGRA8888,
+                AlphaType::Premul,
+                None,
+            );
+            let row_bytes = width as usize * 4;
+            let mut pixels = vec![0; row_bytes * height as usize];
+            if !surface.read_pixels(&info, &mut pixels, row_bytes, (0, 0)) {
+                return Err("Skia could not read shadow alpha".to_owned());
+            }
+            crate::renderer::shadow::composite_shadow(
+                &mut pixels,
+                width as usize,
+                height as usize,
+                shadow,
+            );
+            return skia_safe::images::raster_from_data(&info, Data::new_copy(&pixels), row_bytes)
+                .ok_or_else(|| "Skia could not create shadow surface".to_owned());
+        }
         Ok(surface.image_snapshot())
     }
 

@@ -405,6 +405,12 @@ impl UiElement {
         self
     }
 
+    /// Shadows this element and its subtree as one alpha silhouette, without changing layout.
+    pub fn shadow(mut self, style: super::ShadowStyle) -> Self {
+        self.node = self.node.shadow(style);
+        self
+    }
+
     pub fn scroll_raster_spec(mut self, spec: ScrollRasterSpec) -> Self {
         self.node = self.node.scroll_raster(spec);
         self

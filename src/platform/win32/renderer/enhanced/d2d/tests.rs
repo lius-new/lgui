@@ -1,5 +1,107 @@
 use super::*;
 
+fn shadow_test_renderer() -> D2dRenderer {
+    use windows::Win32::{
+        Foundation::HMODULE,
+        Graphics::{
+            Direct2D::{
+                D2D1CreateFactory, ID2D1Factory1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            },
+            Direct3D::D3D_DRIVER_TYPE_WARP,
+            Direct3D11::{D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION},
+            DirectWrite::{DWriteCreateFactory, DWRITE_FACTORY_TYPE_SHARED},
+            Dxgi::IDXGIDevice,
+        },
+    };
+    unsafe {
+        let mut device = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_WARP,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            None,
+        )
+        .unwrap();
+        let dxgi: IDXGIDevice = device.unwrap().cast().unwrap();
+        let factory: ID2D1Factory1 =
+            D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None).unwrap();
+        let device = factory.CreateDevice(&dxgi).unwrap();
+        let context = device
+            .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)
+            .unwrap();
+        let dwrite = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).unwrap();
+        D2dRenderer::new(context, dwrite, 64, 64).unwrap()
+    }
+}
+
+#[test]
+fn d2d_shadow_uses_subtree_alpha_and_refreshes_cached_pixels() {
+    let _gdiplus = crate::platform::win32::gdiplus::GdiPlusRuntime::start().unwrap();
+    use crate::renderer::shadow::{assert_test_pixels, test_scene};
+    let mut renderer = shadow_test_renderer();
+    let scene = test_scene(128, 0.0);
+    renderer.draw_scene_full(&scene).unwrap();
+    let snapshot = read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap();
+    assert_test_pixels(&snapshot, 64);
+    renderer.draw_scene_full(&scene).unwrap();
+    assert_eq!(
+        snapshot,
+        read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap()
+    );
+    renderer.draw_scene_full(&test_scene(128, 2.0)).unwrap();
+    let pixels = read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap();
+    assert!(pixels[(9 * 64 + 44) * 4 + 3] > 0);
+    renderer.draw_scene_full(&test_scene(0, 2.0)).unwrap();
+    let pixels = read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap();
+    assert_eq!(&pixels[(20 * 64 + 44) * 4..][..4], &[0; 4]);
+    for (name, scene) in crate::renderer::shadow::test_shape_scenes() {
+        renderer.draw_scene_full(&scene).unwrap();
+        let pixels = read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap();
+        crate::renderer::shadow::assert_shape_shadow("d2d", name, &pixels);
+    }
+}
+
+#[test]
+fn d2d_path_clip_preserves_shadow_content_and_clips_its_overflow() {
+    use crate::core::{Point, RenderPhase};
+    let mut renderer = shadow_test_renderer();
+    let source = crate::renderer::shadow::test_scene(128, 0.0);
+    let mut scene = Scene::new();
+    scene.push(ScenePrimitive::ClipPath {
+        id: UiId::new("shadow-clip"),
+        rect: UiRect::new(0.0, 0.0, 64.0, 64.0),
+        path: UiPath::new([
+            UiPathCommand::MoveTo(Point::new(0.0, 0.0)),
+            UiPathCommand::LineTo(Point::new(48.0, 0.0)),
+            UiPathCommand::LineTo(Point::new(48.0, 64.0)),
+            UiPathCommand::LineTo(Point::new(0.0, 64.0)),
+            UiPathCommand::Close,
+        ]),
+        commands: source.commands().to_vec(),
+        child_signature: 1,
+        phase: RenderPhase::Content,
+    });
+    renderer.draw_scene_full(&scene).unwrap();
+    let pixels = read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap();
+    crate::renderer::shadow::assert_test_pixels(&pixels, 64);
+    assert_eq!(&pixels[(20 * 64 + 50) * 4..][..4], &[0; 4]);
+
+    renderer.trim_to(0);
+    renderer
+        .draw_scene_dirty(&scene, &[UiRect::new(0.0, 0.0, 64.0, 64.0)])
+        .unwrap();
+    assert_eq!(
+        pixels,
+        read_bitmap_bgra(&renderer.context, &renderer.scene_bitmap, 64, 64).unwrap()
+    );
+}
+
 #[test]
 fn d2d_matrix_matches_backend_neutral_layer_transform() {
     let rect = UiRect::new(10.0, 20.0, 30.0, 60.0);

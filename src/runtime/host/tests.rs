@@ -1,6 +1,128 @@
 use super::*;
 use crate::core::{CompositingLayerSpec, Point, SemanticRole, Semantics, UiNode, VisualStyle};
 
+#[test]
+fn shadow_changes_and_removal_damage_the_entire_filtered_subtree() {
+    use crate::core::{Color, ShadowStyle};
+    let mut host = HostRuntime::new();
+    let interaction = UiInteractionState::default();
+    let viewport = UiRect::new(0.0, 0.0, 800.0, 600.0);
+    let make_tree = |x: f32, color: Color, shadow: bool| {
+        let mut tree = HostTree::new();
+        let bounds = UiRect::new(x, 100.0, x + 40.0, 140.0);
+        let mut root = UiNode::new(UiId::new("shadow-root"), UiNodeKind::Group, bounds);
+        if shadow {
+            root = root.shadow(ShadowStyle::default());
+        }
+        tree.push(root);
+        tree.push(
+            UiNode::new(UiId::new("shadow-child"), UiNodeKind::Ellipse, bounds)
+                .style(VisualStyle::filled(color))
+                .parent(UiId::new("shadow-root")),
+        );
+        tree
+    };
+    let first = host.commit(
+        &make_tree(100.0, Color::WHITE, true),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    let old_bounds = first.scene.commands()[0].paint_bounds();
+    let changed = host.commit(
+        &make_tree(100.0, Color::BLACK, true),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    assert!(changed
+        .damage
+        .details
+        .iter()
+        .any(|detail| detail.reason == DamageReason::Paint));
+    let damage = changed
+        .damage
+        .dirty
+        .rects()
+        .iter()
+        .copied()
+        .reduce(UiRect::union)
+        .unwrap();
+    assert_eq!(damage.intersect(old_bounds), Some(old_bounds));
+    let moved = host.commit(
+        &make_tree(250.0, Color::BLACK, true),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    for bounds in [old_bounds, moved.scene.commands()[0].paint_bounds()] {
+        assert!(moved
+            .damage
+            .dirty
+            .rects()
+            .iter()
+            .any(|rect| rect.intersect(bounds) == Some(bounds)));
+    }
+    let removed = host.commit(
+        &HostTree::new(),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    let previous_bounds = moved.scene.commands()[0].paint_bounds();
+    assert!(removed
+        .damage
+        .dirty
+        .rects()
+        .iter()
+        .any(|rect| rect.intersect(previous_bounds) == Some(previous_bounds)));
+}
+
+#[test]
+fn toggling_shadow_rebuilds_scene_ownership_without_changing_tree_structure() {
+    use crate::core::{Color, ProjectionChanges, ShadowStyle};
+    let mut host = HostRuntime::new();
+    let interaction = UiInteractionState::default();
+    let viewport = UiRect::new(0.0, 0.0, 500.0, 500.0);
+    let make_tree = |enabled| {
+        let mut tree = HostTree::new();
+        let bounds = UiRect::new(100.0, 100.0, 140.0, 140.0);
+        let mut root = UiNode::new(UiId::new("shadow-root"), UiNodeKind::Group, bounds);
+        if enabled {
+            root = root.shadow(ShadowStyle::default());
+        }
+        tree.push(root);
+        tree.push(
+            UiNode::new(UiId::new("shadow-child"), UiNodeKind::Panel, bounds)
+                .style(VisualStyle::filled(Color::WHITE))
+                .parent(UiId::new("shadow-root")),
+        );
+        tree
+    };
+    host.commit(
+        &make_tree(false),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    for enabled in [true, false, true] {
+        let tree = make_tree(enabled);
+        let changes = ProjectionChanges {
+            changed: [UiId::new("shadow-root")].into_iter().collect(),
+            ..Default::default()
+        };
+        let commit = host.commit_projection(
+            &tree,
+            &interaction,
+            viewport,
+            &mut InvalidationSet::new(),
+            changes,
+        );
+        assert_eq!(commit.scene.commands(), tree.scene().commands());
+        assert!(!commit.damage.dirty.is_empty());
+    }
+}
+
 fn compositing_content_signature(scene: &Scene, id: &UiId) -> u64 {
     scene
         .commands()

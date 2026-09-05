@@ -259,6 +259,7 @@ pub(super) struct GdiBitmapEntry {
 
 pub(super) struct GdiCompositingLayer {
     pub(super) content_signature: Option<u64>,
+    pub(super) shadow: Option<crate::core::ShadowStyle>,
     pub(super) background: CompositingLayerBackground,
     pub(super) width: i32,
     pub(super) height: i32,
@@ -479,6 +480,7 @@ impl GdiCompositingLayer {
         };
         Some(Self {
             content_signature: None,
+            shadow: None,
             background,
             width,
             height,

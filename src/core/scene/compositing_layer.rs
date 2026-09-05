@@ -208,6 +208,8 @@ pub struct CompositingLayerSpec {
     pub opacity: u8,
     pub background: CompositingLayerBackground,
     pub transform: LayerTransform,
+    // The scene compiler reserves transparent padding before assigning this effect.
+    pub(crate) shadow: Option<super::ShadowStyle>,
 }
 
 impl CompositingLayerSpec {
@@ -216,6 +218,7 @@ impl CompositingLayerSpec {
             opacity: 255,
             background: CompositingLayerBackground::Transparent,
             transform: LayerTransform::identity(),
+            shadow: None,
         }
     }
 

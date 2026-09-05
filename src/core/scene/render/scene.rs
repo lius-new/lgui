@@ -1,3 +1,4 @@
+use super::transform::{command_signature, translate_command};
 use super::{primitive::*, *};
 
 #[derive(Clone, Debug, Default)]
@@ -384,15 +385,44 @@ fn project_command(command: &ScenePrimitive, scale: UiScale) -> ScenePrimitive {
         } => {
             let mut spec = *spec;
             spec.transform = spec.transform.project_to_physical(scale);
+            spec.shadow = spec.shadow.map(|shadow| shadow.project_to_physical(scale));
+            let projected_rect = scale.physical_ui_rect(*rect);
+            let rect = if spec.shadow.is_some() {
+                UiRect::new(
+                    projected_rect.left.floor(),
+                    projected_rect.top.floor(),
+                    projected_rect.right.ceil(),
+                    projected_rect.bottom.ceil(),
+                )
+            } else {
+                projected_rect
+            };
+            let commands = commands
+                .iter()
+                .map(|command| {
+                    let projected = project_command(command, scale);
+                    if rect.left == projected_rect.left && rect.top == projected_rect.top {
+                        projected
+                    } else {
+                        translate_command(
+                            &projected,
+                            projected_rect.left - rect.left,
+                            projected_rect.top - rect.top,
+                        )
+                    }
+                })
+                .collect::<Vec<_>>();
+            let content_signature = if spec.shadow.is_some() {
+                command_signature(&commands)
+            } else {
+                content_signature ^ signature_scale
+            };
             ScenePrimitive::CompositingLayer {
                 id: id.clone(),
-                rect: scale.physical_ui_rect(*rect),
+                rect,
                 spec,
-                commands: commands
-                    .iter()
-                    .map(|command| project_command(command, scale))
-                    .collect(),
-                content_signature: content_signature ^ signature_scale,
+                commands,
+                content_signature,
                 phase: *phase,
             }
         }

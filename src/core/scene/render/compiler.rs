@@ -9,6 +9,17 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
         }
         let command_start = list.commands.len();
         let include_popup_subtree = node.render_phase == RenderPhase::Popup;
+        if node.shadow.is_some() {
+            push_node_and_children(
+                tree,
+                node,
+                Arc::make_mut(&mut list.commands),
+                &mut skip,
+                include_popup_subtree,
+            );
+            translate_popup_root_commands(&mut list, tree, node, command_start);
+            continue;
+        }
         if matches!(
             node.kind,
             UiNodeKind::CompositingLayer
@@ -112,14 +123,16 @@ pub fn scene_root_ids(tree: &HostTree) -> Vec<UiId> {
         if skip.contains(&node.id) {
             continue;
         }
-        if matches!(
-            node.kind,
-            UiNodeKind::CompositingLayer
-                | UiNodeKind::StaticLayer
-                | UiNodeKind::ScrollRaster
-                | UiNodeKind::Clip
-                | UiNodeKind::ClipPath
-        ) {
+        if node.shadow.is_some()
+            || matches!(
+                node.kind,
+                UiNodeKind::CompositingLayer
+                    | UiNodeKind::StaticLayer
+                    | UiNodeKind::ScrollRaster
+                    | UiNodeKind::Clip
+                    | UiNodeKind::ClipPath
+            )
+        {
             roots.push(node.id.clone());
             mark_node_and_descendants_skipped(
                 tree,
@@ -147,6 +160,17 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
     let mut list = Scene::new();
     let mut skip = HashSet::new();
     let include_popup_subtree = node.render_phase == RenderPhase::Popup;
+    if node.shadow.is_some() {
+        push_node_and_children(
+            tree,
+            node,
+            Arc::make_mut(&mut list.commands),
+            &mut skip,
+            include_popup_subtree,
+        );
+        translate_popup_root_commands(&mut list, tree, node, 0);
+        return list;
+    }
     if matches!(
         node.kind,
         UiNodeKind::CompositingLayer
@@ -373,6 +397,47 @@ fn push_node_and_children(
         return;
     }
     skip.insert(node.id.clone());
+    if let Some(shadow) = node.shadow {
+        let mut source = node.clone();
+        source.shadow = None;
+        let mut nested = Vec::new();
+        push_node_and_children(tree, &source, &mut nested, skip, include_popup_subtree);
+        let Some(content_bounds) = nested
+            .iter()
+            .map(ScenePrimitive::paint_bounds)
+            .reduce(UiRect::union)
+        else {
+            return;
+        };
+        // A shadowed compositing node needs two independent retained surfaces.
+        for command in &mut nested {
+            if let ScenePrimitive::CompositingLayer { id, .. } = command {
+                if *id == node.id {
+                    *id = UiId::owned(format!("{}.__shadow_content", node.id.as_str()));
+                }
+            }
+        }
+        let rect = shadow.paint_bounds(content_bounds.union(node.paint_bounds));
+        let rect = UiRect::new(
+            rect.left.floor(),
+            rect.top.floor(),
+            rect.right.ceil(),
+            rect.bottom.ceil(),
+        );
+        let nested = translate_commands(nested, -rect.left, -rect.top);
+        let content_signature = command_signature(&nested);
+        let mut spec = CompositingLayerSpec::new();
+        spec.shadow = Some(shadow);
+        commands.push(ScenePrimitive::CompositingLayer {
+            id: node.id.clone(),
+            rect,
+            spec,
+            commands: nested,
+            content_signature,
+            phase: node.render_phase,
+        });
+        return;
+    }
     if node.kind == UiNodeKind::Clip {
         let nested = compile_clip_commands(tree, node, skip, include_popup_subtree);
         let child_signature = command_signature(&nested);

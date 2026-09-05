@@ -30,6 +30,9 @@ use crate::{
 pub struct GdiRenderer {
     background: Color,
     backbuffer: Option<LayeredBackbuffer>,
+    #[cfg(not(feature = "advanced-rendering"))]
+    shadows:
+        std::cell::RefCell<std::collections::HashMap<crate::core::UiId, (u64, LayeredBackbuffer)>>,
     #[cfg(feature = "advanced-rendering")]
     compositing_layer_scope: u64,
 }
@@ -38,10 +41,107 @@ pub struct GdiRenderer {
 static NEXT_COMPOSITING_LAYER_SCOPE: AtomicU64 = AtomicU64::new(1);
 
 impl GdiRenderer {
+    #[cfg(not(feature = "advanced-rendering"))]
+    fn draw_shadow(&self, target: HDC, command: &ScenePrimitive) -> bool {
+        use std::hash::{Hash, Hasher};
+        use windows::Win32::Graphics::Gdi::{
+            AlphaBlend, GdiFlush, AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION,
+        };
+        let ScenePrimitive::CompositingLayer {
+            id,
+            rect,
+            spec,
+            commands,
+            content_signature,
+            ..
+        } = command
+        else {
+            return false;
+        };
+        let Some(shadow) = spec.shadow else {
+            return false;
+        };
+        let content_signature =
+            crate::renderer::shadow::resolved_content_signature(commands, *content_signature);
+        let width = rect.width().ceil().max(1.0) as i32;
+        let height = rect.height().ceil().max(1.0) as i32;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (content_signature, shadow, width, height).hash(&mut hasher);
+        let signature = hasher.finish();
+        let previous = self.shadows.borrow_mut().remove(id);
+        let output = if let Some((_, output)) = previous.filter(|(key, _)| *key == signature) {
+            output
+        } else {
+            let Some(mut black) = LayeredBackbuffer::new(target, width, height) else {
+                return false;
+            };
+            let Some(white) = LayeredBackbuffer::new(target, width, height) else {
+                return false;
+            };
+            let bounds = UiRect::new(0.0, 0.0, width as f32, height as f32);
+            fill_rect(black.hdc(), bounds, Color::BLACK);
+            fill_rect(white.hdc(), bounds, Color::WHITE);
+            self.draw_commands(black.hdc(), commands);
+            self.draw_commands(white.hdc(), commands);
+            unsafe {
+                let _ = GdiFlush();
+            }
+            let mut pixels = black.pixels().to_vec();
+            for (pixel, white) in pixels
+                .chunks_exact_mut(4)
+                .zip(white.pixels().chunks_exact(4))
+            {
+                let backdrop = (0..3)
+                    .map(|c| white[c].saturating_sub(pixel[c]) as u16)
+                    .sum::<u16>();
+                let alpha = 255u8.saturating_sub(((backdrop + 1) / 3) as u8);
+                for channel in &mut pixel[..3] {
+                    *channel = (*channel).min(alpha);
+                }
+                pixel[3] = alpha;
+            }
+            crate::renderer::shadow::composite_shadow(
+                &mut pixels,
+                width as usize,
+                height as usize,
+                shadow,
+            );
+            black.copy_pixels_from(&pixels);
+            black
+        };
+        let result = unsafe {
+            AlphaBlend(
+                target,
+                round_coord(rect.left),
+                round_coord(rect.top),
+                width,
+                height,
+                output.hdc(),
+                0,
+                0,
+                width,
+                height,
+                BLENDFUNCTION {
+                    BlendOp: AC_SRC_OVER as u8,
+                    BlendFlags: 0,
+                    SourceConstantAlpha: 255,
+                    AlphaFormat: AC_SRC_ALPHA as u8,
+                },
+            )
+        }
+        .as_bool();
+        self.shadows
+            .borrow_mut()
+            .insert(id.clone(), (signature, output));
+        result
+    }
+
     pub fn new(background: Color) -> Self {
         Self {
             background,
             backbuffer: None,
+            #[cfg(not(feature = "advanced-rendering"))]
+            shadows: Default::default(),
             #[cfg(feature = "advanced-rendering")]
             compositing_layer_scope: NEXT_COMPOSITING_LAYER_SCOPE.fetch_add(1, Ordering::Relaxed),
         }
@@ -56,13 +156,27 @@ impl GdiRenderer {
             .backbuffer
             .as_ref()
             .map_or(0, LayeredBackbuffer::byte_len);
-        crate::memory::CacheUsage {
+        let usage = crate::memory::CacheUsage {
             live_bytes,
             cpu_bytes: live_bytes,
             entries: usize::from(self.backbuffer.is_some()),
             largest_entry_bytes: live_bytes,
             ..Default::default()
-        }
+        };
+        #[cfg(not(feature = "advanced-rendering"))]
+        let usage = self
+            .shadows
+            .borrow()
+            .values()
+            .fold(usage, |mut usage, (_, buffer)| {
+                let bytes = buffer.byte_len();
+                usage.live_bytes += bytes;
+                usage.cpu_bytes += bytes;
+                usage.entries += 1;
+                usage.largest_entry_bytes = usage.largest_entry_bytes.max(bytes);
+                usage
+            });
+        usage
     }
 
     #[cfg(not(feature = "advanced-rendering"))]
@@ -98,7 +212,15 @@ impl GdiRenderer {
                     }
                 }
             }
-            ScenePrimitive::CompositingLayer { rect, commands, .. } => {
+            ScenePrimitive::CompositingLayer {
+                rect,
+                commands,
+                spec,
+                ..
+            } => {
+                if spec.shadow.is_some() && self.draw_shadow(target, command) {
+                    return;
+                }
                 let saved = unsafe { SaveDC(target) };
                 if saved != 0 {
                     unsafe {
@@ -140,6 +262,34 @@ impl GdiRenderer {
         viewport: PhysicalRect,
         damage: &[PhysicalRect],
     ) -> Result<(), Win32RenderError> {
+        #[cfg(not(feature = "advanced-rendering"))]
+        {
+            fn collect(
+                commands: &[ScenePrimitive],
+                live: &mut std::collections::HashSet<crate::core::UiId>,
+            ) {
+                for command in commands {
+                    match command {
+                        ScenePrimitive::CompositingLayer {
+                            id, spec, commands, ..
+                        } => {
+                            if spec.shadow.is_some() {
+                                live.insert(id.clone());
+                            }
+                            collect(commands, live);
+                        }
+                        ScenePrimitive::StaticLayer { commands, .. }
+                        | ScenePrimitive::ScrollRaster { commands, .. }
+                        | ScenePrimitive::Clip { commands, .. }
+                        | ScenePrimitive::ClipPath { commands, .. } => collect(commands, live),
+                        _ => {}
+                    }
+                }
+            }
+            let mut live = std::collections::HashSet::new();
+            collect(scene.commands(), &mut live);
+            self.shadows.borrow_mut().retain(|id, _| live.contains(id));
+        }
         let replace = self.backbuffer.as_ref().is_none_or(|buffer| {
             buffer.width() != viewport.width() || buffer.height() != viewport.height()
         });
@@ -395,5 +545,54 @@ fn win_rect(rect: UiRect) -> RECT {
         top: rect.top,
         right: rect.right,
         bottom: rect.bottom,
+    }
+}
+
+#[cfg(all(test, not(feature = "advanced-rendering")))]
+mod shadow_tests {
+    use super::*;
+
+    #[test]
+    fn basic_gdi_renders_and_clips_cached_shadow() {
+        use windows::Win32::Graphics::Gdi::{CreateCompatibleDC, DeleteDC, GdiFlush};
+        let dc = unsafe { CreateCompatibleDC(None) };
+        let output = LayeredBackbuffer::new(dc, 64, 64).unwrap();
+        let renderer = GdiRenderer::new(Color::WHITE);
+        let scene = crate::renderer::shadow::test_scene(255, 0.0);
+        let bounds = UiRect::new(0.0, 0.0, 64.0, 64.0);
+        renderer.clear(output.hdc(), bounds);
+        renderer.draw_commands(output.hdc(), scene.commands());
+        unsafe {
+            let _ = GdiFlush();
+        }
+        let offset = (20 * 64 + 44) * 4;
+        assert_eq!(&output.pixels()[offset..offset + 3], &[127, 127, 255]);
+        let snapshot = output.pixels().to_vec();
+        renderer.clear(output.hdc(), bounds);
+        renderer.draw_commands(output.hdc(), scene.commands());
+        unsafe {
+            let _ = GdiFlush();
+        }
+        assert_eq!(snapshot, output.pixels());
+        renderer.clear(output.hdc(), bounds);
+        renderer.draw_command(
+            output.hdc(),
+            &ScenePrimitive::Clip {
+                id: crate::core::UiId::new("clip"),
+                rect: UiRect::new(0.0, 0.0, 32.0, 64.0),
+                commands: scene.commands().to_vec(),
+                child_signature: 1,
+                phase: crate::core::RenderPhase::Content,
+            },
+        );
+        unsafe {
+            let _ = GdiFlush();
+        }
+        assert_eq!(&output.pixels()[offset..offset + 3], &[255; 3]);
+        drop(output);
+        drop(renderer);
+        unsafe {
+            let _ = DeleteDC(dc);
+        }
     }
 }

@@ -131,6 +131,8 @@ fn collect_nested_command_damage(
             },
         ) if previous_rect == next_rect
             && previous_spec == next_spec
+            && next_spec.shadow.is_none()
+            && next_spec.transform.is_identity()
             && previous_phase == next_phase =>
         {
             let local_bounds = UiRect::new(0.0, 0.0, next_rect.width(), next_rect.height());

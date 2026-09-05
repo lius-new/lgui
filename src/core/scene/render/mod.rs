@@ -42,4 +42,6 @@ pub use scene::{scroll_raster_command_snapshot_exists, Scene};
 pub(crate) use transform::translate_scene_primitive_for_backend;
 
 #[cfg(test)]
+mod shadow_tests;
+#[cfg(test)]
 mod tests;
