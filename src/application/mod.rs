@@ -19,8 +19,8 @@ pub use crate::renderer::RenderErrorStage;
 #[cfg(feature = "tray")]
 pub use crate::services::{TrayAction, TrayOptions};
 pub use crate::window::{
-    ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowHandle, WindowId, WindowManager,
-    WindowMode, WindowOptions, WindowPosition,
+    ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowFocusChanged, WindowHandle,
+    WindowId, WindowManager, WindowMode, WindowOptions, WindowPosition,
 };
 pub use backend::ApplicationBackend;
 #[cfg(all(

@@ -147,6 +147,20 @@ pub(super) extern "system" fn window_proc(
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_ACTIVATE => {
+            let focus = STATE.with(|state| {
+                state.borrow().get(&(hwnd.0 as isize)).map(|window| {
+                    (
+                        window.context.clone(),
+                        crate::window::WindowFocusChanged {
+                            window_id: window.id.clone(),
+                            focused: (wparam.0 & 0xFFFF) as u32 != WA_INACTIVE,
+                        },
+                    )
+                })
+            });
+            if let Some((context, event)) = focus {
+                context.emit(event);
+            }
             if (wparam.0 & 0xFFFF) as u32 == WA_INACTIVE {
                 let hide = STATE.with(|state| {
                     state

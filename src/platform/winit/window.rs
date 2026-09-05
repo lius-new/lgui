@@ -75,6 +75,10 @@ impl WinitWindow {
                 ));
             }
             WindowEvent::Focused(focused) => {
+                self.context.emit(crate::window::WindowFocusChanged {
+                    window_id: self.id.clone(),
+                    focused,
+                });
                 self.dispatch_input(InputEvent::Platform(crate::core::PlatformEvent::Focused(
                     focused,
                 )));
