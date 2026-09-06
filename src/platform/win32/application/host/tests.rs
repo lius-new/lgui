@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+mod render_lifecycle;
+
 use windows::Win32::Foundation::RECT;
 
 #[cfg(feature = "images-win32")]

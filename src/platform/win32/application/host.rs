@@ -46,7 +46,7 @@ use windows::{
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyCaret, DestroyIcon, DestroyWindow,
                 DispatchMessageW, GetClassLongPtrW, GetClientRect, GetCursorPos, GetMessageW,
-                GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
+                GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, IsIconic,
                 IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, PostQuitMessage,
                 RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW,
                 SetWindowPlacement, SetWindowPos, ShowWindow, TranslateMessage, UnregisterClassW,

@@ -267,6 +267,7 @@ pub(super) fn create_window(
                 hide_on_deactivate: options.hide_on_deactivate,
                 background_memory_optimization: options.background_memory_optimization,
                 rendering_suspended: false,
+                minimized: false,
                 interaction_mode: WindowInteractionMode::Idle,
                 resize_frame_throttle: ResizeFrameThrottle::default(),
                 visibility: OwnerVisibility {

@@ -16,6 +16,10 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
         let Some(state) = state.get_mut(&(hwnd.0 as isize)) else {
             return false;
         };
+        if state.rendering_suspended || state.minimized || unsafe { IsIconic(hwnd).as_bool() } {
+            state.session.invalidate_all();
+            return false;
+        }
         #[cfg(feature = "diagnostics")]
         let frame_started = state.diagnostics.as_ref().map(|_| Instant::now());
         let mut client = RECT::default();
@@ -28,7 +32,23 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
             );
             return schedule_render_retry(state);
         }
-        let physical = PhysicalSize::new(client.right.max(1), client.bottom.max(1));
+        let mut window = RECT::default();
+        if let Err(source) = unsafe { GetWindowRect(hwnd, &mut window) } {
+            report_render_error(
+                state,
+                RenderErrorStage::Prepare,
+                "read_window_bounds",
+                &source,
+            );
+            return schedule_render_retry(state);
+        }
+        // Shell minimize/restore transitions can expose iconic geometry before IsIconic changes.
+        // Reject it before layout or surface allocation can replace the retained full-size frame.
+        if should_skip_window_geometry(client, window) {
+            state.session.invalidate_all();
+            return false;
+        }
+        let physical = PhysicalSize::new(client.right - client.left, client.bottom - client.top);
         let dpi = DpiContext::for_window(hwnd, state.logical_size);
         let logical = dpi.scale.logical_size(physical);
         let viewport = UiRect::new(0.0, 0.0, logical.width, logical.height);
@@ -315,6 +335,13 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
             let _ = InvalidateRect(Some(hwnd), None, false);
         }
     }
+}
+
+pub(super) fn should_skip_window_geometry(client: RECT, window: RECT) -> bool {
+    client.right - client.left <= 1
+        || client.bottom - client.top <= 1
+        || window.left <= -30000
+        || window.top <= -30000
 }
 
 #[cfg(feature = "diagnostics")]

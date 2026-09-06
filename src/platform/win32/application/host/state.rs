@@ -131,6 +131,7 @@ pub(super) struct WindowState {
     pub(super) hide_on_deactivate: bool,
     pub(super) background_memory_optimization: bool,
     pub(super) rendering_suspended: bool,
+    pub(super) minimized: bool,
     pub(super) interaction_mode: WindowInteractionMode,
     pub(super) resize_frame_throttle: ResizeFrameThrottle,
     pub(super) visibility: OwnerVisibility,
@@ -149,11 +150,12 @@ pub(super) struct WindowState {
 
 impl WindowState {
     pub(super) fn can_advance_animations(&self) -> bool {
-        can_advance_window_animations(
-            self.rendering_suspended,
-            self.visibility,
-            self.interaction_mode,
-        )
+        !self.minimized
+            && can_advance_window_animations(
+                self.rendering_suspended,
+                self.visibility,
+                self.interaction_mode,
+            )
     }
 }
 

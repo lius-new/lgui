@@ -60,6 +60,25 @@ pub(super) extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_SIZE => {
+            let minimized = wparam.0 as u32 == SIZE_MINIMIZED;
+            let restored_dispatcher = STATE.with(|state| {
+                let mut windows = state.borrow_mut();
+                let window = windows.get_mut(&(hwnd.0 as isize))?;
+                let was_minimized = std::mem::replace(&mut window.minimized, minimized);
+                if minimized || was_minimized {
+                    // Native invalidation alone does not invalidate the retained scene.
+                    window.session.invalidate_all();
+                    window.resize_frame_throttle.reset();
+                }
+                (was_minimized && !minimized).then(|| window.dispatcher.clone())
+            });
+            if minimized {
+                hide_owned_windows(hwnd);
+                return LRESULT(0);
+            }
+            if let Some(dispatcher) = restored_dispatcher {
+                dispatcher.start_frame_driver();
+            }
             let resize_dispatcher = STATE.with(|state| {
                 let mut windows = state.borrow_mut();
                 let window = windows.get_mut(&(hwnd.0 as isize))?;
@@ -69,9 +88,7 @@ pub(super) extern "system" fn window_proc(
                 window.resize_frame_throttle.request();
                 Some(window.dispatcher.clone())
             });
-            if wparam.0 as u32 == SIZE_MINIMIZED {
-                hide_owned_windows(hwnd);
-            } else if resize_dispatcher.is_none() {
+            if resize_dispatcher.is_none() {
                 restore_owned_windows(hwnd);
             }
             if let Some(dispatcher) = resize_dispatcher {
