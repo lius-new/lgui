@@ -73,7 +73,7 @@ pub(super) extern "system" fn window_proc(
                 (was_minimized && !minimized).then(|| window.dispatcher.clone())
             });
             if minimized {
-                hide_owned_windows(hwnd);
+                hide_owned_windows_on_minimize(hwnd);
                 return LRESULT(0);
             }
             if let Some(dispatcher) = restored_dispatcher {
@@ -111,7 +111,7 @@ pub(super) extern "system" fn window_proc(
                     window.resize_frame_throttle.reset();
                 }
             });
-            hide_owned_windows(hwnd);
+            hide_owned_windows_during_move(hwnd);
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_MOVING => {
@@ -390,6 +390,21 @@ pub(super) extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
+            // Logical ownership still governs lifetime when native Z-order ownership is disabled.
+            let owned = STATE.with(|state| {
+                state
+                    .borrow()
+                    .iter()
+                    .filter_map(|(raw, window)| {
+                        (window.owner == Some(hwnd)).then_some(HWND(*raw as _))
+                    })
+                    .collect::<Vec<_>>()
+            });
+            for child in owned {
+                unsafe {
+                    let _ = DestroyWindow(child);
+                }
+            }
             #[cfg(feature = "images-win32")]
             crate::platform::win32::clear_image_repaint_hwnd(hwnd);
             let (empty, dispatcher, next_window) = STATE.with(|state| {

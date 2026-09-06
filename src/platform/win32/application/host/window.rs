@@ -11,6 +11,9 @@ pub(super) fn create_window(
 ) -> Result<HWND> {
     let initial_mode = options.mode;
     let initially_visible = options.visible;
+    let minimize_with_owner = options
+        .platform_options::<Win32WindowOptions>()
+        .is_none_or(|options| options.minimize_with_owner);
     let title = wide(&options.title);
     let style = window_style(&options);
     let owner = if let Some(owner_id) = options.owner.as_ref() {
@@ -26,8 +29,16 @@ pub(super) fn create_window(
                 .find_map(|(raw, state)| state.owner.is_none().then_some(HWND(*raw as _)))
         })
     };
+    let native_owner = if options
+        .platform_options::<Win32WindowOptions>()
+        .is_some_and(|options| !options.owner_z_order || !options.minimize_with_owner)
+    {
+        None
+    } else {
+        owner
+    };
     let mut ex_style = WINDOW_EX_STYLE(0);
-    if owner.is_some() {
+    if native_owner.is_some() {
         ex_style |= WS_EX_TOOLWINDOW;
     }
     if options.transparent {
@@ -46,7 +57,7 @@ pub(super) fn create_window(
             CW_USEDEFAULT,
             options.size.width.ceil() as i32,
             options.size.height.ceil() as i32,
-            owner,
+            native_owner,
             None,
             Some(instance),
             None,
@@ -234,6 +245,7 @@ pub(super) fn create_window(
         state.borrow_mut().insert(
             hwnd.0 as isize,
             WindowState {
+                minimize_with_owner,
                 id: options.id,
                 view,
                 context,
@@ -672,13 +684,29 @@ pub(super) fn schedule_background_retrim() {
 }
 
 pub(super) fn hide_owned_windows(owner: HWND) {
+    hide_owned_windows_if(owner, |_| true);
+}
+
+pub(super) fn hide_owned_windows_during_move(owner: HWND) {
+    hide_owned_windows_if(owner, |window| {
+        matches!(window.position, WindowPosition::AdjacentToOwner { .. })
+    });
+}
+
+pub(super) fn hide_owned_windows_on_minimize(owner: HWND) {
+    hide_owned_windows_if(owner, |window| window.minimize_with_owner);
+}
+
+fn hide_owned_windows_if(owner: HWND, should_hide: impl Fn(&WindowState) -> bool) {
     let owned = STATE.with(|state| {
         let mut state = state.borrow_mut();
         state
             .iter_mut()
             .filter_map(|(raw, window)| {
-                (window.owner == Some(owner) && window.visibility.hide_for_owner())
-                    .then_some(HWND(*raw as _))
+                (window.owner == Some(owner)
+                    && should_hide(window)
+                    && window.visibility.hide_for_owner())
+                .then_some(HWND(*raw as _))
             })
             .collect::<Vec<_>>()
     });
@@ -717,7 +745,9 @@ pub(super) fn reposition_owned_windows(owner: HWND) {
             .borrow()
             .iter()
             .filter_map(|(raw, window)| {
-                (window.owner == Some(owner) && window.visibility.desired_visible)
+                (window.owner == Some(owner)
+                    && matches!(window.position, WindowPosition::AdjacentToOwner { .. })
+                    && window.visibility.desired_visible)
                     .then_some(HWND(*raw as _))
             })
             .collect::<Vec<_>>()

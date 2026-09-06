@@ -127,6 +127,7 @@ pub(super) struct WindowState {
     pub(super) windowed_placement: Option<WINDOWPLACEMENT>,
     pub(super) mode: WindowMode,
     pub(super) owner: Option<HWND>,
+    pub(super) minimize_with_owner: bool,
     pub(super) position: WindowPosition,
     pub(super) hide_on_deactivate: bool,
     pub(super) background_memory_optimization: bool,
@@ -221,9 +222,23 @@ pub(super) struct OwnerVisibility {
 pub struct Win32WindowOptions {
     pub class_name: Option<String>,
     pub icon_bytes: Option<&'static [u8]>,
+    /// Use native ownership to keep this window above its logical owner.
+    pub owner_z_order: bool,
+    /// Hide with a minimized logical owner. Disabling also disables native ownership.
+    pub minimize_with_owner: bool,
 }
 
 impl Win32WindowOptions {
+    pub fn minimize_with_owner(mut self, enabled: bool) -> Self {
+        self.minimize_with_owner = enabled;
+        self
+    }
+
+    pub fn owner_z_order(mut self, enabled: bool) -> Self {
+        self.owner_z_order = enabled;
+        self
+    }
+
     pub fn class_name(mut self, class_name: impl Into<String>) -> Self {
         self.class_name = Some(class_name.into());
         self
@@ -240,6 +255,8 @@ impl Default for Win32WindowOptions {
         Self {
             class_name: None,
             icon_bytes: None,
+            owner_z_order: true,
+            minimize_with_owner: true,
         }
     }
 }

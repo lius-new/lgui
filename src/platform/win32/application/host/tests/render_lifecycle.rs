@@ -3,7 +3,10 @@ use crate::{
     core::{group, Scene},
     renderer::{RenderStats, RendererCapabilities},
 };
-use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, SW_SHOWMINNOACTIVE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindow, IsWindow, GW_HWNDNEXT, GW_HWNDPREV, GW_OWNER, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE,
+    SW_MINIMIZE, SW_RESTORE, SW_SHOWMINNOACTIVE, WS_OVERLAPPEDWINDOW,
+};
 
 #[derive(Clone, Default)]
 struct RecordingRenderer(Arc<Mutex<Vec<(PhysicalRect, bool)>>>);
@@ -44,10 +47,35 @@ struct TestWindow {
     _class: RegisteredWindowClass,
 }
 
+struct OtherWindow(HWND);
+
+impl Drop for OtherWindow {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.0);
+        }
+    }
+}
+
+fn is_above(window: HWND, other: HWND) -> bool {
+    let mut next = unsafe { GetWindow(window, GW_HWNDNEXT) };
+    while let Ok(hwnd) = next {
+        if hwnd == other {
+            return true;
+        }
+        next = unsafe { GetWindow(hwnd, GW_HWNDNEXT) };
+    }
+    false
+}
+
 impl TestWindow {
     fn new(renderer: RecordingRenderer, builds: Arc<AtomicUsize>) -> Self {
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None) }.unwrap().0);
-        let class_name = wide("LguiRenderLifecycleTest");
+        static NEXT_CLASS_ID: AtomicUsize = AtomicUsize::new(0);
+        let class_name = wide(&format!(
+            "LguiRenderLifecycleTest.{}",
+            NEXT_CLASS_ID.fetch_add(1, Ordering::SeqCst)
+        ));
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_proc),
@@ -94,6 +122,170 @@ impl Drop for TestWindow {
             DestroyWindow(self.hwnd).unwrap();
         }
     }
+}
+
+#[test]
+fn owner_drag_leaves_chat_position_visibility_and_z_order_unchanged() {
+    let renderer = RecordingRenderer::default();
+    let owner = TestWindow::new(renderer.clone(), Arc::new(AtomicUsize::new(0)));
+    let context = STATE.with(|state| state.borrow()[&(owner.hwnd.0 as isize)].context.clone());
+    let create_child = |id: &str, position| {
+        create_window(
+            owner._class.instance,
+            &owner._class.class_name,
+            WindowOptions::new(id)
+                .owner("render-lifecycle")
+                .native_titlebar(false)
+                .resizable(false)
+                .size(Size::new(120.0, 80.0))
+                .position(position)
+                .with_platform_options(
+                    Win32WindowOptions::default()
+                        .owner_z_order(id != "chat")
+                        .minimize_with_owner(id != "chat"),
+                )
+                .visible(false),
+            Arc::new(|cx| group(cx.viewport())),
+            context.clone(),
+            Arc::new(renderer.clone()),
+            Win32Dispatcher::new(),
+        )
+        .unwrap()
+    };
+    let chat = create_child("chat", WindowPosition::Centered);
+    let adjacent = create_child("friends", WindowPosition::AdjacentToOwner { gap: 1 });
+    let hidden = create_child("hidden", WindowPosition::Centered);
+    show_window(owner.hwnd);
+    show_window(chat);
+    show_window(adjacent);
+    assert!(unsafe { GetWindow(chat, GW_OWNER) }.is_err());
+    assert_eq!(
+        unsafe { GetWindow(adjacent, GW_OWNER) }.unwrap(),
+        owner.hwnd
+    );
+    let mut owner_rect = RECT::default();
+    unsafe {
+        GetWindowRect(owner.hwnd, &mut owner_rect).unwrap();
+        SetWindowPos(
+            chat,
+            Some(owner.hwnd),
+            owner_rect.left + 24,
+            owner_rect.top + 32,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOSIZE,
+        )
+        .unwrap();
+    }
+    let mut chat_rect = RECT::default();
+    unsafe {
+        GetWindowRect(chat, &mut chat_rect).unwrap();
+    }
+
+    for _ in 0..2 {
+        window_proc(owner.hwnd, WM_ENTERSIZEMOVE, WPARAM(0), LPARAM(0));
+        window_proc(owner.hwnd, WM_MOVING, WPARAM(0), LPARAM(0));
+        owner_rect.left += 10;
+        owner_rect.top += 10;
+        unsafe {
+            SetWindowPos(
+                owner.hwnd,
+                None,
+                owner_rect.left,
+                owner_rect.top,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+            )
+            .unwrap();
+        }
+        let mut current_chat_rect = RECT::default();
+        unsafe {
+            GetWindowRect(chat, &mut current_chat_rect).unwrap();
+        }
+        assert_eq!(current_chat_rect, chat_rect);
+        assert_eq!(unsafe { GetWindow(chat, GW_HWNDPREV) }.unwrap(), owner.hwnd);
+        assert!(unsafe { IsWindowVisible(chat).as_bool() });
+        assert!(!unsafe { IsWindowVisible(adjacent).as_bool() });
+        assert!(!unsafe { IsWindowVisible(hidden).as_bool() });
+        unsafe {
+            GetWindowRect(chat, &mut current_chat_rect).unwrap();
+        }
+        assert_eq!(current_chat_rect, chat_rect);
+        window_proc(owner.hwnd, WM_EXITSIZEMOVE, WPARAM(0), LPARAM(0));
+        assert!(unsafe { IsWindowVisible(chat).as_bool() });
+        assert!(unsafe { IsWindowVisible(adjacent).as_bool() });
+        assert!(!unsafe { IsWindowVisible(hidden).as_bool() });
+    }
+
+    let other = OtherWindow(unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            windows::core::w!("STATIC"),
+            windows::core::w!("Other application window"),
+            WS_OVERLAPPEDWINDOW,
+            0,
+            0,
+            160,
+            120,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    });
+    unsafe {
+        let _ = ShowWindow(other.0, SW_SHOW);
+        let _ = ShowWindow(chat, SW_SHOW);
+        let _ = ShowWindow(owner.hwnd, SW_SHOW);
+        SetWindowPos(chat, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE).unwrap();
+        SetWindowPos(
+            owner.hwnd,
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE,
+        )
+        .unwrap();
+    }
+    assert!(is_above(owner.hwnd, other.0));
+    assert!(is_above(chat, other.0));
+    unsafe {
+        let _ = ShowWindow(owner.hwnd, SW_MINIMIZE);
+    }
+    assert!(
+        is_above(chat, other.0),
+        "minimizing the owner must not put another window above chat"
+    );
+    assert!(unsafe { IsWindowVisible(chat).as_bool() });
+    assert!(!unsafe { IsIconic(chat).as_bool() });
+    let mut current_chat_rect = RECT::default();
+    unsafe {
+        GetWindowRect(chat, &mut current_chat_rect).unwrap();
+    }
+    assert_eq!(current_chat_rect, chat_rect);
+    assert!(!unsafe { IsWindowVisible(adjacent).as_bool() });
+    unsafe {
+        let _ = ShowWindow(owner.hwnd, SW_RESTORE);
+    }
+    assert!(unsafe { IsWindowVisible(chat).as_bool() });
+    assert!(unsafe { IsWindowVisible(adjacent).as_bool() });
+    assert!(!unsafe { IsWindowVisible(hidden).as_bool() });
+
+    hide_window(chat);
+    unsafe {
+        let _ = ShowWindow(owner.hwnd, SW_SHOWMINNOACTIVE);
+        let _ = ShowWindow(owner.hwnd, SW_RESTORE);
+    }
+    assert!(!unsafe { IsWindowVisible(chat).as_bool() });
+    window_proc(owner.hwnd, WM_ENTERSIZEMOVE, WPARAM(0), LPARAM(0));
+    window_proc(owner.hwnd, WM_EXITSIZEMOVE, WPARAM(0), LPARAM(0));
+    assert!(!unsafe { IsWindowVisible(chat).as_bool() });
+    drop(owner);
+    assert!(!unsafe { IsWindow(Some(chat)).as_bool() });
 }
 
 #[test]
