@@ -450,5 +450,5 @@ impl Hash for UiRect {
 }
 
 #[cfg(test)]
-#[path = "geometry/tests.rs"]
+#[path = "geometry_test.rs"]
 mod tests;

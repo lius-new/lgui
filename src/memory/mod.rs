@@ -53,6 +53,7 @@ pub use persistent::{
     PersistentCacheStore, PersistentEntry,
 };
 
+#[path = "memory_test.rs"]
 #[cfg(test)]
 mod tests;
 

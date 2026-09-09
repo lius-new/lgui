@@ -51,5 +51,6 @@ pub(crate) use tray::{dispatch_tray_action, TrayRegistration};
 pub(crate) use view::application_root_view;
 pub use view::AppView;
 
+#[path = "application_test.rs"]
 #[cfg(test)]
 mod tests;

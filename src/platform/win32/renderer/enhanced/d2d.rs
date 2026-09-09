@@ -65,5 +65,6 @@ use drawing::*;
 use effects::*;
 use resources::*;
 
+#[path = "d2d/d2d_test.rs"]
 #[cfg(test)]
 mod tests;

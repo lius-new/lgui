@@ -86,5 +86,6 @@ pub(in crate::platform) use renderer::WinitFrameTimings;
 use renderer::*;
 use window::*;
 
+#[path = "winit_test.rs"]
 #[cfg(test)]
 mod tests;

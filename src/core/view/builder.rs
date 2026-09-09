@@ -285,5 +285,5 @@ impl Default for HostTreeBuilder {
 }
 
 #[cfg(test)]
-#[path = "builder/tests.rs"]
+#[path = "builder_test.rs"]
 mod tests;

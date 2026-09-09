@@ -21,5 +21,6 @@ pub(crate) use fonts::{font_assets, font_families, FontAssets};
 pub(crate) use fonts::{install_font_families, FontFamilies};
 pub(crate) use service::install_text_system;
 
+#[path = "text_test.rs"]
 #[cfg(test)]
 mod tests;

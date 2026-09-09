@@ -36,5 +36,6 @@ pub(crate) use cache::update_image_reachability;
 pub(crate) use cache::{load_url_image, prepare_image_bytes, validate_encoded_bytes};
 pub(crate) use resources::{render_resources, with_render_resources};
 
+#[path = "assets_test.rs"]
 #[cfg(test)]
 mod tests;

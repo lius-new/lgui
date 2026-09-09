@@ -41,7 +41,9 @@ pub use scene::{scroll_raster_command_snapshot_exists, Scene};
 #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
 pub(crate) use transform::translate_scene_primitive_for_backend;
 
+#[path = "shadow_test.rs"]
 #[cfg(test)]
 mod shadow_tests;
+#[path = "render_test.rs"]
 #[cfg(test)]
 mod tests;

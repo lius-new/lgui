@@ -800,5 +800,5 @@ fn event_policy_allows(policy: super::EventPolicy, property: AnimProperty) -> bo
 }
 
 #[cfg(test)]
-#[path = "event/tests.rs"]
+#[path = "event_test.rs"]
 mod tests;

@@ -33,5 +33,6 @@ fn elapsed_ms(started: Instant) -> f32 {
     started.elapsed().as_secs_f32() * 1_000.0
 }
 
+#[path = "host_test.rs"]
 #[cfg(test)]
 mod tests;

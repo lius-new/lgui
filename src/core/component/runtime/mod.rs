@@ -18,5 +18,6 @@ mod state;
 
 pub use state::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 
+#[path = "runtime_test.rs"]
 #[cfg(test)]
 mod tests;

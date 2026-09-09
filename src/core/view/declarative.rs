@@ -28,5 +28,5 @@ pub use primitives::{
 };
 
 #[cfg(test)]
-#[path = "declarative/tests.rs"]
+#[path = "declarative/declarative_test.rs"]
 mod tests;

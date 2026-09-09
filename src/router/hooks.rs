@@ -59,5 +59,5 @@ fn clone_snapshot<R: Clone>(snapshot: &RouterSnapshot<R>) -> RouterSnapshot<R> {
 }
 
 #[cfg(test)]
-#[path = "hooks/tests.rs"]
+#[path = "hooks_test.rs"]
 mod tests;

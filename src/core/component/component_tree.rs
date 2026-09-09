@@ -715,5 +715,5 @@ fn attach_child(slots: &mut [ComponentSlot], parent: ComponentId, child: Compone
 }
 
 #[cfg(test)]
-#[path = "component_tree/tests.rs"]
+#[path = "component_tree_test.rs"]
 mod tests;

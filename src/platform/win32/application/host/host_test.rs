@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+#[path = "tests/render_lifecycle_test.rs"]
 mod render_lifecycle;
 
 use windows::Win32::Foundation::RECT;

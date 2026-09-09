@@ -583,5 +583,5 @@ impl UiFocusHandle {
 }
 
 #[cfg(test)]
-#[path = "reactor/tests.rs"]
+#[path = "reactor_test.rs"]
 mod tests;

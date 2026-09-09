@@ -23,5 +23,6 @@ where
     application.command::<C>().invoke(args).await
 }
 
+#[path = "command_test.rs"]
 #[cfg(test)]
 mod tests;

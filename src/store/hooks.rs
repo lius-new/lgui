@@ -273,5 +273,5 @@ fn clone_selected<T: Clone>(value: &T) -> T {
 }
 
 #[cfg(test)]
-#[path = "hooks/tests.rs"]
+#[path = "hooks_test.rs"]
 mod tests;

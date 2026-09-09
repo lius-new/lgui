@@ -405,5 +405,5 @@ impl ComponentStateStore {
 }
 
 #[cfg(test)]
-#[path = "component_state/tests.rs"]
+#[path = "component_state_test.rs"]
 mod tests;

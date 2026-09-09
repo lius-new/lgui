@@ -17,5 +17,6 @@ pub use provider::{DiagnosticsProvider, DiagnosticsSink};
 pub use system::{system_usage_sample_interval_ms, system_usage_snapshot};
 pub use timing::duration_ms;
 
+#[path = "diagnostics_test.rs"]
 #[cfg(test)]
 mod tests;

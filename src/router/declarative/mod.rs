@@ -8,5 +8,6 @@ pub use outlet::outlet;
 pub use redirect::redirect;
 pub use route::{index, layout, not_found, route, scope, IntoRoutes, Route};
 
+#[path = "declarative_test.rs"]
 #[cfg(test)]
 mod tests;

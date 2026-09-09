@@ -105,5 +105,5 @@ impl ScaleContext {
 }
 
 #[cfg(test)]
-#[path = "dpi/tests.rs"]
+#[path = "dpi_test.rs"]
 mod tests;

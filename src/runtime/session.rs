@@ -379,5 +379,5 @@ fn elapsed_ms(started: Instant) -> f32 {
 }
 
 #[cfg(test)]
-#[path = "session/tests.rs"]
+#[path = "session_test.rs"]
 mod tests;

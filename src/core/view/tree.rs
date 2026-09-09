@@ -104,5 +104,5 @@ mod mutation;
 mod scene;
 
 #[cfg(test)]
-#[path = "tree/tests.rs"]
+#[path = "tree/tree_test.rs"]
 mod tests;

@@ -682,5 +682,5 @@ fn skia_surface_format(format: vk::Format) -> Result<(gpu::vk::Format, ColorType
 }
 
 #[cfg(test)]
-#[path = "vulkan/tests.rs"]
+#[path = "vulkan_test.rs"]
 mod tests;

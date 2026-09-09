@@ -7,5 +7,6 @@ pub use model::{
     SelectStyle, SelectSwatch, SELECT_OPTION_HEIGHT,
 };
 
+#[path = "select_test.rs"]
 #[cfg(test)]
 mod tests;

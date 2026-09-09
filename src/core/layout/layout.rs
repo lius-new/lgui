@@ -432,5 +432,5 @@ fn stack_child_rect(content: UiRect, axis: Axis, align: Align, cursor: f32, size
 }
 
 #[cfg(test)]
-#[path = "layout/tests.rs"]
+#[path = "layout_test.rs"]
 mod tests;

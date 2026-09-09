@@ -138,5 +138,6 @@ use rendering::*;
 use state::*;
 use window::*;
 
+#[path = "host/host_test.rs"]
 #[cfg(test)]
 mod tests;

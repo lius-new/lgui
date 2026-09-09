@@ -33,5 +33,6 @@ pub(crate) type WindowView = Arc<
         + 'static,
 >;
 
+#[path = "window_test.rs"]
 #[cfg(test)]
 mod tests;

@@ -36,5 +36,5 @@ pub(crate) fn dispatch_tray_action(
 }
 
 #[cfg(test)]
-#[path = "tray/tests.rs"]
+#[path = "tray_test.rs"]
 mod tests;

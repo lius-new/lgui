@@ -57,5 +57,6 @@ use painter::*;
 use primitives::*;
 use text::*;
 
+#[path = "backend/backend_test.rs"]
 #[cfg(test)]
 mod tests;

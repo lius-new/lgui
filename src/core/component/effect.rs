@@ -222,5 +222,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "effect/tests.rs"]
+#[path = "effect_test.rs"]
 mod tests;

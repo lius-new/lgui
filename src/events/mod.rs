@@ -81,5 +81,6 @@ where
     });
 }
 
+#[path = "events_test.rs"]
 #[cfg(test)]
 mod tests;
