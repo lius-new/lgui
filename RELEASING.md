@@ -18,7 +18,6 @@ cargo package -p lgui-store --list
 cargo package -p lgui-widgets --list
 cargo package -p lgui-render-skia --list
 cargo package -p lgui-platform-win32 --list
-cargo package -p lgui-render-win32-raster --list
 cargo package -p lgui-render-gdi --list
 cargo package -p lgui-render-d2d --list
 cargo package -p lgui-platform-winit --list
@@ -49,8 +48,6 @@ cargo publish -p lgui-render-skia --dry-run
 cargo publish -p lgui-render-skia
 cargo publish -p lgui-platform-win32 --dry-run
 cargo publish -p lgui-platform-win32
-cargo publish -p lgui-render-win32-raster --dry-run
-cargo publish -p lgui-render-win32-raster
 cargo publish -p lgui-render-gdi --dry-run
 cargo publish -p lgui-render-gdi
 cargo publish -p lgui-render-d2d --dry-run
@@ -61,9 +58,8 @@ cargo publish -p lgui --dry-run
 cargo publish -p lgui
 ```
 
-`lgui-skia-vulkan-windows-features`, `lgui-skia-vulkan-linux-features`, and
-`lgui-skia-metal-features` were 0.1 compatibility packages. They are no longer workspace members,
-but their 0.1 releases remain available so existing `lgui 0.1` dependency resolution keeps working.
+The removed 0.1 Skia feature bridge packages and `lgui-render-win32-raster` are not release
+artifacts. Renderer features must resolve through the concrete GDI, Direct2D, and Skia packages.
 
 Tag the commit that was published after all packages have been accepted:
 

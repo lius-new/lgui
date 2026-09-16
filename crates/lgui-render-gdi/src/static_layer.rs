@@ -248,7 +248,6 @@ fn static_layer_memory_contains_key(key: &str) -> bool {
 
 pub trait StaticLayerDrawBackend {
     fn draw_command(hdc: HDC, command: &ScenePrimitive);
-    fn blit_premultiplied_bgra(hdc: HDC, rect: UiRect, width: i32, height: i32, pixels: &[u8]);
     fn blit_premultiplied_bgra_alpha(
         hdc: HDC,
         rect: UiRect,
@@ -256,14 +255,6 @@ pub trait StaticLayerDrawBackend {
         height: i32,
         pixels: &[u8],
         source_alpha: u8,
-    );
-    fn blit_premultiplied_bgra_region(
-        hdc: HDC,
-        dest: UiRect,
-        source: UiRect,
-        width: i32,
-        height: i32,
-        pixels: &[u8],
     );
     fn blit_premultiplied_bgra_region_alpha(
         hdc: HDC,

@@ -17,9 +17,9 @@ use windows::Win32::{
     UI::Shell::SHCreateMemStream,
 };
 
-use crate::render_trace;
+use super::trace;
+use crate as cached_image;
 use lgui_core::core::{ImageFit, UiImageSource, UiRect};
-use lgui_platform_win32 as cached_image;
 
 fn decoded_image_telemetry() -> &'static lgui_core::memory::CacheTelemetry {
     static TELEMETRY: OnceLock<lgui_core::memory::CacheTelemetry> = OnceLock::new();
@@ -56,18 +56,15 @@ impl Drop for DecodedImage {
     }
 }
 
-#[cfg(feature = "d2d")]
-pub(crate) fn decoded_image_cache_usage() -> lgui_core::memory::CacheUsage {
+pub fn decoded_image_cache_usage() -> lgui_core::memory::CacheUsage {
     decoded_image_telemetry().snapshot()
 }
 
-#[cfg(feature = "d2d")]
-pub(crate) fn trim_decoded_image_cache(target_bytes: usize) -> usize {
+pub fn trim_decoded_image_cache(target_bytes: usize) -> usize {
     DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().trim_to(target_bytes))
 }
 
-#[cfg(feature = "d2d")]
-pub(crate) fn set_decoded_image_cache_budget(budget_bytes: usize) {
+pub fn set_decoded_image_cache_budget(budget_bytes: usize) {
     DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
 }
 
@@ -545,7 +542,7 @@ fn image_crop(
 }
 
 fn trace_duration(label: &str, duration: Duration) {
-    if render_trace::duration_enabled(label) {
+    if trace::duration_enabled(label) {
         eprintln!(
             "[ui-trace] {label}: {:.2}ms",
             duration.as_secs_f64() * 1000.0

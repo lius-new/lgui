@@ -67,9 +67,8 @@ The workspace publishes fifteen packages with one owner for each responsibility:
 | `lgui-render-skia` | Skia scene painting, text layout, software surface, and renderer caches |
 | `lgui-render-gdi` | Native GDI renderer and optional retained GDI pipeline |
 | `lgui-render-d2d` | Direct2D, D3D11, DXGI, and DirectComposition renderer |
-| `lgui-render-win32-raster` | Shared Win32 image, blur, static-layer, and raster-cache support |
 | `lgui-platform-winit` | Portable desktop windows, input, event loop, and Skia surfaces |
-| `lgui-platform-win32` | Native Win32 windows, message dispatch, system services, and renderer host contract |
+| `lgui-platform-win32` | Native Win32 windows, message dispatch, system services, renderer host contract, and native pixel interop |
 
 Applications should normally depend only on `lgui`; the other packages are public so renderer and
 platform integrations can be developed and released independently.

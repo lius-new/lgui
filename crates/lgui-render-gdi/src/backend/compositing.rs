@@ -375,17 +375,6 @@ impl StaticLayerDrawBackend for GdiStaticLayerBackend {
         GdiRenderer::draw_command(hdc, command);
     }
 
-    fn blit_premultiplied_bgra(hdc: HDC, rect: UiRect, width: i32, height: i32, pixels: &[u8]) {
-        blit_premultiplied_bgra_with_source(
-            GdiFrameBlitSource::StaticLayer,
-            hdc,
-            rect,
-            width,
-            height,
-            pixels,
-        );
-    }
-
     fn blit_premultiplied_bgra_alpha(
         hdc: HDC,
         rect: UiRect,
@@ -402,26 +391,6 @@ impl StaticLayerDrawBackend for GdiStaticLayerBackend {
             height,
             pixels,
             source_alpha,
-        );
-    }
-
-    fn blit_premultiplied_bgra_region(
-        hdc: HDC,
-        dest: UiRect,
-        source: UiRect,
-        width: i32,
-        height: i32,
-        pixels: &[u8],
-    ) {
-        blit_premultiplied_bgra_region_alpha_with_source(
-            GdiFrameBlitSource::StaticLayer,
-            hdc,
-            dest,
-            source,
-            width,
-            height,
-            pixels,
-            255,
         );
     }
 

@@ -22,7 +22,6 @@ lgui-assets = { version = "0.2.0", path = "../lgui-assets", default-features = f
 lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["raster-effects"] }
 lgui-platform-win32 = { version = "0.2.0", path = "../lgui-platform-win32", default-features = false, features = ["backend-win32", "images-win32", "svg"] }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
-lgui-render-win32-raster = { version = "0.2.0", path = "../lgui-render-win32-raster", default-features = false, features = ["d2d"] }
 windows-numerics = "0.3.1"
 
 [dev-dependencies]

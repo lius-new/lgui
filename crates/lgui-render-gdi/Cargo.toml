@@ -15,8 +15,6 @@ categories = ["gui", "rendering", "os::windows-apis"]
 [features]
 default = []
 advanced-rendering = [
-  "dep:lgui-render-win32-raster",
-  "lgui-render-win32-raster/gdi",
   "lgui-assets/svg",
   "lgui-platform-win32/svg",
 ]
@@ -29,7 +27,6 @@ lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false
 lgui-diagnostics = { version = "0.2.0", path = "../lgui-diagnostics", optional = true }
 lgui-platform-win32 = { version = "0.2.0", path = "../lgui-platform-win32", default-features = false, features = ["backend-win32", "images-win32"] }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
-lgui-render-win32-raster = { version = "0.2.0", path = "../lgui-render-win32-raster", optional = true, default-features = false }
 
 [dev-dependencies]
 lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["test-support"] }

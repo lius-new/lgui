@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use crate::render_trace;
+use super::trace;
 use lgui_core::core::{BackdropBlurStyle, PhysicalRect, UiRect};
 
 use super::image;
@@ -39,8 +39,7 @@ thread_local! {
     );
 }
 
-#[cfg(feature = "d2d")]
-pub(crate) fn blur_cache_usage() -> lgui_core::memory::CacheUsage {
+pub fn blur_cache_usage() -> lgui_core::memory::CacheUsage {
     let mut usage = lgui_core::memory::CacheUsage::default();
     for index in 0..3 {
         usage.add_assign(blur_telemetry(index).snapshot());
@@ -48,8 +47,7 @@ pub(crate) fn blur_cache_usage() -> lgui_core::memory::CacheUsage {
     usage
 }
 
-#[cfg(feature = "d2d")]
-pub(crate) fn trim_blur_caches(target_bytes: usize) -> usize {
+pub fn trim_blur_caches(target_bytes: usize) -> usize {
     let result_target = target_bytes.saturating_mul(3) / 8;
     let source_target = target_bytes / 4;
     let blurred_target = target_bytes.saturating_sub(result_target + source_target);
@@ -58,8 +56,7 @@ pub(crate) fn trim_blur_caches(target_bytes: usize) -> usize {
         + BLURRED_SOURCE_CACHE.with(|cache| cache.borrow_mut().trim_to(blurred_target))
 }
 
-#[cfg(feature = "d2d")]
-pub(crate) fn set_blur_cache_budget(budget_bytes: usize) {
+pub fn set_blur_cache_budget(budget_bytes: usize) {
     let result_budget = budget_bytes.saturating_mul(3) / 8;
     let source_budget = budget_bytes / 4;
     let blurred_budget = budget_bytes.saturating_sub(result_budget + source_budget);
@@ -498,9 +495,9 @@ fn hash_rect<H: Hasher>(rect: &UiRect, state: &mut H) {
 }
 
 fn trace_duration(label: &str, duration: std::time::Duration) {
-    if render_trace::duration_enabled(label) {
+    if trace::duration_enabled(label) {
         let elapsed_ms = duration.as_secs_f64() * 1000.0;
-        let threshold_ms = if render_trace::duration_enabled("blur-detail") {
+        let threshold_ms = if trace::duration_enabled("blur-detail") {
             0.0
         } else if label == "blur.total" {
             2.0
@@ -514,8 +511,8 @@ fn trace_duration(label: &str, duration: std::time::Duration) {
 }
 
 fn trace_blur_miss(rect: UiRect, width: i32, height: i32, radius: usize) {
-    if render_trace::duration_enabled("blur-detail")
-        || (render_trace::duration_enabled("blur") && width * height >= 4096)
+    if trace::duration_enabled("blur-detail")
+        || (trace::duration_enabled("blur") && width * height >= 4096)
     {
         eprintln!(
             "[ui-trace] blur.cache_miss: rect={rect:?} size={}x{} radius={}",

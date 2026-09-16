@@ -226,13 +226,7 @@ pub(super) fn static_layer_cache_key(
     child_signature: u64,
 ) -> D2dBitmapCacheKey {
     D2dBitmapCacheKey::StaticLayer {
-        raster_key: super::super::static_layer::static_layer_cache_key(
-            id,
-            spec,
-            width,
-            height,
-            child_signature,
-        ),
+        raster_key: static_layer_raster_key(id, spec, width, height, child_signature),
         id: id.clone(),
         spec_signature: static_layer_spec_signature(spec),
         child_signature,
@@ -245,6 +239,22 @@ pub(super) fn static_layer_spec_signature(spec: &StaticLayerSpec) -> u64 {
     let mut hasher = DefaultHasher::new();
     spec.cache_signature().hash(&mut hasher);
     hasher.finish()
+}
+
+fn static_layer_raster_key(
+    id: &UiId,
+    spec: &StaticLayerSpec,
+    width: i32,
+    height: i32,
+    child_signature: u64,
+) -> String {
+    let mut hasher = DefaultHasher::new();
+    id.hash(&mut hasher);
+    width.hash(&mut hasher);
+    height.hash(&mut hasher);
+    child_signature.hash(&mut hasher);
+    spec.cache_signature().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 pub(super) fn trace_d2d_regions(label: &str, rects: Option<&[UiRect]>) {

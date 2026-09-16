@@ -9,10 +9,14 @@ pub mod backend;
 #[cfg(feature = "advanced-rendering")]
 mod environment;
 mod factory;
+#[cfg(feature = "advanced-rendering")]
+mod render_cache;
 mod renderer;
+#[cfg(feature = "advanced-rendering")]
+mod static_layer;
 
 #[cfg(feature = "advanced-rendering")]
-pub(crate) use lgui_render_win32_raster::{blur, image, render_trace, static_layer};
+pub(crate) use lgui_platform_win32::render_support::{blur, image, trace as render_trace};
 
 #[cfg(all(feature = "multi-window", target_os = "windows"))]
 pub use backbuffer::{rect_size, AlphaPolicy, LayeredBackbuffer};

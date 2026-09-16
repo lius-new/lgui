@@ -4,9 +4,10 @@
 
 #[doc(hidden)]
 pub mod backend;
+mod environment;
 mod renderer;
 
-pub(crate) use lgui_render_win32_raster::{blur, image, render_trace, static_layer};
+pub(crate) use lgui_platform_win32::render_support::{blur, image, trace as render_trace};
 
 pub use lgui_platform_win32::{
     Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,

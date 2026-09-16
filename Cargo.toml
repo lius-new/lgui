@@ -23,7 +23,6 @@ members = [
   "crates/lgui-render-gdi",
   "crates/lgui-render-api",
   "crates/lgui-render-skia",
-  "crates/lgui-render-win32-raster",
   "crates/lgui-router",
   "crates/lgui-services",
   "crates/lgui-store",

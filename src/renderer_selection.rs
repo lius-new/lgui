@@ -1,3 +1,4 @@
+#[cfg(feature = "renderer-skia")]
 use lgui_render_api::GraphicsPreference;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

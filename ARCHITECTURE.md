@@ -126,9 +126,8 @@ crates/
 |-- lgui-render-skia/src/      # portable Skia renderer
 |-- lgui-render-gdi/src/       # native and retained GDI renderer
 |-- lgui-render-d2d/src/       # D2D, D3D11, DXGI, and DirectComposition renderer
-|-- lgui-render-win32-raster/  # shared Win32 raster and cache support
 |-- lgui-platform-winit/src/   # event loop, input, windows, Skia surfaces
-`-- lgui-platform-win32/src/   # native window host, dispatcher, system adapters
+`-- lgui-platform-win32/src/   # native host, dispatcher, system adapters, pixel interop
 ```
 
 `lgui-core` owns only contracts and runtime capabilities required by every application. Optional
@@ -158,7 +157,8 @@ lgui-router/src/router/declarative/                      # routes and retained o
 lgui-render-skia/src/backend/                            # text, cache, software, painter
 lgui-render-d2d/src/backend/                             # D2D resources and drawing
 lgui-render-gdi/src/backend/                             # retained GDI renderer
-lgui-render-win32-raster/src/static_layer/               # shared layer caches
+lgui-render-gdi/src/static_layer/                        # GDI retained layer rasterization
+lgui-platform-win32/src/render_support/                  # native image, BGRA, blur interop
 lgui-platform-win32/src/application/host/                # native host contract and loop
 lgui-platform-win32/src/services/tray/                   # native tray adapter
 ```
@@ -173,11 +173,12 @@ lines of test code.
 
 ## Rendering
 
-The GDI and Direct2D factories live in `lgui-render-gdi` and `lgui-render-d2d`, respectively, and
-implement the renderer host contract owned by `lgui-platform-win32`. Shared CPU rasterization,
-image decoding, blur, and static-layer caches live in `lgui-render-win32-raster`. Both renderers
-consume the complete Scene model. Direct2D owns its D3D11, DXGI, and DirectComposition resources
-and recreates them after resize or presentation failure.
+GDI, Direct2D, and Skia are peer renderer backends. The GDI and Direct2D factories implement the
+renderer host contract owned by `lgui-platform-win32`; Skia is hosted by the winit surface adapters.
+GDI owns its HDC static-layer rasterization and cache. Direct2D owns its bitmap and static-layer
+resources. The Win32 platform exposes only the native image, BGRA, and blur interoperability shared
+by its renderer integrations. Direct2D owns its D3D11, DXGI, and DirectComposition resources and
+recreates them after resize or presentation failure.
 
 `CompositingLayer` is the backend-neutral retained composition boundary. Its children use
 layer-local coordinates while staying in the normal layout, input, accessibility, and popup

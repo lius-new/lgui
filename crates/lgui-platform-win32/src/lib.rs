@@ -27,6 +27,9 @@ mod ico;
 #[cfg(feature = "images-win32")]
 #[path = "assets/image_cache.rs"]
 mod image_cache;
+#[cfg(feature = "images-win32")]
+#[doc(hidden)]
+pub mod render_support;
 #[cfg(any(
     feature = "notifications-win32",
     feature = "system-diagnostics",

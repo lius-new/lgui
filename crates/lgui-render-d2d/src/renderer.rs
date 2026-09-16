@@ -64,7 +64,7 @@ impl Win32RendererFactory for D2dRendererFactory {
         context: &lgui_core::application::ApplicationContext,
         dispatcher: &lgui_platform_win32::Win32Dispatcher,
     ) -> Box<dyn std::any::Any> {
-        lgui_render_win32_raster::backend::install_d2d_environment(context, dispatcher)
+        crate::environment::install(context, dispatcher)
     }
 }
 

@@ -54,7 +54,7 @@ fn source_tree_expresses_subsystem_boundaries() {
         "crates/lgui-platform-win32/src/window",
         "crates/lgui-render-gdi/src/backend",
         "crates/lgui-render-d2d/src/backend",
-        "crates/lgui-render-win32-raster/src/static_layer",
+        "crates/lgui-render-gdi/src/static_layer",
         "crates/lgui-platform-win32/src/assets",
         "crates/lgui-platform-win32/src/services",
     ] {
@@ -162,9 +162,12 @@ fn source_tree_expresses_subsystem_boundaries() {
         "crates/lgui-platform-winit/src/window.rs",
         "crates/lgui-platform-winit/src/renderer.rs",
         "crates/lgui-platform-winit/src/input.rs",
-        "crates/lgui-render-win32-raster/src/static_layer/draw.rs",
-        "crates/lgui-render-win32-raster/src/static_layer/raster.rs",
-        "crates/lgui-render-win32-raster/src/static_layer/scroll.rs",
+        "crates/lgui-render-gdi/src/static_layer/draw.rs",
+        "crates/lgui-render-gdi/src/static_layer/raster.rs",
+        "crates/lgui-render-gdi/src/static_layer/scroll.rs",
+        "crates/lgui-platform-win32/src/render_support/blur.rs",
+        "crates/lgui-platform-win32/src/render_support/image.rs",
+        "crates/lgui-platform-win32/src/render_support/trace.rs",
         "crates/lgui-platform-win32/src/services/notification.rs",
         "crates/lgui-platform-win32/src/services/tray/host.rs",
         "crates/lgui-platform-win32/src/services/tray/icon.rs",
@@ -186,6 +189,10 @@ fn source_tree_expresses_subsystem_boundaries() {
     assert!(
         !workspace.join("crates/lgui-render-win32").exists(),
         "GDI and Direct2D must remain independently publishable renderer crates"
+    );
+    assert!(
+        !workspace.join("crates/lgui-render-win32-raster").exists(),
+        "Win32 raster support must remain assigned to its owning platform and renderer modules"
     );
 }
 
@@ -218,7 +225,7 @@ fn source_tree_uses_real_modules_instead_of_textual_includes() {
             "responsibility facade `{facade}` grew beyond 400 lines"
         );
     }
-    let static_layer = workspace_root().join("crates/lgui-render-win32-raster/src/static_layer.rs");
+    let static_layer = workspace_root().join("crates/lgui-render-gdi/src/static_layer.rs");
     let source = fs::read_to_string(&static_layer).expect("read static-layer facade");
     assert!(source.lines().count() <= 400);
 }
@@ -869,7 +876,6 @@ fn framework_renderers_contain_no_liuguang_business_paint_keys() {
         "crates/lgui-render-skia/src",
         "crates/lgui-render-gdi/src",
         "crates/lgui-render-d2d/src",
-        "crates/lgui-render-win32-raster/src",
         "crates/lgui-platform-winit/src",
         "crates/lgui-platform-win32/src",
     ]
