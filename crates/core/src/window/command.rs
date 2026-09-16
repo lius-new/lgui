@@ -2,7 +2,8 @@ use crate::{core::InputEvent, platform::dpi::ScalePreference};
 
 use super::{WindowId, WindowMode, WindowOptions, WindowView};
 
-pub(crate) enum WindowCommand {
+#[doc(hidden)]
+pub enum WindowCommand {
     Show {
         options: WindowOptions,
         view: WindowView,

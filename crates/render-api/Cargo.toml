@@ -1,0 +1,21 @@
+[package]
+name = "lgui-render-api"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "Backend-neutral rendering contracts for LGUI"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui-render-api"
+keywords = ["gui", "rendering", "graphics"]
+categories = ["gui", "rendering"]
+
+[features]
+default = []
+test-support = ["dep:image"]
+
+[dependencies]
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+lgui-core = { version = "0.2.0", path = "../core", default-features = false }

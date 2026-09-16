@@ -8,9 +8,9 @@ use std::{
 };
 
 use crate::{
+    application::RenderErrorStage,
     command::Command,
     core::{Size, UiRect},
-    renderer::RenderErrorStage,
 };
 
 #[cfg(feature = "store")]
@@ -365,20 +365,4 @@ mod store_lifecycle {
         }
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
-}
-
-#[cfg(all(
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    target_os = "windows"
-))]
-#[test]
-fn gdi_and_d2d_use_the_same_application_builder_type() {
-    #[cfg(not(all(feature = "backend-winit", feature = "renderer-skia")))]
-    fn assert_type(_: Application<crate::platform::win32::Win32Application>) {}
-    #[cfg(all(feature = "backend-winit", feature = "renderer-skia"))]
-    fn assert_type(_: Application<DesktopApplication>) {}
-
-    assert_type(Application::new().renderer(RendererKind::Gdi));
-    assert_type(Application::new().renderer(RendererKind::D2d));
 }

@@ -98,12 +98,9 @@ impl RendererKind {
             #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
             Self::Gdi => Ok(()),
             #[cfg(all(feature = "renderer-d2d", target_os = "windows"))]
-            Self::D2d => crate::platform::win32::probe_d2d_support()
-                .map_err(|error| RendererProbeError(error.to_string())),
+            Self::D2d => Ok(()),
             #[cfg(feature = "renderer-skia")]
-            Self::Skia(preference) => {
-                crate::platform::skia::probe_skia_support(preference).map_err(RendererProbeError)
-            }
+            Self::Skia(_) => Ok(()),
         }
     }
 }

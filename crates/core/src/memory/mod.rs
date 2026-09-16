@@ -27,7 +27,8 @@ pub use governor::{MemoryGovernor, MemoryReservation, MemoryTaskReservation};
         any(feature = "backend-win32", feature = "tray-win32")
     )
 ))]
-pub(crate) use lru::LruCache;
+#[doc(hidden)]
+pub use lru::LruCache;
 pub use options::{MemoryBudget, MemoryDomainBudgets, MemoryEventPolicy, MemoryOptions};
 pub use policy::{
     CacheDomain, CacheKey, CachePriority, CacheScope, ImageCachePolicy, MemoryAction, MemoryEvent,
@@ -44,7 +45,8 @@ pub use registry::{
         any(feature = "backend-win32", feature = "tray-win32")
     )
 ))]
-pub(crate) use stats::CacheTelemetry;
+#[doc(hidden)]
+pub use stats::CacheTelemetry;
 pub use stats::{CacheUsage, DomainSnapshot, MemorySnapshot, TrimSnapshot};
 
 #[cfg(feature = "persistent-cache")]
@@ -57,8 +59,9 @@ pub use persistent::{
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-pub(crate) const fn test_memory_options() -> MemoryOptions {
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub const fn test_memory_options() -> MemoryOptions {
     const MIB: usize = 1024 * 1024;
     MemoryOptions::new(
         "lgui-tests",

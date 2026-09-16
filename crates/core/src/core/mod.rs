@@ -126,7 +126,8 @@ pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
 pub(crate) use render::estimate_scene_commands_bytes;
 pub(crate) use render::patch_compositing_layer_spec;
 #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
-pub(crate) use render::translate_scene_primitive_for_backend;
+#[doc(hidden)]
+pub use render::translate_scene_primitive_for_backend;
 pub use render::{
     commands_for_phase, compile_scene, compile_scene_root, compositing_layer_damage,
     scene_root_ids, scroll_raster_command_snapshot_exists, ImageFit, RenderPhase, Scene,

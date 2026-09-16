@@ -63,7 +63,8 @@ impl ImageCacheHandle {
         )
     }
 
-    pub(crate) fn new_managed(
+    #[doc(hidden)]
+    pub fn new_managed(
         request: impl Fn(&ImageRequest) -> ImageStatus + Send + Sync + 'static,
         bytes: impl Fn(&ImageRequest) -> Option<AssetBytes> + Send + Sync + 'static,
         stats: impl Fn() -> ImageCacheStats + Send + Sync + 'static,
@@ -502,7 +503,8 @@ fn finish_async_image(
     evict_async_images(&mut state, budget_bytes, 4096, true);
 }
 
-pub(crate) fn load_url_image(
+#[doc(hidden)]
+pub fn load_url_image(
     loader: &RemoteImageLoaderHandle,
     governor: &crate::memory::MemoryGovernor,
     request: &ImageRequest,
@@ -592,10 +594,8 @@ pub(crate) fn load_url_image(
     validate_encoded_bytes(loader.load(url)?, limit)
 }
 
-pub(crate) fn validate_encoded_bytes(
-    bytes: AssetBytes,
-    limit: usize,
-) -> Result<AssetBytes, AssetError> {
+#[doc(hidden)]
+pub fn validate_encoded_bytes(bytes: AssetBytes, limit: usize) -> Result<AssetBytes, AssetError> {
     if bytes.len() > limit {
         return Err(AssetError::InvalidData(format!(
             "encoded image exceeds the {} byte limit",
@@ -605,7 +605,8 @@ pub(crate) fn validate_encoded_bytes(
     Ok(bytes)
 }
 
-pub(crate) fn prepare_image_bytes(
+#[doc(hidden)]
+pub fn prepare_image_bytes(
     bytes: AssetBytes,
     request: &ImageRequest,
     budget: crate::memory::MemoryBudget,

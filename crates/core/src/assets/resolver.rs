@@ -64,7 +64,8 @@ impl RemoteImageLoaderHandle {
         Self(Arc::new(loader))
     }
 
-    pub(crate) fn load(&self, url: &str) -> Result<AssetBytes, AssetError> {
+    #[doc(hidden)]
+    pub fn load(&self, url: &str) -> Result<AssetBytes, AssetError> {
         self.0.load(url)
     }
 

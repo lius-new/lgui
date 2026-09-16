@@ -64,4 +64,24 @@ impl TrayOptions {
         self.activate = Some(action);
         self
     }
+
+    #[doc(hidden)]
+    pub fn tooltip(&self) -> &str {
+        &self.tooltip
+    }
+
+    #[doc(hidden)]
+    pub fn icon(&self) -> Option<&'static [u8]> {
+        self.icon_bytes
+    }
+
+    #[doc(hidden)]
+    pub fn items(&self) -> &[TrayMenuEntry<TrayAction>] {
+        &self.items
+    }
+
+    #[doc(hidden)]
+    pub fn activation(&self) -> Option<&TrayAction> {
+        self.activate.as_ref()
+    }
 }

@@ -15,11 +15,11 @@ pub use model::{
 pub use service::{layout, measure, measure_width, TextSystem, TextSystemHandle};
 
 #[cfg(feature = "renderer-skia")]
-pub(crate) use fonts::install_font_assets;
-#[cfg(feature = "renderer-skia")]
 pub(crate) use fonts::{font_assets, font_families, FontAssets};
-pub(crate) use fonts::{install_font_families, FontFamilies};
-pub(crate) use service::install_text_system;
+#[cfg(feature = "renderer-skia")]
+pub(crate) use fonts::{install_font_assets, FontAssetsGuard};
+pub(crate) use fonts::{install_font_families, FontFamilies, FontFamiliesGuard};
+pub(crate) use service::{install_text_system, TextSystemGuard};
 
 #[path = "text_test.rs"]
 #[cfg(test)]

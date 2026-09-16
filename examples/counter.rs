@@ -1,4 +1,5 @@
 use lgui::prelude::*;
+use lgui::WinitApplication;
 
 fn app(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_i32);
@@ -29,7 +30,8 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    Application::new_skia(GraphicsPreference::Auto)
+    Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
+        .provide(RendererKind::Skia(GraphicsPreference::Auto))
         .memory_options(MemoryOptions::unbounded(
             ImageCachePolicy::WhileVisible,
             false,

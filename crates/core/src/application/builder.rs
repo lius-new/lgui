@@ -17,20 +17,6 @@ use super::{
 };
 
 #[cfg(all(
-    target_os = "windows",
-    feature = "renderer-gdi",
-    feature = "backend-winit",
-    feature = "renderer-skia"
-))]
-use super::DesktopApplication;
-#[cfg(all(feature = "renderer-skia", feature = "backend-winit"))]
-use super::GraphicsPreference;
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-skia", feature = "backend-winit")
-))]
-use super::RendererKind;
-#[cfg(all(
     feature = "tray-win32",
     any(feature = "backend-win32", feature = "backend-winit")
 ))]
@@ -179,95 +165,6 @@ impl<B, M> Application<B, M> {
     pub fn notification_service(self, service: crate::services::NotificationHandle) -> Self {
         self.resources.provide(service);
         self
-    }
-}
-
-#[cfg(all(
-    feature = "renderer-gdi",
-    target_os = "windows",
-    not(all(feature = "backend-winit", feature = "renderer-skia"))
-))]
-impl Application<crate::platform::win32::Win32Application, MemoryOptionsMissing> {
-    pub fn new() -> Self {
-        Self::with_backend(crate::platform::win32::Win32Application::default())
-            .provide(RendererKind::Gdi)
-    }
-}
-
-#[cfg(all(
-    feature = "renderer-gdi",
-    target_os = "windows",
-    not(all(feature = "backend-winit", feature = "renderer-skia"))
-))]
-impl<M> Application<crate::platform::win32::Win32Application, M> {
-    pub fn renderer(mut self, renderer: RendererKind) -> Self {
-        self.resources.provide(renderer);
-        self.backend = match renderer {
-            RendererKind::Gdi => crate::platform::win32::Win32Application::with_renderer(
-                crate::platform::win32::GdiRendererFactory,
-            ),
-            #[cfg(feature = "renderer-d2d")]
-            RendererKind::D2d => crate::platform::win32::Win32Application::with_renderer(
-                crate::platform::win32::D2dRendererFactory,
-            ),
-            #[cfg(feature = "renderer-skia")]
-            RendererKind::Skia(_) => {
-                panic!("the Skia desktop renderer requires the backend-winit feature")
-            }
-        };
-        self
-    }
-}
-
-#[cfg(all(
-    feature = "renderer-gdi",
-    target_os = "windows",
-    feature = "backend-winit",
-    feature = "renderer-skia"
-))]
-impl Application<DesktopApplication, MemoryOptionsMissing> {
-    pub fn new() -> Self {
-        Self::with_backend(DesktopApplication::Win32(
-            crate::platform::win32::Win32Application::default(),
-        ))
-        .provide(RendererKind::Gdi)
-    }
-}
-
-#[cfg(all(
-    target_os = "windows",
-    feature = "renderer-gdi",
-    feature = "backend-winit",
-    feature = "renderer-skia"
-))]
-impl<M> Application<DesktopApplication, M> {
-    pub fn renderer(mut self, renderer: RendererKind) -> Self {
-        self.resources.provide(renderer);
-        self.backend = match renderer {
-            RendererKind::Gdi => {
-                DesktopApplication::Win32(crate::platform::win32::Win32Application::with_renderer(
-                    crate::platform::win32::GdiRendererFactory,
-                ))
-            }
-            #[cfg(feature = "renderer-d2d")]
-            RendererKind::D2d => {
-                DesktopApplication::Win32(crate::platform::win32::Win32Application::with_renderer(
-                    crate::platform::win32::D2dRendererFactory,
-                ))
-            }
-            RendererKind::Skia(preference) => {
-                DesktopApplication::Winit(crate::platform::WinitApplication::new(preference))
-            }
-        };
-        self
-    }
-}
-
-#[cfg(all(feature = "renderer-skia", feature = "backend-winit"))]
-impl Application<crate::platform::WinitApplication, MemoryOptionsMissing> {
-    pub fn new_skia(preference: GraphicsPreference) -> Self {
-        Self::with_backend(crate::platform::WinitApplication::new(preference))
-            .provide(RendererKind::Skia(preference))
     }
 }
 

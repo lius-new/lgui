@@ -9,7 +9,8 @@ mod id;
 mod manager;
 mod options;
 
-pub(crate) use command::WindowCommand;
+#[doc(hidden)]
+pub use command::WindowCommand;
 pub use id::WindowId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,7 +27,8 @@ pub use options::{
     ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowMode, WindowOptions, WindowPosition,
 };
 
-pub(crate) type WindowView = Arc<
+#[doc(hidden)]
+pub type WindowView = Arc<
     dyn for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
         + Send
         + Sync

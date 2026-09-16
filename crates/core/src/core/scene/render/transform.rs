@@ -267,7 +267,8 @@ enum NestedStaticLayerPolicy {
 }
 
 #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
-pub(crate) fn translate_scene_primitive_for_backend(
+#[doc(hidden)]
+pub fn translate_scene_primitive_for_backend(
     command: &ScenePrimitive,
     dx: f32,
     dy: f32,

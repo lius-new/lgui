@@ -152,7 +152,8 @@ impl LayerTransform {
         super::UiRect::new(min_x, min_y, max_x, max_y)
     }
 
-    pub(crate) fn transform_point(self, rect: super::UiRect, x: f32, y: f32) -> (f32, f32) {
+    #[doc(hidden)]
+    pub fn transform_point(self, rect: super::UiRect, x: f32, y: f32) -> (f32, f32) {
         let origin_x = rect.left as f32 + rect.width() as f32 * self.origin_x();
         let origin_y = rect.top as f32 + rect.height() as f32 * self.origin_y();
         let dx = (x - origin_x) * self.scale_x();

@@ -2,9 +2,11 @@
 
 ## Application And Windows
 
-`Application::new().memory_options(...).window_options(...).run(root)` creates the main window and
-mounts the root component. `.provide(value)` adds Application-scoped typed data. `.renderer(RendererKind)` selects
-GDI or Direct2D. Optional `.tray(...)` and `.notifications(...)` configure the built-in Windows
+`Application::with_backend(backend).memory_options(...).window_options(...).run(root)` creates the
+main window and mounts the root component. Use `Win32Application::default()` for the default native
+Windows/GDI stack or `WinitApplication::new(GraphicsPreference)` for the portable desktop stack.
+`.provide(value)` adds Application-scoped typed data. A `RendererKind` resource selects the renderer
+used by a compatible backend. Optional `.tray(...)` and `.notifications(...)` configure the built-in Windows
 adapters when `tray-win32` and `notifications-win32` are enabled. `.notification_service(...)`
 installs a portable application-provided adapter, and `.executor(...)` configures task execution.
 
@@ -40,7 +42,7 @@ let memory = MemoryOptions::new(
     true,
 );
 
-Application::new()
+Application::with_backend(backend)
     .memory_options(memory)
     .persistent_cache(lgui::memory::FileCacheStore::new(cache_root.join("lgui")))
     .run(app)?;
@@ -140,7 +142,7 @@ impl Command for Login {
     const NAME: &'static str = "auth.login";
 }
 
-Application::new()
+Application::with_backend(backend)
     .memory_options(application_memory_options())
     .command::<Login>(move |_cx, request| {
         let auth = auth.clone();

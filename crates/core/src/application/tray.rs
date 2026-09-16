@@ -4,14 +4,16 @@ use crate::services::{TrayAction, TrayOptions};
 
 use super::ApplicationContext;
 
-pub(crate) type TrayCommandHandler = Arc<dyn Fn(&ApplicationContext, &str) + Send + Sync + 'static>;
+pub type TrayCommandHandler = Arc<dyn Fn(&ApplicationContext, &str) + Send + Sync + 'static>;
 
-pub(crate) struct TrayRegistration {
+#[doc(hidden)]
+pub struct TrayRegistration {
     pub options: TrayOptions,
     pub handler: TrayCommandHandler,
 }
 
-pub(crate) fn dispatch_tray_action(
+#[doc(hidden)]
+pub fn dispatch_tray_action(
     registration: &TrayRegistration,
     context: &ApplicationContext,
     action: TrayAction,

@@ -1,8 +1,29 @@
 use std::sync::Arc;
 
-use crate::renderer::RenderErrorStage;
-
 use super::WindowId;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderErrorStage {
+    Create,
+    Prepare,
+    Draw,
+    Copy,
+    Present,
+    Commit,
+}
+
+impl RenderErrorStage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Prepare => "prepare",
+            Self::Draw => "draw",
+            Self::Copy => "copy",
+            Self::Present => "present",
+            Self::Commit => "commit",
+        }
+    }
+}
 
 type RenderErrorHandler = Arc<dyn Fn(&RenderError) + Send + Sync + 'static>;
 

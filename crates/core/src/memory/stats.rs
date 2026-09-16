@@ -38,7 +38,8 @@ impl CacheUsage {
         self.rebuildable_bytes.saturating_add(self.cache_bytes)
     }
 
-    pub(crate) fn add_assign(&mut self, other: Self) {
+    #[doc(hidden)]
+    pub fn add_assign(&mut self, other: Self) {
         self.live_bytes = self.live_bytes.saturating_add(other.live_bytes);
         self.rebuildable_bytes = self
             .rebuildable_bytes
@@ -100,7 +101,8 @@ pub struct MemorySnapshot {
     )
 ))]
 #[derive(Clone, Default)]
-pub(crate) struct CacheTelemetry {
+#[doc(hidden)]
+pub struct CacheTelemetry {
     usage: Arc<Mutex<CacheUsage>>,
 }
 
@@ -113,7 +115,7 @@ pub(crate) struct CacheTelemetry {
     )
 ))]
 impl CacheTelemetry {
-    pub(crate) fn publish(&self, usage: CacheUsage) {
+    pub fn publish(&self, usage: CacheUsage) {
         *self.usage.lock().expect("cache telemetry poisoned") = usage;
     }
 
@@ -130,7 +132,7 @@ impl CacheTelemetry {
             )
         )
     ))]
-    pub(crate) fn snapshot(&self) -> CacheUsage {
+    pub fn snapshot(&self) -> CacheUsage {
         *self.usage.lock().expect("cache telemetry poisoned")
     }
 }

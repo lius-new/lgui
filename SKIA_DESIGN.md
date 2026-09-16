@@ -131,7 +131,7 @@ lgui facade
     |---> lgui-core
     |---> lgui-render-skia ---> lgui-render-api ---> lgui-core
     |---> lgui-platform-winit -> lgui-render-api ---> lgui-core
-    +---> lgui-platform-win32 ---> lgui-core
+    +---> lgui-platform-win32 -> lgui-render-api ---> lgui-core
 ```
 
 An arrow means "depends on". The facade selects and composes concrete implementations; portable
@@ -149,8 +149,8 @@ The dependency rules are:
   AccessKit adapters, and the generic desktop render-runtime boundary. Its optional `skia` module
   binds window/raw handles to Skia OpenGL, Vulkan, Metal, or software surfaces and composes them
   with `lgui-render-skia`. Without that feature the crate does not depend on Skia.
-- `lgui-platform-win32` contains only Windows capability implementations and narrowly scoped raw
-  handle extensions. It cannot own a second UI runtime, Host tree, or frame scheduler.
+- `lgui-platform-win32` owns the native Win32 application adapter and GDI/Direct2D renderers. It
+  consumes `lgui-render-api` and the shared runtime, but does not own a second Host tree.
 - The `lgui` package remains the facade that selects features, supplies ergonomic constructors,
   and re-exports stable public APIs.
 

@@ -4,8 +4,9 @@
 [![docs.rs](https://docs.rs/lgui/badge.svg)](https://docs.rs/lgui)
 
 `lgui` is an application-independent Rust GUI library. An application supplies one root
-component and starts it with `Application::new().run(app)`; `lgui` owns the component session,
-retained host tree, event dispatch, reactive updates, windows, renderer, and frame submission.
+component, chooses a platform backend, and starts it with `Application::with_backend(...)`;
+`lgui` owns the component session, retained host tree, event dispatch, reactive updates, windows,
+renderer, and frame submission.
 
 The portable core provides typed component State, committed Effects, Commands, Events, Context,
 Store selectors and actions, declarative Router outlets, layout, input, and scene construction. Optional features add
@@ -41,24 +42,43 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
         .into()
 }
 
-Application::new()
+Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
+    .provide(RendererKind::Skia(GraphicsPreference::Auto))
+    .memory_options(MemoryOptions::unbounded(
+        ImageCachePolicy::WhileVisible,
+        false,
+    ))
     .window_options(WindowOptions::new("counter").size(Size::new(380.0, 240.0)))
     .run(app)?;
 ```
+
+The workspace publishes six real packages with one owner for each responsibility:
+
+| Package | Responsibility |
+| --- | --- |
+| `lgui` | Application-facing facade and feature composition |
+| `lgui-core` | Components, runtime, layout, input, Scene, resources, and service contracts |
+| `lgui-render-api` | Frame, damage, renderer lifecycle, and memory-pressure contracts |
+| `lgui-render-skia` | Skia scene painting, text layout, software surface, and renderer caches |
+| `lgui-platform-winit` | Portable desktop windows, input, event loop, and Skia surfaces |
+| `lgui-platform-win32` | Native Win32 application backend and GDI/Direct2D renderers |
+
+Applications should normally depend only on `lgui`; the other packages are public so renderer and
+platform integrations can be developed and released independently.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md),
 [`BASELINE.md`](BASELINE.md), and the implementation/status contract in
 [`SKIA_DESIGN.md`](SKIA_DESIGN.md). Build the portable core with:
 
 ```powershell
-cargo test -p lgui --no-default-features
+cargo test -p lgui-core --no-default-features
 ```
 
 Add the Windows-native default configuration to an application with:
 
 ```toml
 [dependencies]
-lgui = "0.1.0"
+lgui = "0.2.0"
 ```
 
 For the portable winit + Skia backend, disable the Windows-oriented defaults and select a Skia
@@ -66,7 +86,7 @@ presentation feature explicitly:
 
 ```toml
 [dependencies]
-lgui = { version = "0.1.0", default-features = false, features = ["renderer-skia-gl", "widgets"] }
+lgui = { version = "0.2.0", default-features = false, features = ["renderer-skia-gl", "widgets"] }
 ```
 
 Run the same example source through the portable winit + Skia backend on Windows, Linux, or

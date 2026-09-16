@@ -46,7 +46,8 @@ impl SvgIconRegistry {
         self
     }
 
-    pub(crate) fn resolve(&self, key: &str) -> Option<Cow<'static, str>> {
+    #[doc(hidden)]
+    pub fn resolve(&self, key: &str) -> Option<Cow<'static, str>> {
         self.icons
             .get(key)
             .and_then(SvgIconSource::to_svg)
@@ -73,7 +74,8 @@ impl From<icondata::Icon> for SvgIconSource {
 }
 
 #[derive(Clone)]
-pub(crate) struct IconRegistration(pub Arc<SvgIconRegistry>);
+#[doc(hidden)]
+pub struct IconRegistration(pub Arc<SvgIconRegistry>);
 
 thread_local! {
     static CURRENT_ICON_REGISTRY: RefCell<Vec<Arc<SvgIconRegistry>>> = const { RefCell::new(Vec::new()) };
@@ -111,7 +113,8 @@ pub(crate) fn resolve_svg(key: &str) -> Option<Cow<'static, str>> {
     })
 }
 
-pub(crate) fn builtin_svg(key: &str) -> Option<Cow<'static, str>> {
+#[doc(hidden)]
+pub fn builtin_svg(key: &str) -> Option<Cow<'static, str>> {
     match key {
         "copy" => Some(Cow::Borrowed(COPY)),
         "arrow-left" => Some(Cow::Borrowed(ARROW_LEFT)),

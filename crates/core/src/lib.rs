@@ -7,6 +7,8 @@ pub use prelude::*;
 pub mod application;
 #[cfg(feature = "images")]
 pub mod assets;
+#[doc(hidden)]
+pub mod backend;
 #[cfg(feature = "clipboard")]
 pub use services::clipboard;
 pub mod command;

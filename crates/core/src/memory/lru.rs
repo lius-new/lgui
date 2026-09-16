@@ -2,7 +2,8 @@ use std::{collections::HashMap, hash::Hash};
 
 use super::{CacheTelemetry, CacheUsage, ResourceClass};
 
-pub(crate) struct LruCache<K, V> {
+#[doc(hidden)]
+pub struct LruCache<K, V> {
     entries: HashMap<K, Entry<V>>,
     bytes: usize,
     budget_bytes: usize,
@@ -24,11 +25,7 @@ impl<K, V> LruCache<K, V>
 where
     K: Clone + Eq + Hash,
 {
-    pub(crate) fn new(
-        budget_bytes: usize,
-        class: ResourceClass,
-        telemetry: CacheTelemetry,
-    ) -> Self {
+    pub fn new(budget_bytes: usize, class: ResourceClass, telemetry: CacheTelemetry) -> Self {
         let cache = Self {
             entries: HashMap::new(),
             bytes: 0,
@@ -44,7 +41,7 @@ where
         cache
     }
 
-    pub(crate) fn contains_touch(&mut self, key: &K) -> bool {
+    pub fn contains_touch(&mut self, key: &K) -> bool {
         self.tick = self.tick.wrapping_add(1);
         let present = if let Some(entry) = self.entries.get_mut(key) {
             entry.last_used = self.tick;
@@ -58,11 +55,11 @@ where
         present
     }
 
-    pub(crate) fn get(&self, key: &K) -> Option<&V> {
+    pub fn get(&self, key: &K) -> Option<&V> {
         self.entries.get(key).map(|entry| &entry.value)
     }
 
-    pub(crate) fn insert(&mut self, key: K, value: V, bytes: usize) -> bool {
+    pub fn insert(&mut self, key: K, value: V, bytes: usize) -> bool {
         if bytes > self.budget_bytes {
             self.publish();
             return false;
@@ -85,11 +82,11 @@ where
     }
 
     #[cfg(any(feature = "images-win32", feature = "renderer-d2d"))]
-    pub(crate) fn can_store(&self, bytes: usize) -> bool {
+    pub fn can_store(&self, bytes: usize) -> bool {
         bytes <= self.budget_bytes
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.evictions = self.evictions.saturating_add(self.entries.len() as u64);
         self.entries.clear();
         self.bytes = 0;
@@ -109,7 +106,7 @@ where
             )
         )
     ))]
-    pub(crate) fn trim_to(&mut self, target_bytes: usize) -> usize {
+    pub fn trim_to(&mut self, target_bytes: usize) -> usize {
         let before = self.bytes;
         self.evict_to(target_bytes);
         before.saturating_sub(self.bytes)
@@ -128,12 +125,12 @@ where
             )
         )
     ))]
-    pub(crate) fn set_budget(&mut self, budget_bytes: usize) {
+    pub fn set_budget(&mut self, budget_bytes: usize) {
         self.budget_bytes = budget_bytes;
         self.evict_to(self.budget_bytes);
     }
 
-    pub(crate) fn usage(&self) -> CacheUsage {
+    pub fn usage(&self) -> CacheUsage {
         let mut usage = CacheUsage {
             cpu_bytes: self.bytes,
             entries: self.entries.len(),

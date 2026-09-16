@@ -92,3 +92,7 @@ pub fn static_layer_cache_entry_ids_for_prefix(prefix: &str) -> Vec<String> {
             .map_or_else(Vec::new, |cache| (cache.prefix_entry_ids)(prefix))
     })
 }
+
+#[cfg(test)]
+#[path = "cache_test.rs"]
+mod tests;

@@ -14,8 +14,6 @@ mod scope;
 mod tray;
 mod view;
 
-pub use crate::renderer::RenderErrorStage;
-
 #[cfg(feature = "tray")]
 pub use crate::services::{TrayAction, TrayOptions};
 pub use crate::window::{
@@ -23,17 +21,10 @@ pub use crate::window::{
     WindowId, WindowManager, WindowMode, WindowOptions, WindowPosition,
 };
 pub use backend::ApplicationBackend;
-#[cfg(all(
-    target_os = "windows",
-    feature = "renderer-gdi",
-    feature = "backend-winit",
-    feature = "renderer-skia"
-))]
-pub use backend::{DesktopApplication, DesktopApplicationError};
 pub use builder::{Application, MemoryOptionsConfigured, MemoryOptionsMissing};
 pub use context::ApplicationContext;
-pub use error::RenderError;
 pub(crate) use error::RenderErrorRegistration;
+pub use error::{RenderError, RenderErrorStage};
 pub use handle::{ApplicationHandle, ApplicationTask};
 #[cfg(any(
     all(feature = "renderer-gdi", target_os = "windows"),
@@ -47,7 +38,8 @@ pub(crate) use scope::{current_application, ApplicationScopeFuture};
     feature = "tray-win32",
     any(feature = "backend-win32", feature = "backend-winit")
 ))]
-pub(crate) use tray::{dispatch_tray_action, TrayRegistration};
+#[doc(hidden)]
+pub use tray::{dispatch_tray_action, TrayRegistration};
 pub(crate) use view::application_root_view;
 pub use view::AppView;
 

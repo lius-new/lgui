@@ -33,7 +33,8 @@ pub struct UiSession {
 
 #[cfg(feature = "diagnostics-timing")]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct SessionRenderTimings {
+#[doc(hidden)]
+pub struct SessionRenderTimings {
     pub pending_updates_ms: f32,
     pub prepare_render_ms: f32,
     pub retained_snapshot_ms: f32,
@@ -328,7 +329,8 @@ impl UiSession {
     }
 
     #[cfg(feature = "diagnostics-timing")]
-    pub(crate) fn render_timings(&self) -> SessionRenderTimings {
+    #[doc(hidden)]
+    pub fn render_timings(&self) -> SessionRenderTimings {
         self.render_timings
     }
 

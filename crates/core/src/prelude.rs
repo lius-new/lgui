@@ -48,10 +48,6 @@ pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
     InputSink, WakeHandle,
 };
-pub use crate::renderer::{
-    ClipRegion, FrameInfo, FrameReason, MemoryPressure, RenderStats, RendererCapabilities,
-    SceneRenderer,
-};
 pub use crate::resources::Resources;
 #[cfg(feature = "router")]
 pub use crate::router::{

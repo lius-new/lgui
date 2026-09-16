@@ -110,7 +110,8 @@ impl Scene {
         self.commands.as_slice()
     }
 
-    pub(crate) fn shares_command_storage_with(&self, other: &Self) -> bool {
+    #[doc(hidden)]
+    pub fn shares_command_storage_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.commands, &other.commands)
     }
 

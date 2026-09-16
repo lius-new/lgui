@@ -66,7 +66,8 @@ pub struct HostCommitMetrics {
 
 #[cfg(feature = "diagnostics-timing")]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct HostCommitTimings {
+#[doc(hidden)]
+pub struct HostCommitTimings {
     pub change_scan_ms: f32,
     pub node_patch_ms: f32,
     pub scene_reconcile_ms: f32,
@@ -84,7 +85,8 @@ pub struct HostCommit {
     pub metrics: HostCommitMetrics,
     pub semantics: SemanticUpdate,
     #[cfg(feature = "diagnostics-timing")]
-    pub(crate) timings: HostCommitTimings,
+    #[doc(hidden)]
+    pub timings: HostCommitTimings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

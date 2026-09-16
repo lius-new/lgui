@@ -12,7 +12,8 @@ pub use model::{
     FramePresentMetrics, FrameRenderMetrics, FrameSample, GpuUsageSnapshot, MachineUsageSnapshot,
     ProcessUsageSnapshot, RendererDeviceInfo, SystemUsageSnapshot,
 };
-pub(crate) use provider::DiagnosticsRegistration;
+#[doc(hidden)]
+pub use provider::DiagnosticsRegistration;
 pub use provider::{DiagnosticsProvider, DiagnosticsSink};
 pub use system::{system_usage_sample_interval_ms, system_usage_snapshot};
 pub use timing::duration_ms;

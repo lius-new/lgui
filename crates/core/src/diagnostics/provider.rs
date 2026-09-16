@@ -14,7 +14,8 @@ pub trait DiagnosticsSink: Send + Sync {
 }
 
 #[derive(Clone)]
-pub(crate) struct DiagnosticsRegistration {
+#[doc(hidden)]
+pub struct DiagnosticsRegistration {
     sink: Arc<dyn DiagnosticsSink>,
 }
 
@@ -25,7 +26,7 @@ impl DiagnosticsRegistration {
         }
     }
 
-    pub(crate) fn record(&self, sample: FrameSample, tree: &HostTree, viewport: UiRect) {
+    pub fn record(&self, sample: FrameSample, tree: &HostTree, viewport: UiRect) {
         self.sink.record(sample, tree, viewport);
     }
 }
