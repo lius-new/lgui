@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lgui::core::ScenePrimitiveKind;
+use lgui_core::core::ScenePrimitiveKind;
 
 #[test]
 fn source_tree_expresses_subsystem_boundaries() {
@@ -689,7 +689,8 @@ fn desktop_service_features_separate_contracts_from_windows_adapters() {
 #[test]
 fn skia_design_assigns_every_scene_primitive() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let design = fs::read_to_string(root.join("SKIA_DESIGN.md")).expect("read Skia design");
+    let design =
+        fs::read_to_string(root.join("../..").join("SKIA_DESIGN.md")).expect("read Skia design");
 
     for kind in ScenePrimitiveKind::ALL {
         assert!(

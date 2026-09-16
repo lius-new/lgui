@@ -1,0 +1,181 @@
+[package]
+name = "lgui-core"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "A reactive Rust GUI library with native and portable rendering backends"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui"
+keywords = ["gui", "desktop", "widgets", "reactive"]
+categories = ["gui", "rendering"]
+
+[features]
+default = ["renderer-gdi", "router", "store", "widgets"]
+async = []
+desktop = ["backend-winit", "clipboard", "open-url", "dialogs", "accessibility"]
+backend-winit = [
+  "renderer-skia",
+  "dep:raw-window-handle",
+  "dep:softbuffer",
+  "dep:winit",
+]
+accessibility = ["backend-winit", "dep:accesskit", "dep:accesskit_winit"]
+advanced-rendering = [
+  "renderer-d2d",
+  "renderer-gdi",
+]
+renderer-skia = [
+  "dep:skia-safe",
+  "images",
+  "svg",
+]
+renderer-skia-gl = [
+  "renderer-skia",
+  "backend-winit",
+  "dep:glutin",
+]
+renderer-skia-vulkan = [
+  "renderer-skia",
+  "backend-winit",
+  "dep:ash",
+  "dep:ash-window",
+]
+renderer-skia-vulkan-windows = [
+  "renderer-skia-vulkan",
+  "dep:lgui-skia-vulkan-windows-features",
+]
+renderer-skia-vulkan-linux = [
+  "renderer-skia-vulkan",
+  "dep:lgui-skia-vulkan-linux-features",
+]
+renderer-skia-metal = [
+  "renderer-skia",
+  "backend-winit",
+  "dep:objc2",
+  "dep:objc2-app-kit",
+  "dep:objc2-core-foundation",
+  "dep:objc2-metal",
+  "dep:objc2-quartz-core",
+  "dep:lgui-skia-metal-features",
+]
+backend-win32 = [
+  "windows-platform",
+  "windows/Win32_System_ProcessStatus",
+  "windows/Win32_System_Threading",
+]
+clipboard = ["dep:arboard"]
+dialogs = ["dep:rfd"]
+open-url = ["dep:open"]
+diagnostics = []
+diagnostics-serde = ["diagnostics", "dep:serde"]
+diagnostics-timing = ["diagnostics"]
+persistent-cache = ["dep:sha2"]
+system-diagnostics = [
+  "diagnostics",
+  "backend-win32",
+  "windows/Win32_System_SystemInformation",
+]
+images = ["dep:image", "dep:ureq"]
+images-win32 = [
+  "images",
+  "backend-win32",
+  "windows/Win32_Graphics_GdiPlus",
+  "windows/Win32_System_Com",
+  "windows/Win32_UI_Shell",
+]
+multi-window = []
+notifications = []
+notifications-win32 = [
+  "notifications",
+  "windows-platform",
+  "windows/Data_Xml_Dom",
+  "windows/UI_Notifications",
+  "windows/Win32_UI_Shell",
+]
+router = []
+renderer-gdi = ["backend-win32", "dep:image"]
+renderer-d2d = [
+  "backend-win32",
+  "dep:windows-numerics",
+  "diagnostics",
+  "images-win32",
+  "svg",
+  "windows/Win32_Graphics_Direct3D",
+  "windows/Win32_Graphics_Direct3D11",
+  "windows/Win32_Graphics_DirectComposition",
+  "windows/Win32_Graphics_Dxgi",
+]
+store = []
+svg = [
+  "images",
+  "dep:icondata",
+  "dep:resvg",
+  "dep:tiny-skia",
+  "dep:usvg",
+]
+theme = []
+tokio = ["async", "dep:tokio"]
+tray = []
+tray-win32 = ["tray", "windows-platform", "windows/Win32_UI_Shell"]
+windows-platform = ["dep:windows"]
+widgets = ["theme"]
+
+[dependencies]
+accesskit = { version = "0.24", optional = true }
+accesskit_winit = { version = "0.33", optional = true, default-features = false, features = ["accesskit_unix", "async-io", "rwh_06"] }
+arboard = { version = "3.6", optional = true }
+ash = { version = "0.38", optional = true, default-features = false, features = ["loaded", "std"] }
+ash-window = { version = "0.13", optional = true }
+glutin = { version = "0.32", optional = true }
+icondata = { version = "0.7.0", optional = true, default-features = false, features = ["lucide"] }
+image = { version = "0.25", optional = true, default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+keyboard-types = "0.8"
+open = { version = "5.3", optional = true }
+resvg = { version = "0.45", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+rfd = { version = "0.15", optional = true }
+serde = { version = "1", optional = true, features = ["derive"] }
+sha2 = { version = "0.10", optional = true }
+softbuffer = { version = "0.4.8", optional = true, default-features = false, features = ["x11", "x11-dlopen", "wayland", "wayland-dlopen"] }
+tiny-skia = { version = "0.11", optional = true }
+tokio = { version = "1", optional = true, features = ["rt"] }
+usvg = { version = "0.45", optional = true }
+ureq = { version = "2.12", optional = true, default-features = true, features = ["native-certs"] }
+unicode-segmentation = "1.12"
+unicode-bidi = "0.3"
+winit = { version = "0.30.12", optional = true }
+# 0.99.0's official Windows binary matrix publishes this exact feature set. Keeping it exact
+# avoids a local LLVM/Ninja source build while still using the upstream rust-skia artifacts.
+skia-safe = { version = "=0.99.0", optional = true, default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout"] }
+
+[target.'cfg(windows)'.dependencies]
+lgui-skia-vulkan-windows-features = { version = "0.1.0", path = "../skia-vulkan-windows-features", optional = true }
+windows-numerics = { version = "0.3.1", optional = true }
+windows = { version = "0.62.2", optional = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Direct2D",
+  "Win32_Graphics_Direct2D_Common",
+  "Win32_Graphics_DirectWrite",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Input_Ime",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.3", optional = true, default-features = false }
+objc2-app-kit = { version = "0.3.2", optional = true, default-features = false, features = ["objc2-quartz-core", "NSView", "NSResponder"] }
+objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false }
+objc2-metal = { version = "0.3.2", optional = true, default-features = false, features = ["MTLCommandBuffer", "MTLCommandQueue", "MTLDevice", "MTLDrawable", "MTLPixelFormat"] }
+objc2-quartz-core = { version = "0.3.2", optional = true, default-features = false, features = ["objc2-core-foundation", "objc2-metal", "CAMetalLayer"] }
+lgui-skia-metal-features = { version = "0.1.0", path = "../skia-metal-features", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+lgui-skia-vulkan-linux-features = { version = "0.1.0", path = "../skia-vulkan-linux-features", optional = true }
