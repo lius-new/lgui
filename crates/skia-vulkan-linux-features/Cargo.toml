@@ -8,5 +8,5 @@ license.workspace = true
 repository = "https://github.com/lius-new/lgui"
 homepage = "https://github.com/lius-new/lgui"
 
-[dependencies]
-skia-safe = { version = "=0.99.0", default-features = false, features = ["all-linux", "vulkan"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+skia-safe = { version = "=0.99.0", default-features = false, features = ["all-linux", "binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout", "vulkan"] }
