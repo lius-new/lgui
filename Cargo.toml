@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = ["crates-io"]
 description = "A reactive Rust GUI library with native and portable rendering backends"
+license.workspace = true
 readme = "README.md"
 repository = "https://github.com/lius-new/lgui"
 homepage = "https://github.com/lius-new/lgui"
@@ -14,6 +15,9 @@ categories = ["gui", "rendering"]
 [workspace]
 members = ["crates/*"]
 resolver = "2"
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
 
 [features]
 default = ["renderer-gdi", "router", "store", "widgets"]

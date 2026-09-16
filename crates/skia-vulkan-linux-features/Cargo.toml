@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = ["crates-io"]
 description = "Target-specific Skia Vulkan feature bridge for lgui on Linux"
+license.workspace = true
 repository = "https://github.com/lius-new/lgui"
 homepage = "https://github.com/lius-new/lgui"
 

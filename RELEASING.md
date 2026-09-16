@@ -1,7 +1,7 @@
 # Releasing LGUI
 
-Every published package must declare the repository's chosen license in its `Cargo.toml`, and the
-matching license file must be present before the first release.
+Every published package must declare `MIT OR Apache-2.0` in its `Cargo.toml`, and both license files
+must be present before a release.
 
 Run the test suite and inspect each package before publishing:
 
