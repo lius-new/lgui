@@ -1,5 +1,8 @@
 # LGUI
 
+[![crates.io](https://img.shields.io/crates/v/lgui.svg)](https://crates.io/crates/lgui)
+[![docs.rs](https://docs.rs/lgui/badge.svg)](https://docs.rs/lgui)
+
 `lgui` is an application-independent Rust GUI library. An application supplies one root
 component and starts it with `Application::new().run(app)`; `lgui` owns the component session,
 retained host tree, event dispatch, reactive updates, windows, renderer, and frame submission.
@@ -51,23 +54,29 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md),
 cargo test -p lgui --no-default-features
 ```
 
+Add the Windows-native default configuration to an application with:
+
+```toml
+[dependencies]
+lgui = "0.1.0"
+```
+
+For the portable winit + Skia backend, disable the Windows-oriented defaults and select a Skia
+presentation feature explicitly:
+
+```toml
+[dependencies]
+lgui = { version = "0.1.0", default-features = false, features = ["renderer-skia-gl", "widgets"] }
+```
+
 Run the same example source through the portable winit + Skia backend on Windows, Linux, or
 macOS:
 
 ```powershell
-cargo run --manifest-path native\lgui\Cargo.toml --example counter --no-default-features --features renderer-skia-gl,widgets
+cargo run --example counter --no-default-features --features renderer-skia-gl,widgets
 ```
 
 The Skia desktop backend uses winit with Vulkan, OpenGL, Metal, or software presentation.
-Liuguang keeps Skia behind an explicit feature and runtime renderer choice during migration:
-
-```powershell
-cargo run --bin liugc --features renderer-skia -- --renderer skia
-cargo run --bin liugc --features renderer-skia -- --renderer skia-opengl
-cargo run --bin liugc --features renderer-skia -- --renderer skia-vulkan
-cargo run --bin liugc --features renderer-skia -- --renderer skia-software
-```
-
-`skia` selects the documented platform `Auto` order. Framework applications on macOS may select
-`skia-metal` when built with `lgui/renderer-skia-metal`. Explicit GPU choices return an error when
-the requested driver is unavailable; only `Auto` follows the bounded fallback chain.
+Applications on macOS may enable `renderer-skia-metal`; Linux and Windows applications may enable
+their platform-specific Vulkan feature. Explicit GPU choices return an error when the requested
+driver is unavailable; only `Auto` follows the bounded fallback chain.

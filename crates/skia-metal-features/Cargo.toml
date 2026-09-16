@@ -2,7 +2,10 @@
 name = "lgui-skia-metal-features"
 version = "0.1.0"
 edition = "2021"
-publish = false
+publish = ["crates-io"]
+description = "Target-specific Skia Metal feature bridge for lgui"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
 
 [dependencies]
 skia-safe = { version = "=0.99.0", default-features = false, features = ["metal"] }
