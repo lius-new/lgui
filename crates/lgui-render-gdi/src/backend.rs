@@ -81,6 +81,6 @@ use compositing::*;
 use primitives::*;
 use text::*;
 
-#[path = "gdi_renderer/gdi_renderer_test.rs"]
+#[path = "backend/gdi_renderer_test.rs"]
 #[cfg(test)]
 mod tests;

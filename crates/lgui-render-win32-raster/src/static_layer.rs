@@ -179,7 +179,6 @@ impl StaticLayerMemoryCache {
     }
 }
 
-#[cfg(feature = "advanced-rendering")]
 pub(crate) fn trim_static_layer_memory_cache(target_bytes: usize) -> usize {
     let mut cache = static_layer_cache()
         .lock()
@@ -190,7 +189,6 @@ pub(crate) fn trim_static_layer_memory_cache(target_bytes: usize) -> usize {
     before.saturating_sub(cache.bytes)
 }
 
-#[cfg(feature = "advanced-rendering")]
 pub(crate) fn set_static_layer_memory_cache_budget(budget_bytes: usize) {
     let mut cache = static_layer_cache()
         .lock()
@@ -200,7 +198,8 @@ pub(crate) fn set_static_layer_memory_cache_budget(budget_bytes: usize) {
     cache.evict_to_budget();
 }
 
-pub(super) fn static_layer_cache_key(
+#[doc(hidden)]
+pub fn static_layer_cache_key(
     id: &UiId,
     spec: &StaticLayerSpec,
     width: i32,

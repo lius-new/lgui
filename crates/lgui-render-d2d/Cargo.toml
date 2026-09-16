@@ -1,0 +1,45 @@
+[package]
+name = "lgui-render-d2d"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "Direct2D, Direct3D, and DirectComposition renderer backend for LGUI"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui-render-d2d"
+keywords = ["gui", "rendering", "direct2d", "win32"]
+categories = ["gui", "rendering", "os::windows-apis"]
+
+[features]
+default = []
+diagnostics = ["lgui-platform-win32/diagnostics"]
+multi-window = ["lgui-core/multi-window", "lgui-platform-win32/multi-window"]
+
+[dependencies]
+lgui-assets = { version = "0.2.0", path = "../lgui-assets", default-features = false, features = ["images", "svg"] }
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["renderer-d2d"] }
+lgui-platform-win32 = { version = "0.2.0", path = "../lgui-platform-win32", default-features = false, features = ["backend-win32", "images-win32", "svg"] }
+lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
+lgui-render-win32-raster = { version = "0.2.0", path = "../lgui-render-win32-raster", default-features = false, features = ["d2d"] }
+windows-numerics = "0.3.1"
+
+[dev-dependencies]
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["test-support"] }
+lgui-render-api = { version = "0.2.0", path = "../lgui-render-api", features = ["test-support"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Direct2D",
+  "Win32_Graphics_Direct2D_Common",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_DirectComposition",
+  "Win32_Graphics_DirectWrite",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+] }

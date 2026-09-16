@@ -114,16 +114,13 @@ pub use node::{
 };
 pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
-#[cfg(any(
-    test,
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
 pub(crate) use render::estimate_scene_commands_bytes;
 pub(crate) use render::patch_compositing_layer_spec;
-#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+#[cfg(all(
+    target_os = "windows",
+    any(feature = "renderer-gdi", feature = "renderer-d2d")
+))]
 #[doc(hidden)]
 pub use render::translate_scene_primitive_for_backend;
 pub use render::{

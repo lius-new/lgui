@@ -42,12 +42,12 @@ thread_local! {
     static RENDER_CACHE: RefCell<Option<RenderCacheHandle>> = const { RefCell::new(None) };
 }
 
-#[cfg(any(test, all(target_os = "windows", feature = "advanced-rendering")))]
+#[cfg(any(test, all(target_os = "windows", feature = "renderer-gdi")))]
 pub(crate) struct RenderCacheGuard {
     previous: Option<RenderCacheHandle>,
 }
 
-#[cfg(any(test, all(target_os = "windows", feature = "advanced-rendering")))]
+#[cfg(any(test, all(target_os = "windows", feature = "renderer-gdi")))]
 impl Drop for RenderCacheGuard {
     fn drop(&mut self) {
         RENDER_CACHE.with(|current| {
@@ -56,7 +56,7 @@ impl Drop for RenderCacheGuard {
     }
 }
 
-#[cfg(any(test, all(target_os = "windows", feature = "advanced-rendering")))]
+#[cfg(any(test, all(target_os = "windows", feature = "renderer-gdi")))]
 pub(crate) fn install_render_cache(handle: RenderCacheHandle) -> RenderCacheGuard {
     let previous = RENDER_CACHE.with(|current| current.borrow_mut().replace(handle));
     RenderCacheGuard { previous }

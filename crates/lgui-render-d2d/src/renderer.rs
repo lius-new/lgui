@@ -43,8 +43,8 @@ use lgui_render_api::{
     FrameInfo, RenderErrorStage, RenderStats, RendererCapabilities, SceneRenderer,
 };
 
-use super::super::{
-    enhanced, Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,
+use crate::{
+    backend, Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -64,7 +64,7 @@ impl Win32RendererFactory for D2dRendererFactory {
         context: &lgui_core::application::ApplicationContext,
         dispatcher: &lgui_platform_win32::Win32Dispatcher,
     ) -> Box<dyn std::any::Any> {
-        crate::environment::install_d2d(context, dispatcher)
+        lgui_render_win32_raster::backend::install_d2d_environment(context, dispatcher)
     }
 }
 
@@ -76,7 +76,7 @@ pub fn probe_d2d_support() -> Result<()> {
     let d2d_device: ID2D1Device = unsafe { d2d_factory.CreateDevice(&dxgi_device) }?;
     let context = unsafe { d2d_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE) }?;
     let dwrite: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }?;
-    let _renderer = enhanced::d2d::D2dRenderer::new(context, dwrite, 1, 1)?;
+    let _renderer = backend::D2dRenderer::new(context, dwrite, 1, 1)?;
     Ok(())
 }
 
@@ -210,7 +210,7 @@ struct CompositionResources {
     _dcomp_target: IDCompositionTarget,
     _dcomp_visual: IDCompositionVisual,
     target_bitmap: ID2D1Bitmap1,
-    renderer: enhanced::d2d::D2dRenderer,
+    renderer: backend::D2dRenderer,
 }
 
 impl CompositionResources {
@@ -243,7 +243,7 @@ impl CompositionResources {
         }
 
         let dwrite: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }?;
-        let renderer = enhanced::d2d::D2dRenderer::new(d2d_context.clone(), dwrite, width, height)?;
+        let renderer = backend::D2dRenderer::new(d2d_context.clone(), dwrite, width, height)?;
 
         Ok(Self {
             _d3d_device: d3d_device,
@@ -355,7 +355,7 @@ unsafe fn present_dirty(swap_chain: &IDXGISwapChain1, damage: &[PhysicalRect]) -
 }
 
 #[cfg(test)]
-#[path = "d2d_composition_test.rs"]
+#[path = "renderer_test.rs"]
 mod tests;
 
 fn create_d3d_device() -> Result<(ID3D11Device, D3D_FEATURE_LEVEL)> {

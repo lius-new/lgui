@@ -15,12 +15,7 @@ use crate::{
     window::{WindowId, WindowManager},
 };
 
-#[cfg(any(
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 use crate::{memory::CacheUsage, session::UiSession};
 
 pub use crate::window::WindowCommand;
@@ -132,12 +127,12 @@ pub fn memory_finish_frame_budget_check(memory: &crate::memory::MemoryGovernor) 
     memory.finish_frame_budget_check();
 }
 
-#[cfg(all(target_os = "windows", feature = "advanced-rendering"))]
+#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
 pub struct RenderCacheEnvironment {
     _guard: crate::renderer::RenderCacheGuard,
 }
 
-#[cfg(all(target_os = "windows", feature = "advanced-rendering"))]
+#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
 pub fn install_render_cache(cache: crate::renderer::RenderCacheHandle) -> RenderCacheEnvironment {
     RenderCacheEnvironment {
         _guard: crate::renderer::install_render_cache(cache),
@@ -158,42 +153,22 @@ pub fn composite_shadow(
     crate::renderer::shadow::composite_shadow(pixels, width, height, style);
 }
 
-#[cfg(any(
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_suspend_rendering(session: &mut UiSession) {
     session.suspend_rendering();
 }
 
-#[cfg(any(
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_trim_component_outputs(session: &mut UiSession, target_bytes: usize) -> usize {
     session.trim_component_outputs(target_bytes)
 }
 
-#[cfg(any(
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_trim_host_scene(session: &mut UiSession) -> usize {
     session.trim_host_scene()
 }
 
-#[cfg(any(
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_memory_usage(session: &UiSession) -> (CacheUsage, CacheUsage) {
     session.memory_usage()
 }

@@ -18,7 +18,9 @@ cargo package -p lgui-store --list
 cargo package -p lgui-widgets --list
 cargo package -p lgui-render-skia --list
 cargo package -p lgui-platform-win32 --list
-cargo package -p lgui-render-win32 --list
+cargo package -p lgui-render-win32-raster --list
+cargo package -p lgui-render-gdi --list
+cargo package -p lgui-render-d2d --list
 cargo package -p lgui-platform-winit --list
 cargo package -p lgui --list
 ```
@@ -47,8 +49,12 @@ cargo publish -p lgui-render-skia --dry-run
 cargo publish -p lgui-render-skia
 cargo publish -p lgui-platform-win32 --dry-run
 cargo publish -p lgui-platform-win32
-cargo publish -p lgui-render-win32 --dry-run
-cargo publish -p lgui-render-win32
+cargo publish -p lgui-render-win32-raster --dry-run
+cargo publish -p lgui-render-win32-raster
+cargo publish -p lgui-render-gdi --dry-run
+cargo publish -p lgui-render-gdi
+cargo publish -p lgui-render-d2d --dry-run
+cargo publish -p lgui-render-d2d
 cargo publish -p lgui-platform-winit --dry-run
 cargo publish -p lgui-platform-winit
 cargo publish -p lgui --dry-run

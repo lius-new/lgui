@@ -358,7 +358,7 @@ impl GdiRenderer {
         self.clear(target, clear);
         let clip = clip.map(PhysicalRect::as_ui_rect);
         #[cfg(feature = "advanced-rendering")]
-        super::enhanced::GdiRenderer::draw_scene_clipped_scoped(
+        crate::backend::GdiRenderer::draw_scene_clipped_scoped(
             target,
             scene,
             clip,
@@ -396,7 +396,7 @@ impl Default for GdiRenderer {
 impl Drop for GdiRenderer {
     fn drop(&mut self) {
         #[cfg(feature = "advanced-rendering")]
-        super::enhanced::release_gdi_compositing_layer_scope(self.compositing_layer_scope);
+        crate::backend::release_gdi_compositing_layer_scope(self.compositing_layer_scope);
     }
 }
 
@@ -552,5 +552,5 @@ fn win_rect(rect: UiRect) -> RECT {
 }
 
 #[cfg(all(test, not(feature = "advanced-rendering")))]
-#[path = "gdi_shadow_tests_test.rs"]
+#[path = "renderer_test.rs"]
 mod shadow_tests;

@@ -262,11 +262,17 @@ pub(super) fn translate_commands(
 #[derive(Clone, Copy)]
 enum NestedStaticLayerPolicy {
     Translate,
-    #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+    #[cfg(all(
+        target_os = "windows",
+        any(feature = "renderer-gdi", feature = "renderer-d2d")
+    ))]
     PreserveLocalCommands,
 }
 
-#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+#[cfg(all(
+    target_os = "windows",
+    any(feature = "renderer-gdi", feature = "renderer-d2d")
+))]
 #[doc(hidden)]
 pub fn translate_scene_primitive_for_backend(
     command: &ScenePrimitive,
@@ -486,7 +492,10 @@ fn translate_command_with_policy(
                 NestedStaticLayerPolicy::Translate => {
                     translate_commands_with_policy(commands.clone(), dx, dy, nested_static_layer)
                 }
-                #[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+                #[cfg(all(
+                    target_os = "windows",
+                    any(feature = "renderer-gdi", feature = "renderer-d2d")
+                ))]
                 NestedStaticLayerPolicy::PreserveLocalCommands => commands.clone(),
             },
             child_signature: *child_signature,

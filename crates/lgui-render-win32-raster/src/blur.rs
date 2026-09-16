@@ -39,6 +39,7 @@ thread_local! {
     );
 }
 
+#[cfg(feature = "d2d")]
 pub(crate) fn blur_cache_usage() -> lgui_core::memory::CacheUsage {
     let mut usage = lgui_core::memory::CacheUsage::default();
     for index in 0..3 {
@@ -47,6 +48,7 @@ pub(crate) fn blur_cache_usage() -> lgui_core::memory::CacheUsage {
     usage
 }
 
+#[cfg(feature = "d2d")]
 pub(crate) fn trim_blur_caches(target_bytes: usize) -> usize {
     let result_target = target_bytes.saturating_mul(3) / 8;
     let source_target = target_bytes / 4;
@@ -56,6 +58,7 @@ pub(crate) fn trim_blur_caches(target_bytes: usize) -> usize {
         + BLURRED_SOURCE_CACHE.with(|cache| cache.borrow_mut().trim_to(blurred_target))
 }
 
+#[cfg(feature = "d2d")]
 pub(crate) fn set_blur_cache_budget(budget_bytes: usize) {
     let result_budget = budget_bytes.saturating_mul(3) / 8;
     let source_budget = budget_bytes / 4;

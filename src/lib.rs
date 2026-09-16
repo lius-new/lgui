@@ -92,7 +92,26 @@ pub mod renderer {
         target_os = "windows",
         any(feature = "renderer-gdi", feature = "renderer-d2d")
     ))]
-    pub use lgui_render_win32 as win32;
+    pub mod win32 {
+        pub use lgui_platform_win32::{
+            Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,
+        };
+
+        #[cfg(feature = "renderer-d2d")]
+        pub mod d2d {
+            pub use lgui_render_d2d::*;
+        }
+        #[cfg(feature = "renderer-d2d")]
+        pub use lgui_render_d2d::{probe_d2d_support, D2dRenderer, D2dRendererFactory};
+        #[cfg(feature = "renderer-gdi")]
+        pub mod gdi {
+            pub use lgui_render_gdi::*;
+        }
+        #[cfg(all(feature = "renderer-gdi", feature = "multi-window"))]
+        pub use lgui_render_gdi::{rect_size, AlphaPolicy, LayeredBackbuffer};
+        #[cfg(feature = "renderer-gdi")]
+        pub use lgui_render_gdi::{GdiRenderer, GdiRendererFactory};
+    }
 }
 
 pub mod prelude {
@@ -172,11 +191,11 @@ pub use lgui_platform_win32::{
 };
 #[cfg(feature = "backend-winit")]
 pub use lgui_platform_winit::{WinitApplication, WinitApplicationError};
+#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+pub use lgui_render_d2d::{D2dRenderer, D2dRendererFactory};
+#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
+pub use lgui_render_gdi::{GdiRenderer, GdiRendererFactory};
 #[cfg(feature = "renderer-skia")]
 pub use lgui_render_skia as render_skia;
-#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
-pub use lgui_render_win32::{D2dRenderer, D2dRendererFactory};
-#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
-pub use lgui_render_win32::{GdiRenderer, GdiRendererFactory};
 #[cfg(all(target_os = "windows", feature = "backend-win32"))]
 pub use win32::Win32Application;

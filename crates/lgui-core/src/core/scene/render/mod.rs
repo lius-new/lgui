@@ -24,13 +24,7 @@ pub use compiler::{compile_scene, compile_scene_root, scene_root_ids};
 pub use damage::compositing_layer_damage;
 pub use phase::commands_for_phase;
 pub use primitive::{ImageFit, RenderPhase, ScenePrimitive, ScenePrimitiveKind, ScrollRasterSpec};
-#[cfg(any(
-    test,
-    feature = "backend-winit",
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    all(feature = "backend-win32", feature = "renderer-skia")
-))]
+#[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
 pub(crate) use scene::estimate_scene_commands_bytes;
 pub(crate) use scene::patch_compositing_layer_spec;
 pub(crate) use scene::{
@@ -38,7 +32,10 @@ pub(crate) use scene::{
     trim_scroll_raster_command_cache,
 };
 pub use scene::{scroll_raster_command_snapshot_exists, Scene};
-#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
+#[cfg(all(
+    target_os = "windows",
+    any(feature = "renderer-gdi", feature = "renderer-d2d")
+))]
 #[doc(hidden)]
 pub use transform::translate_scene_primitive_for_backend;
 

@@ -473,13 +473,7 @@ impl ComponentTree {
         self.metrics.get()
     }
 
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn output_memory_usage(&self) -> crate::memory::CacheUsage {
         let slots = self.slots.borrow();
         let mut bytes = 0usize;
@@ -504,13 +498,7 @@ impl ComponentTree {
         }
     }
 
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn trim_outputs(&self, target_bytes: usize) -> usize {
         let before = self.output_memory_usage().rebuildable_bytes;
         if before <= target_bytes {

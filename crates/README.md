@@ -14,7 +14,9 @@ Every directory in this folder is a publishable Cargo package and has the same n
 | `lgui-widgets` | Theme tokens and reusable controls |
 | `lgui-render-api` | Backend-neutral frame and renderer contracts |
 | `lgui-render-skia` | Portable Skia scene renderer |
-| `lgui-render-win32` | GDI and Direct2D renderers plus their shared Windows render caches |
+| `lgui-render-gdi` | Native GDI renderer and optional retained GDI pipeline |
+| `lgui-render-d2d` | Direct2D, D3D11, DXGI, and DirectComposition renderer |
+| `lgui-render-win32-raster` | Shared Win32 image, blur, static-layer, and raster-cache support |
 | `lgui-platform-winit` | Winit event loop, windows, input, and Skia surface adapters |
 | `lgui-platform-win32` | Win32 windows, message dispatch, native services, and renderer host contract |
 

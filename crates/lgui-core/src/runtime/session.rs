@@ -272,13 +272,7 @@ impl UiSession {
         self.projection_metrics
     }
 
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn memory_usage(&self) -> (crate::memory::CacheUsage, crate::memory::CacheUsage) {
         let component = self.runtime.component_tree().output_memory_usage();
         let host_scene_bytes = self
@@ -299,13 +293,7 @@ impl UiSession {
         (component, host_scene)
     }
 
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn trim_component_outputs(&mut self, target_bytes: usize) -> usize {
         let released = self.runtime.component_tree().trim_outputs(target_bytes);
         if released > 0 {
@@ -314,13 +302,7 @@ impl UiSession {
         released
     }
 
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn trim_host_scene(&mut self) -> usize {
         let before = self.memory_usage().1.rebuildable_bytes;
         self.clear_host();
@@ -348,13 +330,7 @@ impl UiSession {
     }
 
     /// Releases retained drawing data while preserving state, hooks, effects and tasks.
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn suspend_rendering(&mut self) {
         self.runtime.suspend_rendering();
         self.trim_component_outputs(0);

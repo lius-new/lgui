@@ -51,7 +51,7 @@ Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
     .run(app)?;
 ```
 
-The workspace publishes thirteen packages with one owner for each responsibility:
+The workspace publishes fifteen packages with one owner for each responsibility:
 
 | Package | Responsibility |
 | --- | --- |
@@ -65,7 +65,9 @@ The workspace publishes thirteen packages with one owner for each responsibility
 | `lgui-widgets` | Theme tokens and reusable controls |
 | `lgui-render-api` | Frame, damage, renderer lifecycle, and memory-pressure contracts |
 | `lgui-render-skia` | Skia scene painting, text layout, software surface, and renderer caches |
-| `lgui-render-win32` | GDI and Direct2D renderers and their shared Windows render caches |
+| `lgui-render-gdi` | Native GDI renderer and optional retained GDI pipeline |
+| `lgui-render-d2d` | Direct2D, D3D11, DXGI, and DirectComposition renderer |
+| `lgui-render-win32-raster` | Shared Win32 image, blur, static-layer, and raster-cache support |
 | `lgui-platform-winit` | Portable desktop windows, input, event loop, and Skia surfaces |
 | `lgui-platform-win32` | Native Win32 windows, message dispatch, system services, and renderer host contract |
 

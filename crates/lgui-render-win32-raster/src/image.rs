@@ -56,14 +56,17 @@ impl Drop for DecodedImage {
     }
 }
 
+#[cfg(feature = "d2d")]
 pub(crate) fn decoded_image_cache_usage() -> lgui_core::memory::CacheUsage {
     decoded_image_telemetry().snapshot()
 }
 
+#[cfg(feature = "d2d")]
 pub(crate) fn trim_decoded_image_cache(target_bytes: usize) -> usize {
     DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().trim_to(target_bytes))
 }
 
+#[cfg(feature = "d2d")]
 pub(crate) fn set_decoded_image_cache_budget(budget_bytes: usize) {
     DECODED_IMAGE_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
 }

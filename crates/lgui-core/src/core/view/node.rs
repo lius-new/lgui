@@ -326,13 +326,7 @@ impl UiNode {
         }
     }
 
-    #[cfg(any(
-        test,
-        feature = "backend-winit",
-        feature = "renderer-gdi",
-        feature = "renderer-d2d",
-        all(feature = "backend-win32", feature = "renderer-skia")
-    ))]
+    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn estimated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(self.id.as_str().len())

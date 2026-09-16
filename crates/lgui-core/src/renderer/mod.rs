@@ -8,6 +8,6 @@ mod cache;
 ))]
 pub(crate) mod shadow;
 
-#[cfg(all(target_os = "windows", feature = "advanced-rendering"))]
+#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
 pub(crate) use cache::install_render_cache;
 pub use cache::*;

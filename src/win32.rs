@@ -20,7 +20,7 @@ impl Win32Application {
 #[cfg(feature = "renderer-gdi")]
 impl Default for Win32Application {
     fn default() -> Self {
-        Self::with_renderer(lgui_render_win32::GdiRendererFactory)
+        Self::with_renderer(lgui_render_gdi::GdiRendererFactory)
     }
 }
 

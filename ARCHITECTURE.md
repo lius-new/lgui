@@ -124,7 +124,9 @@ crates/
 |-- lgui-widgets/src/          # theme tokens and reusable controls
 |-- lgui-render-api/src/       # backend-neutral renderer lifecycle
 |-- lgui-render-skia/src/      # portable Skia renderer
-|-- lgui-render-win32/src/     # GDI and Direct2D renderers
+|-- lgui-render-gdi/src/       # native and retained GDI renderer
+|-- lgui-render-d2d/src/       # D2D, D3D11, DXGI, and DirectComposition renderer
+|-- lgui-render-win32-raster/  # shared Win32 raster and cache support
 |-- lgui-platform-winit/src/   # event loop, input, windows, Skia surfaces
 `-- lgui-platform-win32/src/   # native window host, dispatcher, system adapters
 ```
@@ -144,9 +146,9 @@ lgui-core/src/core/scene/render/                         # compiler, transform, 
 lgui-core/src/runtime/host/                              # retained model and commit pipeline
 lgui-router/src/router/declarative/                      # routes and retained outlets
 lgui-render-skia/src/backend/                            # text, cache, software, painter
-lgui-render-win32/src/renderer/enhanced/d2d/             # D2D resources and drawing
-lgui-render-win32/src/renderer/enhanced/gdi_renderer/    # GDI retained renderer
-lgui-render-win32/src/renderer/enhanced/static_layer/    # shared layer caches
+lgui-render-d2d/src/backend/                             # D2D resources and drawing
+lgui-render-gdi/src/backend/                             # retained GDI renderer
+lgui-render-win32-raster/src/static_layer/               # shared layer caches
 lgui-platform-win32/src/application/host/                # native host contract and loop
 lgui-platform-win32/src/services/tray/                   # native tray adapter
 ```
@@ -161,9 +163,11 @@ lines of test code.
 
 ## Rendering
 
-The GDI and Direct2D factories live in `lgui-render-win32` and implement the renderer host contract
-owned by `lgui-platform-win32`. Both consume the complete Scene model. Direct2D owns its D3D11,
-DXGI, and DirectComposition resources and recreates them after resize or presentation failure.
+The GDI and Direct2D factories live in `lgui-render-gdi` and `lgui-render-d2d`, respectively, and
+implement the renderer host contract owned by `lgui-platform-win32`. Shared CPU rasterization,
+image decoding, blur, and static-layer caches live in `lgui-render-win32-raster`. Both renderers
+consume the complete Scene model. Direct2D owns its D3D11, DXGI, and DirectComposition resources
+and recreates them after resize or presentation failure.
 
 `CompositingLayer` is the backend-neutral retained composition boundary. Its children use
 layer-local coordinates while staying in the normal layout, input, accessibility, and popup

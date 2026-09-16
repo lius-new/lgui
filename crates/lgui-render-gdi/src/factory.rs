@@ -27,19 +27,19 @@ impl Win32RendererFactory for GdiRendererFactory {
         context: &lgui_core::application::ApplicationContext,
         dispatcher: &lgui_platform_win32::Win32Dispatcher,
     ) -> Box<dyn std::any::Any> {
-        crate::environment::install_gdi(context, dispatcher)
+        crate::environment::install(context, dispatcher)
     }
 
     #[cfg(all(feature = "diagnostics", feature = "advanced-rendering"))]
     fn reset_present_metrics(&self) {
-        crate::enhanced::reset_gdi_frame_blit_metrics();
+        crate::backend::reset_gdi_frame_blit_metrics();
     }
 
     #[cfg(all(feature = "diagnostics", feature = "advanced-rendering"))]
     fn take_present_metrics(&self, submitted_pixels: u64) -> lgui_diagnostics::FramePresentMetrics {
         use lgui_diagnostics::{FrameBlitSourceMetrics, FramePresentMetrics};
 
-        fn source(metrics: crate::enhanced::GdiFrameBlitSourceMetrics) -> FrameBlitSourceMetrics {
+        fn source(metrics: crate::backend::GdiFrameBlitSourceMetrics) -> FrameBlitSourceMetrics {
             FrameBlitSourceMetrics {
                 blit_count: metrics.blit_count,
                 bitblt_count: metrics.bitblt_count,
@@ -49,7 +49,7 @@ impl Win32RendererFactory for GdiRendererFactory {
             }
         }
 
-        let metrics = crate::enhanced::take_gdi_frame_blit_metrics();
+        let metrics = crate::backend::take_gdi_frame_blit_metrics();
         FramePresentMetrics {
             submitted_pixels,
             blit_count: metrics.blit_count,
