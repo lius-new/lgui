@@ -9,10 +9,9 @@ component, chooses a platform backend, and starts it with `Application::with_bac
 renderer, and frame submission.
 
 The portable core provides typed component State, committed Effects, Commands, Events, Context,
-Store selectors and actions, declarative Router outlets, layout, input, and scene construction. Optional features add
-the Win32 application backend, GDI or Direct2D rendering, multiple windows, images, SVG, advanced
-rendering, clipboard, portable notification/tray contracts, Windows notification/tray adapters,
-diagnostics, and Tokio execution.
+layout, input, and scene construction. Separate add-on crates provide Store, Router, themes, and
+widgets. Optional features compose those packages with the Win32 or winit platform backend, GDI,
+Direct2D, or Skia rendering, images, SVG, desktop services, diagnostics, and Tokio execution.
 
 Application resources are ordinary typed data. Asset resolvers and custom paint providers are
 provided to `Application`, while renderers own their native caches and device resources. Business
@@ -52,16 +51,20 @@ Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
     .run(app)?;
 ```
 
-The workspace publishes six real packages with one owner for each responsibility:
+The workspace publishes ten real packages with one owner for each responsibility:
 
 | Package | Responsibility |
 | --- | --- |
 | `lgui` | Application-facing facade and feature composition |
-| `lgui-core` | Components, runtime, layout, input, Scene, resources, and service contracts |
+| `lgui-core` | Portable application runtime, components, layout, input, Scene, memory, assets, and service contracts |
+| `lgui-router` | Route history, matching, declarative routes, outlets, and navigation hooks |
+| `lgui-store` | Application-scoped stores, selectors, actions, and subscriptions |
+| `lgui-widgets` | Theme tokens and reusable controls |
 | `lgui-render-api` | Frame, damage, renderer lifecycle, and memory-pressure contracts |
 | `lgui-render-skia` | Skia scene painting, text layout, software surface, and renderer caches |
+| `lgui-render-win32` | GDI and Direct2D renderers and their shared Windows render caches |
 | `lgui-platform-winit` | Portable desktop windows, input, event loop, and Skia surfaces |
-| `lgui-platform-win32` | Native Win32 application backend and GDI/Direct2D renderers |
+| `lgui-platform-win32` | Native Win32 windows, message dispatch, system services, and renderer host contract |
 
 Applications should normally depend only on `lgui`; the other packages are public so renderer and
 platform integrations can be developed and released independently.

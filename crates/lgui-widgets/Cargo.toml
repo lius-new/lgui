@@ -1,0 +1,23 @@
+[package]
+name = "lgui-widgets"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "Theme tokens and reusable widgets for LGUI"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui-widgets"
+keywords = ["gui", "widgets", "desktop", "reactive"]
+categories = ["gui"]
+
+[features]
+default = ["widgets"]
+widgets = []
+
+[dependencies]
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
+
+[dev-dependencies]
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["test-support"] }

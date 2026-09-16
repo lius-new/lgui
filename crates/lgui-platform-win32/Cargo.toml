@@ -1,0 +1,69 @@
+[package]
+name = "lgui-platform-win32"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "Native Win32 window and system integration for LGUI"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui-platform-win32"
+keywords = ["gui", "desktop", "windows", "win32"]
+categories = ["gui", "os::windows-apis"]
+
+[features]
+default = ["backend-win32"]
+backend-win32 = ["lgui-core/backend-win32"]
+backend-winit = ["lgui-core/backend-winit"]
+diagnostics = ["lgui-core/diagnostics"]
+diagnostics-timing = ["diagnostics", "lgui-core/diagnostics-timing"]
+images = ["dep:image", "lgui-core/images"]
+images-win32 = ["images", "backend-win32", "lgui-core/images-win32"]
+multi-window = ["lgui-core/multi-window"]
+notifications-win32 = ["backend-win32", "lgui-core/notifications-win32"]
+store = ["dep:lgui-store"]
+svg = ["images", "dep:resvg", "dep:tiny-skia", "dep:usvg", "lgui-core/svg"]
+system-diagnostics = ["diagnostics", "backend-win32", "lgui-core/system-diagnostics"]
+tray-win32 = ["backend-win32", "svg", "lgui-core/tray-win32"]
+
+[dependencies]
+image = { version = "0.25", optional = true, default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
+lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
+lgui-store = { version = "0.2.0", path = "../lgui-store", optional = true }
+resvg = { version = "0.45", optional = true }
+tiny-skia = { version = "0.11", optional = true }
+usvg = { version = "0.45", optional = true }
+
+[dev-dependencies]
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["test-support"] }
+lgui-render-api = { version = "0.2.0", path = "../lgui-render-api", features = ["test-support"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Data_Xml_Dom",
+  "UI_Notifications",
+  "Win32_Foundation",
+  "Win32_Graphics_Direct2D",
+  "Win32_Graphics_Direct2D_Common",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_DirectComposition",
+  "Win32_Graphics_DirectWrite",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_GdiPlus",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_ProcessStatus",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_Ime",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }

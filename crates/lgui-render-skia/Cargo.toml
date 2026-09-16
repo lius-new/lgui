@@ -1,0 +1,40 @@
+[package]
+name = "lgui-render-skia"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "Skia renderer for LGUI"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui-render-skia"
+keywords = ["gui", "rendering", "skia", "graphics"]
+categories = ["gui", "rendering"]
+
+[features]
+default = []
+renderer-skia-gl = []
+renderer-skia-vulkan = ["dep:ash"]
+renderer-skia-metal = []
+
+[dependencies]
+ash = { version = "0.38", optional = true, default-features = false, features = ["loaded", "std"] }
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["backend-winit", "images", "renderer-skia", "svg"] }
+lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
+skia-safe = { version = "=0.99.0", default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout"] }
+unicode-bidi = "0.3"
+unicode-segmentation = "1.12"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+lgui-render-api = { version = "0.2.0", path = "../lgui-render-api", features = ["test-support"] }
+
+[target.'cfg(windows)'.dependencies]
+skia-safe = { version = "=0.99.0", default-features = false, features = ["d3d", "vulkan"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+skia-safe = { version = "=0.99.0", default-features = false, features = ["all-linux", "vulkan"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+skia-safe = { version = "=0.99.0", default-features = false, features = ["metal"] }

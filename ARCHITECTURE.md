@@ -109,24 +109,17 @@ the policy itself remains in the application.
 The physical tree follows subsystem ownership:
 
 ```text
-src/
-|-- application/   # builders, context, handles, lifecycle and service registration
-|-- command/       # typed contracts, context, registry, handles
-|-- events/        # typed contracts, bus, subscriptions
-|-- router/        # hooks, matching, runtime history, declarative routes
-|-- store/         # definitions, hooks, subscriptions, runtime registry
-|-- core/          # foundation, view, component, input, layout, scene
-|-- runtime/       # session, retained host, frame invalidation
-|-- window/        # IDs, options, handles, manager and portable commands
-|-- renderer/      # portable contract/cache and portable Skia renderer
-|-- platform/      # Winit adapters and categorized Win32 implementation
-|-- services/      # portable clipboard, notification, tray, dialog and URL contracts
-|-- assets/        # image/resource system and icons
-|-- memory/        # Application budgets, domains, reservations, Trim, stats, persistence
-|-- text/          # text model, layout, and text-system boundary
-|-- theme/         # theme tokens and context
-|-- widgets/       # controls; complex controls own subdirectories
-`-- diagnostics/   # model, collection, providers, timing
+src/                           # lgui facade and feature composition
+crates/
+|-- lgui-core/src/             # portable runtime, UI model, memory, assets, services
+|-- lgui-router/src/router/    # matching, history, declarative routes, outlets
+|-- lgui-store/src/store/      # stores, selectors, actions, subscriptions
+|-- lgui-widgets/src/          # theme tokens and reusable controls
+|-- lgui-render-api/src/       # backend-neutral renderer lifecycle
+|-- lgui-render-skia/src/      # portable Skia renderer
+|-- lgui-render-win32/src/     # GDI and Direct2D renderers
+|-- lgui-platform-winit/src/   # event loop, input, windows, Skia surfaces
+`-- lgui-platform-win32/src/   # native window host, dispatcher, system adapters
 ```
 
 `runtime` physically owns Session, Host, and Frame. The established `lgui::session`,
@@ -136,21 +129,17 @@ established flat `lgui::core::*` exports while its implementation is grouped by 
 Large implementations are split one level further:
 
 ```text
-core/component/runtime/                 # state, input, action, animation, focus
-core/view/declarative/                  # element, content, events, primitives
-core/view/tree/                         # mutation, event dispatch, scene projection
-core/scene/render/                      # compiler, transform, phase, scene, damage
-runtime/host/                           # model, storage, reconcile, commit, scene
-renderer/skia/backend/                  # support, text, cache, software, painter
-platform/win32/application/host/        # contract, state, backend, window, loop
-platform/win32/renderer/enhanced/d2d/   # cache, drawing, effects, resources
-platform/win32/renderer/enhanced/gdi_renderer/
-platform/win32/renderer/enhanced/static_layer/
-services/clipboard/                     # contract and optional system adapter
-services/notification/                  # model, service contract, type-erased handle
-services/tray/                          # generic menu contract and application actions
-platform/win32/services/tray/           # icon, host loop, native menu and shared support
-window/                                 # portable window model and command transport
+lgui-core/src/core/component/runtime/                    # state, input, action, animation, focus
+lgui-core/src/core/view/declarative/                     # element, content, events, primitives
+lgui-core/src/core/scene/render/                         # compiler, transform, scene, damage
+lgui-core/src/runtime/host/                              # retained model and commit pipeline
+lgui-router/src/router/declarative/                      # routes and retained outlets
+lgui-render-skia/src/backend/                            # text, cache, software, painter
+lgui-render-win32/src/renderer/enhanced/d2d/             # D2D resources and drawing
+lgui-render-win32/src/renderer/enhanced/gdi_renderer/    # GDI retained renderer
+lgui-render-win32/src/renderer/enhanced/static_layer/    # shared layer caches
+lgui-platform-win32/src/application/host/                # native host contract and loop
+lgui-platform-win32/src/services/tray/                   # native tray adapter
 ```
 
 These directories are real Rust submodules. Source assembly with `include!` is forbidden:
@@ -163,9 +152,9 @@ lines of test code.
 
 ## Rendering
 
-The GDI and Direct2D factories implement the same Win32 Application renderer contract. Both
-consume the complete Scene model. Direct2D owns its D3D11, DXGI, and DirectComposition resources
-and recreates them after resize or presentation failure.
+The GDI and Direct2D factories live in `lgui-render-win32` and implement the renderer host contract
+owned by `lgui-platform-win32`. Both consume the complete Scene model. Direct2D owns its D3D11,
+DXGI, and DirectComposition resources and recreates them after resize or presentation failure.
 
 `CompositingLayer` is the backend-neutral retained composition boundary. Its children use
 layer-local coordinates while staying in the normal layout, input, accessibility, and popup

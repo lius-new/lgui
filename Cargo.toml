@@ -13,7 +13,17 @@ keywords = ["gui", "desktop", "widgets", "reactive"]
 categories = ["gui", "rendering"]
 
 [workspace]
-members = ["crates/*"]
+members = [
+  "crates/lgui-core",
+  "crates/lgui-platform-win32",
+  "crates/lgui-platform-winit",
+  "crates/lgui-render-api",
+  "crates/lgui-render-skia",
+  "crates/lgui-render-win32",
+  "crates/lgui-router",
+  "crates/lgui-store",
+  "crates/lgui-widgets",
+]
 resolver = "2"
 
 [workspace.package]
@@ -25,8 +35,8 @@ async = ["lgui-core/async"]
 desktop = ["backend-winit", "clipboard", "open-url", "dialogs", "accessibility"]
 backend-winit = ["dep:lgui-platform-winit", "lgui-core/backend-winit"]
 accessibility = ["backend-winit", "lgui-platform-winit/accessibility"]
-advanced-rendering = ["renderer-d2d", "renderer-gdi", "lgui-core/advanced-rendering", "lgui-platform-win32?/advanced-rendering"]
-renderer-skia = ["dep:lgui-render-skia", "lgui-core/renderer-skia", "lgui-platform-win32?/renderer-skia"]
+advanced-rendering = ["renderer-d2d", "renderer-gdi", "lgui-core/advanced-rendering", "lgui-render-win32?/advanced-rendering"]
+renderer-skia = ["dep:lgui-render-skia", "lgui-core/renderer-skia"]
 renderer-skia-gl = ["renderer-skia", "backend-winit", "lgui-platform-winit/renderer-skia-gl", "lgui-render-skia/renderer-skia-gl"]
 renderer-skia-vulkan = ["renderer-skia", "backend-winit", "lgui-platform-winit/renderer-skia-vulkan", "lgui-render-skia/renderer-skia-vulkan"]
 renderer-skia-vulkan-windows = ["renderer-skia-vulkan"]
@@ -43,29 +53,33 @@ persistent-cache = ["lgui-core/persistent-cache", "lgui-platform-winit?/persiste
 system-diagnostics = ["backend-win32", "diagnostics", "lgui-core/system-diagnostics", "lgui-platform-win32/system-diagnostics"]
 images = ["lgui-core/images", "lgui-platform-winit?/images", "lgui-platform-win32?/images"]
 images-win32 = ["backend-win32", "images", "lgui-core/images-win32", "lgui-platform-win32/images-win32"]
-multi-window = ["lgui-core/multi-window", "lgui-platform-winit?/multi-window", "lgui-platform-win32?/multi-window"]
+multi-window = ["lgui-core/multi-window", "lgui-platform-winit?/multi-window", "lgui-platform-win32?/multi-window", "lgui-render-win32?/multi-window"]
 notifications = ["lgui-core/notifications", "lgui-platform-winit?/notifications"]
 notifications-win32 = ["backend-win32", "notifications", "lgui-core/notifications-win32", "lgui-platform-winit?/notifications-win32", "lgui-platform-win32/notifications-win32"]
-router = ["lgui-core/router"]
-renderer-gdi = ["backend-win32", "lgui-core/renderer-gdi", "lgui-platform-win32/renderer-gdi"]
-renderer-d2d = ["backend-win32", "lgui-core/renderer-d2d", "lgui-platform-win32/renderer-d2d"]
-store = ["lgui-core/store", "lgui-platform-winit?/store", "lgui-platform-win32?/store"]
+router = ["dep:lgui-router"]
+renderer-gdi = ["backend-win32", "dep:lgui-render-win32", "lgui-core/renderer-gdi", "lgui-render-win32/gdi"]
+renderer-d2d = ["backend-win32", "dep:lgui-render-win32", "lgui-core/renderer-d2d", "lgui-render-win32/d2d"]
+store = ["dep:lgui-store", "lgui-platform-winit?/store", "lgui-platform-win32?/store"]
 svg = ["lgui-core/svg", "lgui-platform-winit?/svg", "lgui-platform-win32?/svg"]
-theme = ["lgui-core/theme"]
+theme = ["dep:lgui-widgets"]
 tokio = ["lgui-core/tokio"]
 tray = ["lgui-core/tray"]
 tray-win32 = ["backend-win32", "tray", "lgui-core/tray-win32", "lgui-platform-winit?/tray-win32", "lgui-platform-win32/tray-win32"]
 windows-platform = ["backend-win32", "lgui-core/windows-platform"]
-widgets = ["lgui-core/widgets"]
+widgets = ["theme", "lgui-widgets/widgets"]
 
 [dependencies]
-lgui-core = { version = "0.2.0", path = "crates/core", default-features = false }
-lgui-platform-winit = { version = "0.2.0", path = "crates/platform-winit", optional = true, default-features = false }
-lgui-render-api = { version = "0.2.0", path = "crates/render-api" }
-lgui-render-skia = { version = "0.2.0", path = "crates/render-skia", optional = true, default-features = false }
+lgui-core = { version = "0.2.0", path = "crates/lgui-core", default-features = false }
+lgui-platform-winit = { version = "0.2.0", path = "crates/lgui-platform-winit", optional = true, default-features = false }
+lgui-render-api = { version = "0.2.0", path = "crates/lgui-render-api" }
+lgui-render-skia = { version = "0.2.0", path = "crates/lgui-render-skia", optional = true, default-features = false }
+lgui-router = { version = "0.2.0", path = "crates/lgui-router", optional = true }
+lgui-store = { version = "0.2.0", path = "crates/lgui-store", optional = true }
+lgui-widgets = { version = "0.2.0", path = "crates/lgui-widgets", optional = true, default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-lgui-platform-win32 = { version = "0.2.0", path = "crates/platform-win32", optional = true, default-features = false }
+lgui-platform-win32 = { version = "0.2.0", path = "crates/lgui-platform-win32", optional = true, default-features = false }
+lgui-render-win32 = { version = "0.2.0", path = "crates/lgui-render-win32", optional = true, default-features = false }
 
 [[example]]
 name = "counter"

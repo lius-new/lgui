@@ -1,0 +1,19 @@
+[package]
+name = "lgui-store"
+version = "0.2.0"
+edition = "2021"
+publish = ["crates-io"]
+description = "Application-scoped reactive state stores for LGUI"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/lius-new/lgui"
+homepage = "https://github.com/lius-new/lgui"
+documentation = "https://docs.rs/lgui-store"
+keywords = ["gui", "state", "store", "reactive"]
+categories = ["gui"]
+
+[dependencies]
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
+
+[dev-dependencies]
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["test-support"] }
