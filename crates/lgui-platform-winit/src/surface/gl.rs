@@ -228,8 +228,8 @@ impl WinitOpenGlRenderer {
     }
 
     #[cfg(feature = "diagnostics")]
-    pub(crate) fn device_info(&self) -> lgui_core::diagnostics::RendererDeviceInfo {
-        lgui_core::diagnostics::RendererDeviceInfo {
+    pub(crate) fn device_info(&self) -> lgui_diagnostics::RendererDeviceInfo {
+        lgui_diagnostics::RendererDeviceInfo {
             adapter_name: self.adapter_name.clone(),
             api: "OpenGL".to_owned(),
             api_version: self.api_version.clone(),

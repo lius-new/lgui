@@ -51,12 +51,15 @@ Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
     .run(app)?;
 ```
 
-The workspace publishes ten real packages with one owner for each responsibility:
+The workspace publishes thirteen packages with one owner for each responsibility:
 
 | Package | Responsibility |
 | --- | --- |
 | `lgui` | Application-facing facade and feature composition |
-| `lgui-core` | Portable application runtime, components, layout, input, Scene, memory, assets, and service contracts |
+| `lgui-core` | Portable application runtime, components, layout, input, Scene, windows, and memory governance |
+| `lgui-assets` | Image loading and caching, render resources, custom paint providers, and SVG icons |
+| `lgui-diagnostics` | Frame samples, renderer metrics, collectors, and diagnostics providers |
+| `lgui-services` | Clipboard, dialogs, URL opening, notifications, and tray contracts and adapters |
 | `lgui-router` | Route history, matching, declarative routes, outlets, and navigation hooks |
 | `lgui-store` | Application-scoped stores, selectors, actions, and subscriptions |
 | `lgui-widgets` | Theme tokens and reusable controls |

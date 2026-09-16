@@ -18,7 +18,7 @@ use windows::{
     },
 };
 
-use lgui_core::services::{TrayAction, TrayMenuEntry};
+use lgui_services::{TrayAction, TrayMenuEntry};
 
 use super::support::{wide, windows_io_error};
 

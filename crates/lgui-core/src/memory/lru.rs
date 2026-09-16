@@ -81,7 +81,6 @@ where
         true
     }
 
-    #[cfg(any(feature = "images-win32", feature = "renderer-d2d"))]
     pub fn can_store(&self, bytes: usize) -> bool {
         bytes <= self.budget_bytes
     }
@@ -93,38 +92,12 @@ where
         self.publish();
     }
 
-    #[cfg(any(
-        feature = "images-win32",
-        feature = "renderer-d2d",
-        all(
-            feature = "svg",
-            feature = "backend-win32",
-            any(
-                feature = "renderer-gdi",
-                feature = "renderer-d2d",
-                feature = "renderer-skia"
-            )
-        )
-    ))]
     pub fn trim_to(&mut self, target_bytes: usize) -> usize {
         let before = self.bytes;
         self.evict_to(target_bytes);
         before.saturating_sub(self.bytes)
     }
 
-    #[cfg(any(
-        feature = "images-win32",
-        feature = "renderer-d2d",
-        all(
-            feature = "svg",
-            feature = "backend-win32",
-            any(
-                feature = "renderer-gdi",
-                feature = "renderer-d2d",
-                feature = "renderer-skia"
-            )
-        )
-    ))]
     pub fn set_budget(&mut self, budget_bytes: usize) {
         self.budget_bytes = budget_bytes;
         self.evict_to(self.budget_bytes);

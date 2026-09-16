@@ -10,15 +10,12 @@ fn source_tree_expresses_subsystem_boundaries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     for directory in [
         "application",
-        "assets",
         "command",
         "core",
-        "diagnostics",
         "events",
         "platform",
         "renderer",
         "runtime",
-        "services",
         "text",
         "window",
         "core/foundation",
@@ -33,15 +30,18 @@ fn source_tree_expresses_subsystem_boundaries() {
         "core/scene/render",
         "runtime/host",
         "runtime/frame",
-        "services/clipboard",
-        "services/notification",
-        "services/tray",
     ] {
         assert!(root.join(directory).is_dir(), "missing `{directory}`");
     }
 
     let workspace = workspace_root();
     for directory in [
+        "crates/lgui-assets/src",
+        "crates/lgui-diagnostics/src",
+        "crates/lgui-services/src",
+        "crates/lgui-services/src/clipboard",
+        "crates/lgui-services/src/notification",
+        "crates/lgui-services/src/tray",
         "crates/lgui-render-api/src",
         "crates/lgui-render-skia/src/backend",
         "crates/lgui-router/src/router",
@@ -65,7 +65,9 @@ fn source_tree_expresses_subsystem_boundaries() {
     for legacy in [
         "application.rs",
         "assets.rs",
+        "assets",
         "diagnostics.rs",
+        "diagnostics",
         "renderer.rs",
         "session.rs",
         "text.rs",
@@ -83,6 +85,7 @@ fn source_tree_expresses_subsystem_boundaries() {
         "widgets/select/control.rs",
         "widgets/slider/control.rs",
         "services/contracts.rs",
+        "services",
         "router",
         "store",
         "theme",
@@ -106,22 +109,24 @@ fn source_tree_expresses_subsystem_boundaries() {
         "core/view/tree/events.rs",
         "core/view/tree/mutation.rs",
         "core/view/tree/scene.rs",
-        "assets/resolver.rs",
-        "assets/cache.rs",
         "text/layout.rs",
         "text/service.rs",
         "window/command.rs",
         "window/manager.rs",
         "window/options.rs",
-        "services/clipboard/contract.rs",
-        "services/notification/contract.rs",
-        "services/tray/contract.rs",
-        "services/tray/model.rs",
     ] {
         assert!(root.join(leaf).is_file(), "missing `{leaf}`");
     }
 
     for leaf in [
+        "crates/lgui-assets/src/cache.rs",
+        "crates/lgui-assets/src/resolver.rs",
+        "crates/lgui-diagnostics/src/collector.rs",
+        "crates/lgui-diagnostics/src/provider.rs",
+        "crates/lgui-services/src/clipboard/contract.rs",
+        "crates/lgui-services/src/notification/contract.rs",
+        "crates/lgui-services/src/tray/contract.rs",
+        "crates/lgui-services/src/tray/model.rs",
         "crates/lgui-render-api/src/contract.rs",
         "crates/lgui-render-skia/src/backend.rs",
         "crates/lgui-router/src/router/runtime/history.rs",
@@ -558,10 +563,10 @@ fn portable_renderer_contract_has_no_platform_or_graphics_api_types() {
 
 #[test]
 fn portable_asset_and_text_services_have_no_platform_dependencies() {
-    for (module, source) in ["src/assets", "src/text"]
+    let sources = workspace_rust_sources("crates/lgui-assets/src")
         .into_iter()
-        .flat_map(rust_sources)
-    {
+        .chain(rust_sources("src/text"));
+    for (module, source) in sources {
         for forbidden in ["crate::platform", "windows::", "winit::", "skia_safe"] {
             assert!(
                 !source.contains(forbidden),
@@ -648,7 +653,7 @@ fn window_and_desktop_services_have_single_owners() {
         "platform must consume service contracts instead of owning them through a path alias"
     );
 
-    let violations = rust_sources("src/services")
+    let violations = workspace_rust_sources("crates/lgui-services/src")
         .into_iter()
         .flat_map(|(path, source)| {
             [
@@ -866,7 +871,7 @@ fn win32_remote_images_are_owned_by_the_framework_asset_runtime() {
 
     let cache =
         fs::read_to_string(root.join("assets/image_cache.rs")).expect("read Win32 image cache");
-    for required in ["lgui-image-loader", "lgui_core::assets::load_url_image"] {
+    for required in ["lgui-image-loader", "lgui_assets::load_url_image"] {
         assert!(
             cache.contains(required),
             "Win32 image cache lost remote loading behavior `{required}`"

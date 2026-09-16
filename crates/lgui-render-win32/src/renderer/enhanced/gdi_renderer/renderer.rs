@@ -56,7 +56,7 @@ impl GdiRenderer {
                 fit,
                 ..
             } => {
-                let _ = lgui_core::assets::request_image(request);
+                let _ = lgui_assets::request_image(request);
                 image::draw_ui_image(hdc, *rect, source, *fit);
             }
             ScenePrimitive::Overlay { rect, style, .. } => draw_overlay(hdc, *rect, style),
@@ -87,7 +87,7 @@ impl GdiRenderer {
             } => {
                 if let (Some(style), Some(provider)) = (
                     style,
-                    lgui_core::backend::render_resources()
+                    lgui_assets::backend::render_resources()
                         .custom_paint()
                         .cloned(),
                 ) {
@@ -224,7 +224,7 @@ pub(super) fn draw_gdi_compositing_layer(
     content_signature: u64,
 ) {
     let resolved_signature =
-        lgui_core::backend::resolved_content_signature(commands, content_signature);
+        lgui_assets::backend::resolved_content_signature(commands, content_signature);
     let has_external_images = resolved_signature != content_signature;
     let content_signature = resolved_signature;
     let width = raster_length(rect.width());

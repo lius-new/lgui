@@ -1,14 +1,6 @@
 //! Application-scoped resource accounting, cache policy, pressure, and persistence.
 
 mod governor;
-#[cfg(any(
-    feature = "images-win32",
-    feature = "renderer-d2d",
-    all(
-        feature = "svg",
-        any(feature = "backend-win32", feature = "tray-win32")
-    )
-))]
 mod lru;
 mod options;
 mod policy;
@@ -19,14 +11,6 @@ mod stats;
 mod persistent;
 
 pub use governor::{MemoryGovernor, MemoryReservation, MemoryTaskReservation};
-#[cfg(any(
-    feature = "images-win32",
-    feature = "renderer-d2d",
-    all(
-        feature = "svg",
-        any(feature = "backend-win32", feature = "tray-win32")
-    )
-))]
 #[doc(hidden)]
 pub use lru::LruCache;
 pub use options::{MemoryBudget, MemoryDomainBudgets, MemoryEventPolicy, MemoryOptions};
@@ -37,14 +21,6 @@ pub use policy::{
 pub use registry::{
     CacheAdapter, CacheRegistration, DomainInstanceId, DomainRegistration, TrimRequest, TrimResult,
 };
-#[cfg(any(
-    feature = "images-win32",
-    feature = "renderer-d2d",
-    all(
-        feature = "svg",
-        any(feature = "backend-win32", feature = "tray-win32")
-    )
-))]
 #[doc(hidden)]
 pub use stats::CacheTelemetry;
 pub use stats::{CacheUsage, DomainSnapshot, MemorySnapshot, TrimSnapshot};
@@ -93,4 +69,13 @@ pub const fn test_memory_options() -> MemoryOptions {
         ImageCachePolicy::Session,
         true,
     )
+}
+
+#[cfg(all(feature = "persistent-cache", any(test, feature = "test-support")))]
+#[doc(hidden)]
+pub fn test_memory_governor_with_store(
+    options: MemoryOptions,
+    store: std::sync::Arc<dyn PersistentCacheStore>,
+) -> MemoryGovernor {
+    MemoryGovernor::with_store(options, Some(store))
 }

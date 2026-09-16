@@ -74,7 +74,7 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
             .as_ref()
             .is_some_and(|previous| previous.shares_command_storage_with(&commit.scene))
         {
-            lgui_core::backend::update_image_reachability(
+            lgui_assets::backend::update_image_reachability(
                 state.memory_instance,
                 &commit.scene.image_requests(),
             );
@@ -124,14 +124,14 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
         let result = {
             let resources = state
                 .context
-                .try_resource::<lgui_core::assets::RenderResources>()
+                .try_resource::<lgui_assets::RenderResources>()
                 .map(|resources| (*resources).clone())
                 .unwrap_or_default();
             let Some(renderer) = state.renderer.as_mut() else {
                 return false;
             };
             let render = || {
-                lgui_core::backend::with_render_resources(&state.context, resources, || {
+                lgui_assets::backend::with_render_resources(&state.context, resources, || {
                     renderer.prepare(&mut render_target, &frame)?;
                     renderer.render(&mut render_target, &scene, &frame)
                 })
@@ -186,11 +186,11 @@ pub(super) fn render_window(hwnd: HWND, target: HDC) {
                             frame_index: state.frame_index,
                             recorded_at: Instant::now(),
                             backend: state.renderer_factory.name(),
-                            renderer: lgui_core::diagnostics::RendererDeviceInfo {
+                            renderer: lgui_diagnostics::RendererDeviceInfo {
                                 api: state.renderer_factory.name().to_owned(),
                                 color_format: "BGRA8 premultiplied".to_owned(),
                                 present_mode: "Win32 immediate".to_owned(),
-                                ..lgui_core::diagnostics::RendererDeviceInfo::default()
+                                ..lgui_diagnostics::RendererDeviceInfo::default()
                             },
                             mode: if physical_damage.is_empty() {
                                 DiagnosticPresentMode::Skipped

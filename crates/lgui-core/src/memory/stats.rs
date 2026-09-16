@@ -1,12 +1,4 @@
 use super::{CacheDomain, DomainInstanceId, MemoryOptions, TrimReason};
-#[cfg(any(
-    feature = "images-win32",
-    feature = "renderer-d2d",
-    all(
-        feature = "svg",
-        any(feature = "backend-win32", feature = "tray-win32")
-    )
-))]
 use std::sync::{Arc, Mutex};
 
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
@@ -92,46 +84,17 @@ pub struct MemorySnapshot {
     pub last_trim: Option<TrimSnapshot>,
 }
 
-#[cfg(any(
-    feature = "images-win32",
-    feature = "renderer-d2d",
-    all(
-        feature = "svg",
-        any(feature = "backend-win32", feature = "tray-win32")
-    )
-))]
 #[derive(Clone, Default)]
 #[doc(hidden)]
 pub struct CacheTelemetry {
     usage: Arc<Mutex<CacheUsage>>,
 }
 
-#[cfg(any(
-    feature = "images-win32",
-    feature = "renderer-d2d",
-    all(
-        feature = "svg",
-        any(feature = "backend-win32", feature = "tray-win32")
-    )
-))]
 impl CacheTelemetry {
     pub fn publish(&self, usage: CacheUsage) {
         *self.usage.lock().expect("cache telemetry poisoned") = usage;
     }
 
-    #[cfg(any(
-        feature = "images-win32",
-        feature = "renderer-d2d",
-        all(
-            feature = "svg",
-            feature = "backend-win32",
-            any(
-                feature = "renderer-gdi",
-                feature = "renderer-d2d",
-                feature = "renderer-skia"
-            )
-        )
-    ))]
     pub fn snapshot(&self) -> CacheUsage {
         *self.usage.lock().expect("cache telemetry poisoned")
     }

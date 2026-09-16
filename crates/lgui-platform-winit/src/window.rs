@@ -360,8 +360,8 @@ impl WinitWindow {
         #[cfg(feature = "images")]
         let _image_cache = self
             .context
-            .try_resource::<lgui_core::assets::ImageCacheHandle>()
-            .map(|cache| lgui_core::backend::install_image_cache((*cache).clone()));
+            .try_resource::<lgui_assets::ImageCacheHandle>()
+            .map(|cache| lgui_assets::backend::install_image_cache((*cache).clone()));
         #[cfg(feature = "diagnostics")]
         let frame_started = Instant::now();
         let commit = self.session.render_view(&self.view, viewport, self.scale);
@@ -391,7 +391,7 @@ impl WinitWindow {
                 .collect::<Vec<_>>()
         };
         #[cfg(feature = "images")]
-        lgui_core::backend::update_image_reachability(
+        lgui_assets::backend::update_image_reachability(
             self.memory_instance,
             &commit.scene.image_requests(),
         );
@@ -414,13 +414,13 @@ impl WinitWindow {
         #[cfg(feature = "images")]
         let resources = self
             .context
-            .try_resource::<lgui_core::assets::RenderResources>()
+            .try_resource::<lgui_assets::RenderResources>()
             .map(|resources| (*resources).clone())
             .unwrap_or_default();
         #[cfg(feature = "diagnostics")]
         let draw_started = Instant::now();
         #[cfg(feature = "images")]
-        let result = lgui_core::backend::with_render_resources(&self.context, resources, || {
+        let result = lgui_assets::backend::with_render_resources(&self.context, resources, || {
             self.renderer.draw_and_present(&scene, &frame, &damage)
         });
         #[cfg(not(feature = "images"))]
@@ -648,7 +648,7 @@ impl WinitWindow {
     pub(super) fn suspend_rendering(&mut self, force: bool) {
         if force || self.options.background_memory_optimization {
             #[cfg(feature = "images")]
-            lgui_core::backend::update_image_reachability(self.memory_instance, &[]);
+            lgui_assets::backend::update_image_reachability(self.memory_instance, &[]);
             self.renderer.trim(MemoryPressure::Critical);
             lgui_core::backend::session_suspend_rendering(&mut self.session);
             self.update_memory_usage();
@@ -744,7 +744,7 @@ fn should_trim_host_scene(request: lgui_core::memory::TrimRequest) -> bool {
 impl Drop for WinitWindow {
     fn drop(&mut self) {
         #[cfg(feature = "images")]
-        lgui_core::backend::update_image_reachability(self.memory_instance, &[]);
+        lgui_assets::backend::update_image_reachability(self.memory_instance, &[]);
     }
 }
 

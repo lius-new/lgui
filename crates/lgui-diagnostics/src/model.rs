@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Debug, Default)]
 pub struct SystemUsageSnapshot {
     pub schema: &'static str,
@@ -11,7 +11,7 @@ pub struct SystemUsageSnapshot {
     pub gpu: GpuUsageSnapshot,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Debug, Default)]
 pub struct ProcessUsageSnapshot {
     pub cpu_percent: Option<f32>,
@@ -19,7 +19,7 @@ pub struct ProcessUsageSnapshot {
     pub private_mb: Option<f32>,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Debug, Default)]
 pub struct MachineUsageSnapshot {
     pub memory_load_percent: Option<u32>,
@@ -27,7 +27,7 @@ pub struct MachineUsageSnapshot {
     pub available_memory_mb: Option<f32>,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct GpuUsageSnapshot {
     pub usage_percent: Option<f32>,
@@ -45,7 +45,7 @@ impl Default for GpuUsageSnapshot {
     }
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticPresentMode {
     Full,
@@ -53,7 +53,7 @@ pub enum DiagnosticPresentMode {
     Skipped,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameRenderMetrics {
     pub build_host_tree_ms: f32,
@@ -98,7 +98,7 @@ pub struct FrameRenderMetrics {
     pub reused_scene_nodes: usize,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameBlitSourceMetrics {
     pub blit_count: usize,
@@ -108,7 +108,7 @@ pub struct FrameBlitSourceMetrics {
     pub pixels: u64,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FramePresentMetrics {
     pub acquire_ms: f32,
@@ -145,7 +145,7 @@ pub struct FramePresentMetrics {
     pub other_blits: FrameBlitSourceMetrics,
 }
 
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RendererDeviceInfo {
     pub adapter_name: Option<String>,

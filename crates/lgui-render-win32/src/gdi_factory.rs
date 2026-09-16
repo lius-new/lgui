@@ -36,11 +36,8 @@ impl Win32RendererFactory for GdiRendererFactory {
     }
 
     #[cfg(all(feature = "diagnostics", feature = "advanced-rendering"))]
-    fn take_present_metrics(
-        &self,
-        submitted_pixels: u64,
-    ) -> lgui_core::diagnostics::FramePresentMetrics {
-        use lgui_core::diagnostics::{FrameBlitSourceMetrics, FramePresentMetrics};
+    fn take_present_metrics(&self, submitted_pixels: u64) -> lgui_diagnostics::FramePresentMetrics {
+        use lgui_diagnostics::{FrameBlitSourceMetrics, FramePresentMetrics};
 
         fn source(metrics: crate::enhanced::GdiFrameBlitSourceMetrics) -> FrameBlitSourceMetrics {
             FrameBlitSourceMetrics {

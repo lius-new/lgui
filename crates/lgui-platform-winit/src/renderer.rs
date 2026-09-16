@@ -287,14 +287,14 @@ impl WinitSkiaRenderer {
     }
 
     #[cfg(feature = "diagnostics")]
-    pub(super) fn device_info(&self) -> lgui_core::diagnostics::RendererDeviceInfo {
+    pub(super) fn device_info(&self) -> lgui_diagnostics::RendererDeviceInfo {
         match self {
             #[cfg(feature = "renderer-skia")]
-            Self::Software { .. } => lgui_core::diagnostics::RendererDeviceInfo {
+            Self::Software { .. } => lgui_diagnostics::RendererDeviceInfo {
                 api: "software".to_owned(),
                 color_format: "BGRA8 premultiplied".to_owned(),
                 present_mode: "softbuffer damage".to_owned(),
-                ..lgui_core::diagnostics::RendererDeviceInfo::default()
+                ..lgui_diagnostics::RendererDeviceInfo::default()
             },
             #[cfg(feature = "renderer-skia-gl")]
             Self::OpenGl(renderer) => renderer.device_info(),
@@ -305,7 +305,7 @@ impl WinitSkiaRenderer {
             Self::Vulkan(renderer) => renderer.device_info(),
             #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
             Self::Metal(renderer) => renderer.device_info(),
-            Self::Unavailable => lgui_core::diagnostics::RendererDeviceInfo::default(),
+            Self::Unavailable => lgui_diagnostics::RendererDeviceInfo::default(),
         }
     }
 

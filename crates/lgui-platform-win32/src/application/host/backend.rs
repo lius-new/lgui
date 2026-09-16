@@ -17,9 +17,9 @@ impl ApplicationBackend for Win32Application {
         #[cfg(feature = "images-win32")]
         let _remote_image_loader = super::super::super::install_remote_image_loader(
             context
-                .try_resource::<lgui_core::assets::RemoteImageLoaderHandle>()
+                .try_resource::<lgui_assets::RemoteImageLoaderHandle>()
                 .map(|loader| (*loader).clone())
-                .unwrap_or_else(lgui_core::assets::http_image_loader),
+                .unwrap_or_else(lgui_assets::http_image_loader),
         );
         #[cfg(feature = "images-win32")]
         let _image_memory_governor =
@@ -34,7 +34,7 @@ impl ApplicationBackend for Win32Application {
                 .domain_budget(lgui_core::memory::CacheDomain::EncodedImage),
         );
         #[cfg(feature = "images-win32")]
-        let _image_cache = lgui_core::backend::install_image_cache(image_cache_handle.clone());
+        let _image_cache = lgui_assets::backend::install_image_cache(image_cache_handle.clone());
         #[cfg(feature = "images-win32")]
         {
             let stats_cache = image_cache_handle.clone();
@@ -122,7 +122,7 @@ impl ApplicationBackend for Win32Application {
             self.renderer_factory.text_system(),
         );
         #[cfg(feature = "svg")]
-        if let Some(icons) = lgui_core::backend::configured_svg_icons(&context) {
+        if let Some(icons) = lgui_assets::backend::configured_svg_icons(&context) {
             let _ = super::super::super::install_svg_icon_registry(icons);
         }
         #[cfg(feature = "svg")]

@@ -7,15 +7,8 @@ mod error;
 mod handle;
 mod renderer_selection;
 mod scope;
-#[cfg(all(
-    feature = "tray-win32",
-    any(feature = "backend-win32", feature = "backend-winit")
-))]
-mod tray;
 mod view;
 
-#[cfg(feature = "tray")]
-pub use crate::services::{TrayAction, TrayOptions};
 pub use crate::window::{
     ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowFocusChanged, WindowHandle,
     WindowId, WindowManager, WindowMode, WindowOptions, WindowPosition,
@@ -34,12 +27,6 @@ pub use handle::{ApplicationHandle, ApplicationTask};
 pub use renderer_selection::RendererKind;
 pub use renderer_selection::{GraphicsPreference, RendererProbeError};
 pub(crate) use scope::{current_application, ApplicationScopeFuture};
-#[cfg(all(
-    feature = "tray-win32",
-    any(feature = "backend-win32", feature = "backend-winit")
-))]
-#[doc(hidden)]
-pub use tray::{dispatch_tray_action, TrayRegistration};
 pub(crate) use view::application_root_view;
 pub use view::AppView;
 

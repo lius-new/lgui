@@ -225,7 +225,7 @@ impl D2dRenderer {
                 ..
             } => {
                 let resolved_signature =
-                    lgui_core::backend::resolved_content_signature(commands, *content_signature);
+                    lgui_assets::backend::resolved_content_signature(commands, *content_signature);
                 let has_external_images = resolved_signature != *content_signature;
                 let content_signature = resolved_signature;
                 let (width, height) = raster_size(*rect);

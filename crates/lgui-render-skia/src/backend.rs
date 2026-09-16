@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use lgui_core::backend::render_resources;
+use lgui_assets::backend::render_resources;
 use lgui_core::{
     application::GraphicsPreference,
     core::{

@@ -1,5 +1,9 @@
 //! Frame and system diagnostics contracts, samples, and collection.
 
+#![deny(unsafe_code)]
+
+mod extension;
+
 mod collector;
 mod model;
 mod provider;
@@ -7,6 +11,7 @@ mod system;
 mod timing;
 
 pub use collector::FrameCollector;
+pub use extension::DiagnosticsApplicationExt;
 pub use model::{
     DiagnosticPresentMode, DiagnosticsQuery, FrameBlitSourceMetrics, FrameDiagnosticsSnapshot,
     FramePresentMetrics, FrameRenderMetrics, FrameSample, GpuUsageSnapshot, MachineUsageSnapshot,

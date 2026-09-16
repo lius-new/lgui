@@ -331,8 +331,8 @@ impl WinitVulkanRenderer {
     }
 
     #[cfg(feature = "diagnostics")]
-    pub(crate) fn device_info(&self) -> lgui_core::diagnostics::RendererDeviceInfo {
-        lgui_core::diagnostics::RendererDeviceInfo {
+    pub(crate) fn device_info(&self) -> lgui_diagnostics::RendererDeviceInfo {
+        lgui_diagnostics::RendererDeviceInfo {
             adapter_name: Some(self.adapter_name.clone()),
             api: "Vulkan".to_owned(),
             api_version: Some("1.1".to_owned()),

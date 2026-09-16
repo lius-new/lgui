@@ -411,7 +411,7 @@ pub(super) extern "system" fn window_proc(
                 let mut state = state.borrow_mut();
                 #[cfg(feature = "images-win32")]
                 if let Some(window) = state.get(&(hwnd.0 as isize)) {
-                    lgui_core::backend::update_image_reachability(window.memory_instance, &[]);
+                    lgui_assets::backend::update_image_reachability(window.memory_instance, &[]);
                 }
                 let dispatcher = state
                     .remove(&(hwnd.0 as isize))

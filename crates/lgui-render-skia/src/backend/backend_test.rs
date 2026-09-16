@@ -1,13 +1,11 @@
 use super::*;
-use lgui_core::{
-    assets::{
-        AssetBytes, AssetError, AssetResolver, CustomPaintProvider, RenderResources, SceneFragment,
-    },
-    core::{
-        CompositingLayerSpec, CustomPaintStyle, IconStyle, OverlayStyle, Point,
-        RadialGradientLayer, RenderPhase, ScenePrimitiveKind, ScrollRasterSpec, StaticLayerSource,
-        StaticLayerSpec, UiId, UiPathCommand, UiScale, VerticalGradientLayer,
-    },
+use lgui_assets::{
+    AssetBytes, AssetError, AssetResolver, CustomPaintProvider, RenderResources, SceneFragment,
+};
+use lgui_core::core::{
+    CompositingLayerSpec, CustomPaintStyle, IconStyle, OverlayStyle, Point, RadialGradientLayer,
+    RenderPhase, ScenePrimitiveKind, ScrollRasterSpec, StaticLayerSource, StaticLayerSpec, UiId,
+    UiPathCommand, UiScale, VerticalGradientLayer,
 };
 use lgui_render_api::FrameReason;
 
@@ -15,7 +13,7 @@ const TEST_CACHE_BUDGET: usize = 96 * 1024 * 1024;
 
 #[test]
 fn shadow_refreshes_when_an_async_image_finishes_without_scene_changes() {
-    use lgui_core::assets::{ImageCacheHandle, ImageStatus};
+    use lgui_assets::{ImageCacheHandle, ImageStatus};
     use lgui_core::core::{HostTree, ShadowStyle, UiNode, UiNodeKind};
     use std::sync::atomic::{AtomicBool, Ordering};
     let ready = Arc::new(AtomicBool::new(false));
@@ -26,7 +24,7 @@ fn shadow_refreshes_when_an_async_image_finishes_without_scene_changes() {
         .write_to(&mut encoded, image::ImageFormat::Png)
         .unwrap();
     let encoded: Arc<[u8]> = encoded.into_inner().into();
-    let _cache = lgui_core::backend::install_image_cache(ImageCacheHandle::new(
+    let _cache = lgui_assets::backend::install_image_cache(ImageCacheHandle::new(
         move |_| {
             if request_ready.load(Ordering::SeqCst) {
                 ImageStatus::Ready
@@ -176,7 +174,7 @@ fn draw_scene(
     let resources = RenderResources::new()
         .with_resolver(TestAssets)
         .with_custom_paint(TestCustomPaint);
-    lgui_core::backend::with_render_resources_unscoped(resources, || {
+    lgui_assets::backend::with_render_resources_unscoped(resources, || {
         surface.draw(scene, &frame).expect("draw conformance scene")
     });
 }

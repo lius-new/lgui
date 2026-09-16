@@ -577,7 +577,7 @@ pub(super) fn suspend_window_rendering(hwnd: HWND, force: bool) -> bool {
         lgui_core::backend::session_suspend_rendering(&mut window.session);
         #[cfg(feature = "images-win32")]
         {
-            lgui_core::backend::update_image_reachability(window.memory_instance, &[]);
+            lgui_assets::backend::update_image_reachability(window.memory_instance, &[]);
             window.image_reachability_scene = None;
         }
         window.rendering_suspended = true;

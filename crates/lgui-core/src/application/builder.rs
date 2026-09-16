@@ -16,12 +16,6 @@ use super::{
     RenderErrorRegistration, WindowOptions,
 };
 
-#[cfg(all(
-    feature = "tray-win32",
-    any(feature = "backend-win32", feature = "backend-winit")
-))]
-use super::{TrayOptions, TrayRegistration};
-
 pub struct MemoryOptionsMissing;
 
 pub struct MemoryOptionsConfigured(MemoryOptions);
@@ -114,16 +108,6 @@ impl<B, M> Application<B, M> {
         self
     }
 
-    #[cfg(feature = "diagnostics")]
-    pub fn diagnostics_sink(
-        self,
-        sink: impl crate::diagnostics::DiagnosticsSink + 'static,
-    ) -> Self {
-        self.resources
-            .provide(crate::diagnostics::DiagnosticsRegistration::new(sink));
-        self
-    }
-
     pub fn font_families(self, families: &'static [&'static str]) -> Self {
         self.resources.provide(crate::text::FontFamilies(families));
         self
@@ -133,37 +117,6 @@ impl<B, M> Application<B, M> {
     pub fn font_assets(self, assets: Vec<crate::text::FontAsset>) -> Self {
         self.resources
             .provide(crate::text::FontAssets(std::sync::Arc::new(assets)));
-        self
-    }
-
-    #[cfg(feature = "svg")]
-    pub fn svg_icons(self, registry: crate::icons::SvgIconRegistry) -> Self {
-        self.resources
-            .provide(crate::icons::IconRegistration(std::sync::Arc::new(
-                registry,
-            )));
-        self
-    }
-
-    #[cfg(all(
-        feature = "tray-win32",
-        any(feature = "backend-win32", feature = "backend-winit")
-    ))]
-    pub fn tray(
-        self,
-        options: TrayOptions,
-        handler: impl Fn(&ApplicationContext, &str) + Send + Sync + 'static,
-    ) -> Self {
-        self.resources.provide(TrayRegistration {
-            options,
-            handler: Arc::new(handler),
-        });
-        self
-    }
-
-    #[cfg(feature = "notifications")]
-    pub fn notification_service(self, service: crate::services::NotificationHandle) -> Self {
-        self.resources.provide(service);
         self
     }
 }
@@ -179,32 +132,6 @@ where
             + Sync
             + 'static,
     ) -> Result<(), B::Error> {
-        #[cfg(feature = "clipboard")]
-        if self
-            .resources
-            .get::<crate::services::ClipboardHandle>()
-            .is_none()
-        {
-            self.resources
-                .provide::<crate::services::ClipboardHandle>(crate::clipboard::system_clipboard());
-        }
-        #[cfg(feature = "open-url")]
-        if self
-            .resources
-            .get::<crate::desktop::OpenUrlHandle>()
-            .is_none()
-        {
-            self.resources.provide(crate::desktop::system_url_opener());
-        }
-        #[cfg(feature = "dialogs")]
-        if self
-            .resources
-            .get::<crate::dialogs::FileDialogHandle>()
-            .is_none()
-        {
-            self.resources
-                .provide(crate::dialogs::system_file_dialogs());
-        }
         let context = ApplicationContext::new_with_memory(
             self.resources,
             self.executor,

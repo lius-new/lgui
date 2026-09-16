@@ -36,7 +36,7 @@ static IMAGE_REPAINT_HWND: LazyLock<Mutex<Option<isize>>> = LazyLock::new(|| Mut
 static IMAGE_REPAINT_PENDING: AtomicBool = AtomicBool::new(false);
 static IMAGE_INVALIDATED_REQUEST_KEYS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
-static REMOTE_IMAGE_LOADER: LazyLock<Mutex<Option<lgui_core::assets::RemoteImageLoaderHandle>>> =
+static REMOTE_IMAGE_LOADER: LazyLock<Mutex<Option<lgui_assets::RemoteImageLoaderHandle>>> =
     LazyLock::new(|| Mutex::new(None));
 static IMAGE_MEMORY_GOVERNOR: LazyLock<Mutex<Option<lgui_core::memory::MemoryGovernor>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -64,7 +64,7 @@ thread_local! {
 }
 
 pub(crate) struct RemoteImageLoaderGuard {
-    previous: Option<lgui_core::assets::RemoteImageLoaderHandle>,
+    previous: Option<lgui_assets::RemoteImageLoaderHandle>,
 }
 
 pub(crate) struct ImageMemoryGovernorGuard {
@@ -107,7 +107,7 @@ impl Drop for RemoteImageLoaderGuard {
 }
 
 pub(crate) fn install_remote_image_loader(
-    loader: lgui_core::assets::RemoteImageLoaderHandle,
+    loader: lgui_assets::RemoteImageLoaderHandle,
 ) -> RemoteImageLoaderGuard {
     let previous = REMOTE_IMAGE_LOADER
         .lock()
@@ -177,7 +177,7 @@ struct ImageCache {
 
 struct CachedImage {
     status: CachedImageStatus,
-    bytes: Option<lgui_core::assets::AssetBytes>,
+    bytes: Option<lgui_assets::AssetBytes>,
     width: i32,
     height: i32,
     resident_bytes: usize,
@@ -399,15 +399,15 @@ pub fn request_cached_image(source: &ImageSource) -> CachedImageStatus {
     status
 }
 
-pub(crate) fn portable_image_cache_handle() -> lgui_core::assets::ImageCacheHandle {
-    lgui_core::assets::ImageCacheHandle::new_managed(
+pub(crate) fn portable_image_cache_handle() -> lgui_assets::ImageCacheHandle {
+    lgui_assets::ImageCacheHandle::new_managed(
         |request| {
             let source = match request.source() {
                 lgui_core::core::UiImageSource::Url(url) => ImageSource::url(url),
                 lgui_core::core::UiImageSource::File(path) => ImageSource::file(path),
                 lgui_core::core::UiImageSource::Static(_)
                 | lgui_core::core::UiImageSource::Bytes { .. } => {
-                    return lgui_core::assets::ImageStatus::Ready
+                    return lgui_assets::ImageStatus::Ready
                 }
             };
             IMAGE_REQUESTS
@@ -427,7 +427,7 @@ pub(crate) fn portable_image_cache_handle() -> lgui_core::assets::ImageCacheHand
         },
         || {
             let cache = IMAGE_CACHE.lock().expect("image cache poisoned");
-            lgui_core::assets::ImageCacheStats {
+            lgui_assets::ImageCacheStats {
                 entries: cache.entries.len(),
                 resident_bytes: cache.resident_bytes,
                 pinned_bytes: cache
@@ -552,17 +552,15 @@ fn trim_cached_image_cache(target_bytes: usize) -> usize {
     released
 }
 
-fn portable_status(status: CachedImageStatus) -> lgui_core::assets::ImageStatus {
+fn portable_status(status: CachedImageStatus) -> lgui_assets::ImageStatus {
     match status {
-        CachedImageStatus::Loading => lgui_core::assets::ImageStatus::Loading,
-        CachedImageStatus::Ready => lgui_core::assets::ImageStatus::Ready,
-        CachedImageStatus::Failed => lgui_core::assets::ImageStatus::Failed,
+        CachedImageStatus::Loading => lgui_assets::ImageStatus::Loading,
+        CachedImageStatus::Ready => lgui_assets::ImageStatus::Ready,
+        CachedImageStatus::Failed => lgui_assets::ImageStatus::Failed,
     }
 }
 
-pub fn cached_image_data(
-    source: &ImageSource,
-) -> Option<(lgui_core::assets::AssetBytes, i32, i32)> {
+pub fn cached_image_data(source: &ImageSource) -> Option<(lgui_assets::AssetBytes, i32, i32)> {
     let key = source.key();
     let entry = {
         let mut cache = IMAGE_CACHE.lock().expect("image cache poisoned");
@@ -649,16 +647,16 @@ fn start_image_load(key: String, source: ImageSource, request_key: String, epoch
             let result = match source {
                 ImageSource::File(path) => fs::read(path)
                     .map(Arc::<[u8]>::from)
-                    .map_err(|error| lgui_core::assets::AssetError::NotFound(error.to_string()))
-                    .and_then(|bytes| lgui_core::assets::validate_encoded_bytes(bytes, limit)),
+                    .map_err(|error| lgui_assets::AssetError::NotFound(error.to_string()))
+                    .and_then(|bytes| lgui_assets::validate_encoded_bytes(bytes, limit)),
                 ImageSource::Url(url) => match (loader, request) {
                     (Some(loader), Some(request)) => {
-                        lgui_core::assets::load_url_image(&loader, &governor, &request, &url)
+                        lgui_assets::load_url_image(&loader, &governor, &request, &url)
                     }
                     (Some(loader), None) => loader
                         .load(&url)
-                        .and_then(|bytes| lgui_core::assets::validate_encoded_bytes(bytes, limit)),
-                    (None, _) => Err(lgui_core::assets::AssetError::Unsupported(
+                        .and_then(|bytes| lgui_assets::validate_encoded_bytes(bytes, limit)),
+                    (None, _) => Err(lgui_assets::AssetError::Unsupported(
                         "remote image loader is unavailable".to_owned(),
                     )),
                 },
@@ -704,12 +702,7 @@ fn start_next_queued_image_load() {
     start_image_load(next.key, next.source, next.request_key, next.epoch);
 }
 
-fn finish_image_load(
-    key: String,
-    request_key: String,
-    bytes: lgui_core::assets::AssetBytes,
-    epoch: u64,
-) {
+fn finish_image_load(key: String, request_key: String, bytes: lgui_assets::AssetBytes, epoch: u64) {
     if !is_current_epoch(epoch) {
         return;
     }
@@ -734,7 +727,7 @@ fn finish_image_load(
         ),
         _ => lgui_core::core::ImageRequest::new(lgui_core::core::UiImageSource::file(&key)),
     });
-    let bytes = match lgui_core::assets::prepare_image_bytes(bytes, &request, budget) {
+    let bytes = match lgui_assets::prepare_image_bytes(bytes, &request, budget) {
         Ok(bytes) => bytes,
         Err(_) => {
             fail_image_load(key, request_key, epoch);

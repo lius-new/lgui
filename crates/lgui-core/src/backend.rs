@@ -3,9 +3,7 @@
 //! This module is public so separately published backend crates can integrate
 //! with the core runtime. Applications should use the higher-level APIs.
 
-#[cfg(feature = "svg")]
-use std::borrow::Cow;
-#[cfg(any(feature = "renderer-skia", feature = "svg"))]
+#[cfg(feature = "renderer-skia")]
 use std::sync::Arc;
 
 use crate::{
@@ -112,83 +110,6 @@ pub fn font_assets() -> Arc<Vec<crate::text::FontAsset>> {
     crate::text::font_assets()
 }
 
-#[cfg(feature = "images")]
-pub fn render_resources() -> crate::assets::RenderResources {
-    crate::assets::render_resources()
-}
-
-#[cfg(all(feature = "images", feature = "renderer-skia"))]
-pub fn cached_image_bytes(
-    request: &crate::core::ImageRequest,
-) -> Option<crate::assets::AssetBytes> {
-    crate::assets::cached_image_bytes(request)
-}
-
-#[cfg(all(feature = "images", feature = "backend-winit"))]
-pub fn async_image_cache(
-    loader: crate::assets::RemoteImageLoaderHandle,
-    wake: impl Fn() + Send + Sync + 'static,
-    budget_bytes: usize,
-    governor: crate::memory::MemoryGovernor,
-) -> crate::assets::ImageCacheHandle {
-    crate::assets::async_image_cache(loader, wake, budget_bytes, governor)
-}
-
-#[cfg(feature = "images")]
-pub struct ImageCacheEnvironment {
-    _guard: crate::assets::ImageCacheGuard,
-}
-
-#[cfg(feature = "images")]
-pub fn install_image_cache(cache: crate::assets::ImageCacheHandle) -> ImageCacheEnvironment {
-    ImageCacheEnvironment {
-        _guard: crate::assets::install_image_cache(cache),
-    }
-}
-
-#[cfg(feature = "images")]
-pub fn update_image_reachability(
-    owner: crate::memory::DomainInstanceId,
-    requests: &[crate::core::ImageRequest],
-) {
-    crate::assets::update_image_reachability(owner, requests);
-}
-
-#[cfg(feature = "images")]
-pub fn with_render_resources<R>(
-    context: &ApplicationContext,
-    resources: crate::assets::RenderResources,
-    render: impl FnOnce() -> R,
-) -> R {
-    #[cfg(feature = "svg")]
-    {
-        let icons = context
-            .try_resource::<crate::icons::IconRegistration>()
-            .map(|registration| Arc::clone(&registration.0));
-        return crate::icons::with_icon_registry(icons, || {
-            crate::assets::with_render_resources(resources, render)
-        });
-    }
-    #[cfg(not(feature = "svg"))]
-    {
-        let _ = context;
-        crate::assets::with_render_resources(resources, render)
-    }
-}
-
-#[cfg(feature = "images")]
-pub fn with_render_resources_unscoped<R>(
-    resources: crate::assets::RenderResources,
-    render: impl FnOnce() -> R,
-) -> R {
-    crate::assets::with_render_resources(resources, render)
-}
-
-#[cfg(feature = "svg")]
-pub fn resolve_svg(key: &str) -> Option<Cow<'static, str>> {
-    crate::icons::resolve_svg(key)
-}
-
 pub fn compositing_shadow(
     spec: impl std::borrow::Borrow<crate::core::CompositingLayerSpec>,
 ) -> Option<crate::core::ShadowStyle> {
@@ -221,22 +142,6 @@ pub fn install_render_cache(cache: crate::renderer::RenderCacheHandle) -> Render
     RenderCacheEnvironment {
         _guard: crate::renderer::install_render_cache(cache),
     }
-}
-
-#[cfg(feature = "svg")]
-pub fn configured_svg_icons(context: &ApplicationContext) -> Option<crate::icons::SvgIconRegistry> {
-    context
-        .try_resource::<crate::icons::IconRegistration>()
-        .map(|registration| (*registration.0).clone())
-}
-
-#[cfg(any(
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    feature = "renderer-skia"
-))]
-pub fn resolved_content_signature(commands: &[crate::core::ScenePrimitive], signature: u64) -> u64 {
-    crate::renderer::shadow::resolved_content_signature(commands, signature)
 }
 
 #[cfg(any(

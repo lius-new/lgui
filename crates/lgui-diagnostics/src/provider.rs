@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::{HostTree, UiRect};
+use lgui_core::core::{HostTree, UiRect};
 
 use super::{DiagnosticsQuery, FrameDiagnosticsSnapshot, FrameSample};
 
@@ -20,7 +20,7 @@ pub struct DiagnosticsRegistration {
 }
 
 impl DiagnosticsRegistration {
-    pub(crate) fn new(sink: impl DiagnosticsSink + 'static) -> Self {
+    pub fn new(sink: impl DiagnosticsSink + 'static) -> Self {
         Self {
             sink: Arc::new(sink),
         }

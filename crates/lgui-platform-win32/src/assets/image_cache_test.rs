@@ -16,11 +16,8 @@ const ONE_PIXEL_PNG: &[u8] = &[
 
 struct TestRemoteLoader;
 
-impl lgui_core::assets::RemoteImageLoader for TestRemoteLoader {
-    fn load(
-        &self,
-        _url: &str,
-    ) -> Result<lgui_core::assets::AssetBytes, lgui_core::assets::AssetError> {
+impl lgui_assets::RemoteImageLoader for TestRemoteLoader {
+    fn load(&self, _url: &str) -> Result<lgui_assets::AssetBytes, lgui_assets::AssetError> {
         Ok(Arc::from(ONE_PIXEL_PNG))
     }
 }
@@ -30,11 +27,8 @@ struct BlockingRemoteLoader {
     release_first: Arc<AtomicBool>,
 }
 
-impl lgui_core::assets::RemoteImageLoader for BlockingRemoteLoader {
-    fn load(
-        &self,
-        _url: &str,
-    ) -> Result<lgui_core::assets::AssetBytes, lgui_core::assets::AssetError> {
+impl lgui_assets::RemoteImageLoader for BlockingRemoteLoader {
+    fn load(&self, _url: &str) -> Result<lgui_assets::AssetBytes, lgui_assets::AssetError> {
         if !self.first_started.swap(true, Ordering::AcqRel) {
             while !self.release_first.load(Ordering::Acquire) {
                 std::thread::yield_now();
@@ -86,9 +80,8 @@ fn zero_budget_win32_cache_still_delivers_a_reachable_image() {
     trim_cached_image_cache(0);
     let cache = portable_image_cache_handle();
     cache.set_budget(0);
-    let _loader = install_remote_image_loader(lgui_core::assets::RemoteImageLoaderHandle::new(
-        TestRemoteLoader,
-    ));
+    let _loader =
+        install_remote_image_loader(lgui_assets::RemoteImageLoaderHandle::new(TestRemoteLoader));
     let source = ImageSource::url("https://example.invalid/avatar.png");
 
     assert_eq!(request_cached_image(&source), CachedImageStatus::Loading);
@@ -127,7 +120,7 @@ fn images_waiting_for_a_task_slot_are_loaded_in_order() {
     cache.set_budget(options.domains.encoded_image_bytes);
     let first_started = Arc::new(AtomicBool::new(false));
     let release_first = Arc::new(AtomicBool::new(false));
-    let _loader = install_remote_image_loader(lgui_core::assets::RemoteImageLoaderHandle::new(
+    let _loader = install_remote_image_loader(lgui_assets::RemoteImageLoaderHandle::new(
         BlockingRemoteLoader {
             first_started: Arc::clone(&first_started),
             release_first: Arc::clone(&release_first),

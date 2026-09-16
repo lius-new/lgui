@@ -1,4 +1,5 @@
 use super::*;
+use crate::cache::{async_image_cache, install_image_cache};
 use crate::core::PhysicalSize;
 use std::{
     io::Cursor,
@@ -246,9 +247,9 @@ fn persistent_image_revalidation_reuses_cached_bytes_after_304() {
     entry.mime = Some("image/png".to_owned());
     entry.expires_unix_seconds = Some(1);
     crate::memory::PersistentCacheStore::put(&store, entry).expect("seed persistent image");
-    let governor = crate::memory::MemoryGovernor::with_store(
+    let governor = crate::memory::test_memory_governor_with_store(
         crate::memory::test_memory_options(),
-        Some(Arc::new(store.clone())),
+        Arc::new(store.clone()),
     );
     let observed_etag = Arc::new(Mutex::new(None));
     let loader = RemoteImageLoaderHandle::new(NotModifiedLoader {

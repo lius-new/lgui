@@ -77,7 +77,7 @@ impl SkiaPainter<'_> {
                 ..
             } => {
                 let content_signature =
-                    lgui_core::backend::resolved_content_signature(commands, *content_signature);
+                    lgui_assets::backend::resolved_content_signature(commands, *content_signature);
                 let key = format!(
                     "composite:{}:{content_signature}:{}x{}:{:?}:{:?}",
                     id.as_str(),
@@ -261,8 +261,8 @@ impl SkiaPainter<'_> {
                 None => return Ok(None),
             },
             UiImageSource::File(_) | UiImageSource::Url(_) => {
-                let Some(bytes) = lgui_core::backend::cached_image_bytes(request) else {
-                    let _ = lgui_core::assets::request_image(request);
+                let Some(bytes) = lgui_assets::backend::cached_image_bytes(request) else {
+                    let _ = lgui_assets::request_image(request);
                     return Ok(None);
                 };
                 bytes
@@ -289,7 +289,7 @@ impl SkiaPainter<'_> {
         if let Some(image) = self.cache.get(&cache_key) {
             return Ok(Some(image));
         }
-        let Some(svg) = lgui_core::backend::resolve_svg(key) else {
+        let Some(svg) = lgui_assets::backend::resolve_svg(key) else {
             return Ok(None);
         };
         let tinted = tint_svg(&svg, style.color, style.alpha);

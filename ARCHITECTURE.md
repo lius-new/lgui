@@ -29,10 +29,14 @@ their owning `ApplicationContext::scope`; no process-global Application singleto
 input, and native resource release. Auxiliary windows share the same Application Context, Store,
 Router, and Dispatcher as the main window.
 
-`services` owns platform-neutral clipboard, notification, and tray contracts. Application owns
-only service registration and application-action orchestration. Windows Toast, notification-icon,
+`lgui-services` owns platform-neutral clipboard, notification, dialog, URL-opening, and tray
+contracts plus their Application extension traits. Windows Toast, notification-icon,
 and tray message-loop code belongs to `platform::win32::services`; those adapters do not own an
 `ApplicationContext`, business command handler, or main-window handle.
+
+`lgui-assets` owns image resolution and caching, render resources, custom paint providers, and
+SVG icon registration. `lgui-diagnostics` owns frame and machine metrics, collection, and sink
+registration. Both depend on `lgui-core` contracts and remain independent of platform backends.
 
 ## Dependency Direction
 
@@ -40,8 +44,8 @@ and tray message-loop code belongs to `platform::win32::services`; those adapter
 application root -> lgui public API -> portable runtime/contracts -> platform adapters
 ```
 
-Portable modules do not depend on Win32 or Winit. `services` does not depend on `application` or
-`platform`; platform modules implement its contracts. `platform::win32` does not depend on pages,
+Portable capability crates depend inward on `lgui-core`, never on Win32 or Winit. Platform crates
+consume their contracts and implement native adapters. `platform::win32` does not depend on pages,
 business stores, network protocols, project environment variables, or Liuguang-specific paint
 keys. Business crates may provide data and resources, but they do not wrap or re-export GUI
 infrastructure.
@@ -111,7 +115,10 @@ The physical tree follows subsystem ownership:
 ```text
 src/                           # lgui facade and feature composition
 crates/
-|-- lgui-core/src/             # portable runtime, UI model, memory, assets, services
+|-- lgui-core/src/             # portable runtime, UI model, windows, memory
+|-- lgui-assets/src/           # image runtime, render resources, custom paint, SVG icons
+|-- lgui-diagnostics/src/      # metrics, samples, collectors, providers
+|-- lgui-services/src/         # desktop service contracts and optional system adapters
 |-- lgui-router/src/router/    # matching, history, declarative routes, outlets
 |-- lgui-store/src/store/      # stores, selectors, actions, subscriptions
 |-- lgui-widgets/src/          # theme tokens and reusable controls
@@ -122,7 +129,9 @@ crates/
 `-- lgui-platform-win32/src/   # native window host, dispatcher, system adapters
 ```
 
-`runtime` physically owns Session, Host, and Frame. The established `lgui::session`,
+`lgui-core` owns only contracts and runtime capabilities required by every application. Optional
+assets, diagnostics, and desktop services depend on core as sibling crates and are composed by the
+`lgui` facade. `runtime` physically owns Session, Host, and Frame. The established `lgui::session`,
 `lgui::host`, and `lgui::frame` paths remain compatibility entry points. Core keeps the
 established flat `lgui::core::*` exports while its implementation is grouped by responsibility.
 

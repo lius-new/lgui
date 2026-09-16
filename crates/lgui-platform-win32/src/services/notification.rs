@@ -8,13 +8,12 @@ use windows::{
     UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager},
 };
 
-use lgui_core::services::{Notification, NotificationService};
+use lgui_services::{Notification, NotificationService};
 
 #[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
-use lgui_core::{
-    application::{Application, ApplicationContext},
-    services::{NotificationError, NotificationHandle},
-};
+use lgui_core::application::{Application, ApplicationContext};
+#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+use lgui_services::{NotificationError, NotificationHandle};
 
 #[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
 pub(crate) struct Win32NotificationRegistration {

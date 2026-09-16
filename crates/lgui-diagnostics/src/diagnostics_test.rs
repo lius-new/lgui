@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use crate::core::{HostTree, UiRect};
+use lgui_core::core::{HostTree, UiRect};
 
 use super::*;
 

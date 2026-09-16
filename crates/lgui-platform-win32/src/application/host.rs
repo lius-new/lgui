@@ -73,9 +73,9 @@ use windows::{
 #[cfg(feature = "tray-win32")]
 use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
 
-#[cfg(feature = "tray-win32")]
-use lgui_core::application::{dispatch_tray_action, TrayRegistration};
 use lgui_core::backend::application_root_view;
+#[cfg(feature = "diagnostics")]
+use lgui_core::host::DamageReason;
 use lgui_core::{
     application::{AppView, ApplicationBackend, ApplicationContext},
     core::{
@@ -91,14 +91,13 @@ use lgui_core::{
     },
 };
 #[cfg(feature = "diagnostics")]
-use lgui_core::{
-    diagnostics::{
-        duration_ms, DiagnosticPresentMode, DiagnosticsRegistration, FramePresentMetrics,
-        FrameRenderMetrics, FrameSample,
-    },
-    host::DamageReason,
+use lgui_diagnostics::{
+    duration_ms, DiagnosticPresentMode, DiagnosticsRegistration, FramePresentMetrics,
+    FrameRenderMetrics, FrameSample,
 };
 use lgui_render_api::{FrameInfo, FrameReason, RenderErrorStage, SceneRenderer};
+#[cfg(feature = "tray-win32")]
+use lgui_services::{dispatch_tray_action, TrayRegistration};
 
 use super::super::ico::create_icon_from_ico_bytes;
 #[cfg(feature = "tray-win32")]

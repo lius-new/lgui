@@ -1,3 +1,4 @@
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
 use std::io::Cursor;
 use std::{cell::RefCell, sync::Arc};
 
@@ -15,14 +16,18 @@ use std::{
 #[cfg(feature = "persistent-cache")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{AssetBytes, AssetError, ImageSource, ImageStatus, RemoteImageLoaderHandle};
+use super::{AssetBytes, ImageSource, ImageStatus};
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+use super::{AssetError, RemoteImageLoaderHandle};
 #[cfg(any(
     test,
     feature = "persistent-cache",
     all(feature = "backend-winit", feature = "images")
 ))]
 use crate::core::ImageCachePolicy;
-use crate::core::{ImageDecodePolicy, ImageRequest};
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+use crate::core::ImageDecodePolicy;
+use crate::core::ImageRequest;
 
 #[derive(Clone)]
 pub struct ImageCacheHandle {
@@ -504,6 +509,7 @@ fn finish_async_image(
 }
 
 #[doc(hidden)]
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
 pub fn load_url_image(
     loader: &RemoteImageLoaderHandle,
     governor: &crate::memory::MemoryGovernor,
@@ -595,6 +601,7 @@ pub fn load_url_image(
 }
 
 #[doc(hidden)]
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
 pub fn validate_encoded_bytes(bytes: AssetBytes, limit: usize) -> Result<AssetBytes, AssetError> {
     if bytes.len() > limit {
         return Err(AssetError::InvalidData(format!(
@@ -606,6 +613,7 @@ pub fn validate_encoded_bytes(bytes: AssetBytes, limit: usize) -> Result<AssetBy
 }
 
 #[doc(hidden)]
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
 pub fn prepare_image_bytes(
     bytes: AssetBytes,
     request: &ImageRequest,
@@ -652,6 +660,7 @@ pub fn prepare_image_bytes(
     )
 }
 
+#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
 fn validate_decoded_dimensions(
     width: u32,
     height: u32,

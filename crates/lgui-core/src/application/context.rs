@@ -14,9 +14,6 @@ use crate::{
 #[cfg(feature = "persistent-cache")]
 use crate::memory::PersistentCacheStore;
 
-#[cfg(feature = "notifications")]
-use crate::services::NotificationHandle;
-
 use super::{ApplicationScopeFuture, RenderError, RenderErrorRegistration, WindowManager};
 
 #[derive(Clone)]
@@ -239,26 +236,6 @@ impl ApplicationContext {
         } else {
             eprintln!("{error}");
         }
-    }
-
-    #[cfg(feature = "notifications")]
-    pub fn notifications(&self) -> Option<Arc<NotificationHandle>> {
-        self.try_resource::<NotificationHandle>()
-    }
-
-    #[cfg(feature = "clipboard")]
-    pub fn clipboard(&self) -> crate::services::ClipboardHandle {
-        (*self.resource::<crate::services::ClipboardHandle>()).clone()
-    }
-
-    #[cfg(feature = "open-url")]
-    pub fn open_url(&self, url: &str) -> Result<(), crate::desktop::OpenUrlError> {
-        self.resource::<crate::desktop::OpenUrlHandle>().open(url)
-    }
-
-    #[cfg(feature = "dialogs")]
-    pub fn file_dialogs(&self) -> Arc<crate::dialogs::FileDialogHandle> {
-        self.resource::<crate::dialogs::FileDialogHandle>()
     }
 
     pub(crate) fn task_spawner(&self) -> Option<UiTaskSpawner> {

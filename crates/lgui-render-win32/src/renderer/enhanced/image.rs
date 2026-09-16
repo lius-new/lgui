@@ -259,7 +259,7 @@ fn rasterize_remote_image_bgra(
 }
 
 fn decode_image(source: &'static str) -> Option<DecodedImage> {
-    let bytes = lgui_core::backend::render_resources()
+    let bytes = lgui_assets::backend::render_resources()
         .resolver()?
         .resolve(source)
         .ok()?;

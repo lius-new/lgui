@@ -16,15 +16,17 @@ categories = ["gui", "rendering", "os::windows-apis"]
 default = ["gdi"]
 advanced-rendering = ["gdi", "d2d", "lgui-core/advanced-rendering"]
 d2d = ["diagnostics", "images", "svg", "dep:windows-numerics", "lgui-core/renderer-d2d"]
-diagnostics = ["lgui-core/diagnostics", "lgui-platform-win32/diagnostics"]
+diagnostics = ["dep:lgui-diagnostics", "lgui-platform-win32/diagnostics"]
 gdi = ["images", "lgui-core/renderer-gdi"]
-images = ["dep:image", "lgui-core/images", "lgui-platform-win32/images-win32"]
+images = ["dep:image", "dep:lgui-assets", "lgui-platform-win32/images-win32"]
 multi-window = ["lgui-core/multi-window", "lgui-platform-win32/multi-window"]
-svg = ["images", "dep:resvg", "dep:tiny-skia", "dep:usvg", "lgui-core/svg", "lgui-platform-win32/svg"]
+svg = ["images", "lgui-assets/svg", "dep:resvg", "dep:tiny-skia", "dep:usvg", "lgui-platform-win32/svg"]
 
 [dependencies]
 image = { version = "0.25", optional = true, default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+lgui-assets = { version = "0.2.0", path = "../lgui-assets", optional = true, default-features = false, features = ["images"] }
 lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
+lgui-diagnostics = { version = "0.2.0", path = "../lgui-diagnostics", optional = true }
 lgui-platform-win32 = { version = "0.2.0", path = "../lgui-platform-win32", default-features = false, features = ["backend-win32"] }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
 resvg = { version = "0.45", optional = true }

@@ -24,7 +24,7 @@ use windows::{
     },
 };
 
-use lgui_core::services::{TrayAction, TrayOptions};
+use lgui_services::{TrayAction, TrayOptions};
 
 use super::{
     icon::Win32TrayIcon,

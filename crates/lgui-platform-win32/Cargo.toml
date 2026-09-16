@@ -16,21 +16,24 @@ categories = ["gui", "os::windows-apis"]
 default = ["backend-win32"]
 backend-win32 = ["lgui-core/backend-win32"]
 backend-winit = ["lgui-core/backend-winit"]
-diagnostics = ["lgui-core/diagnostics"]
+diagnostics = ["dep:lgui-diagnostics"]
 diagnostics-timing = ["diagnostics", "lgui-core/diagnostics-timing"]
-images = ["dep:image", "lgui-core/images"]
-images-win32 = ["images", "backend-win32", "lgui-core/images-win32"]
+images = ["dep:image", "dep:lgui-assets"]
+images-win32 = ["images", "backend-win32", "lgui-assets/images-win32"]
 multi-window = ["lgui-core/multi-window"]
-notifications-win32 = ["backend-win32", "lgui-core/notifications-win32"]
+notifications-win32 = ["backend-win32", "lgui-services/notifications"]
 store = ["dep:lgui-store"]
-svg = ["images", "dep:resvg", "dep:tiny-skia", "dep:usvg", "lgui-core/svg"]
-system-diagnostics = ["diagnostics", "backend-win32", "lgui-core/system-diagnostics"]
-tray-win32 = ["backend-win32", "svg", "lgui-core/tray-win32"]
+svg = ["images", "dep:resvg", "dep:tiny-skia", "dep:usvg", "lgui-assets/svg"]
+system-diagnostics = ["diagnostics", "backend-win32"]
+tray-win32 = ["backend-win32", "svg", "lgui-services/tray"]
 
 [dependencies]
 image = { version = "0.25", optional = true, default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+lgui-assets = { version = "0.2.0", path = "../lgui-assets", optional = true, default-features = false }
 lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
+lgui-diagnostics = { version = "0.2.0", path = "../lgui-diagnostics", optional = true }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
+lgui-services = { version = "0.2.0", path = "../lgui-services", default-features = false }
 lgui-store = { version = "0.2.0", path = "../lgui-store", optional = true }
 resvg = { version = "0.45", optional = true }
 tiny-skia = { version = "0.11", optional = true }

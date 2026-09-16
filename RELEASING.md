@@ -9,6 +9,9 @@ Run the test suite and inspect each package before publishing:
 cargo fmt --all -- --check
 cargo test --workspace --all-features
 cargo package -p lgui-core
+cargo package -p lgui-assets --list
+cargo package -p lgui-diagnostics --list
+cargo package -p lgui-services --list
 cargo package -p lgui-render-api --list
 cargo package -p lgui-router --list
 cargo package -p lgui-store --list
@@ -26,6 +29,12 @@ index that version before running the next package's dry run:
 ```powershell
 cargo publish -p lgui-core --dry-run
 cargo publish -p lgui-core
+cargo publish -p lgui-assets --dry-run
+cargo publish -p lgui-assets
+cargo publish -p lgui-diagnostics --dry-run
+cargo publish -p lgui-diagnostics
+cargo publish -p lgui-services --dry-run
+cargo publish -p lgui-services
 cargo publish -p lgui-render-api --dry-run
 cargo publish -p lgui-render-api
 cargo publish -p lgui-router --dry-run

@@ -29,7 +29,7 @@ pub(super) fn draw_command_d2d(
             fit,
             ..
         } => {
-            let _ = lgui_core::assets::request_image(request);
+            let _ = lgui_assets::request_image(request);
             draw_image(resources, *rect, source, *fit)
         }
         ScenePrimitive::Icon {
@@ -59,7 +59,7 @@ pub(super) fn draw_command_d2d(
             rect, key, style, ..
         } => {
             if let Some(style) = style {
-                let provider = lgui_core::backend::render_resources()
+                let provider = lgui_assets::backend::render_resources()
                     .custom_paint()
                     .cloned();
                 if let Some(provider) = provider {

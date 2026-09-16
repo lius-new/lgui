@@ -29,13 +29,6 @@ use winit::{
     },
 };
 
-#[cfg(all(feature = "tray-win32", target_os = "windows"))]
-use lgui_core::application::{dispatch_tray_action, TrayRegistration};
-#[cfg(feature = "diagnostics")]
-use lgui_core::diagnostics::{
-    DiagnosticPresentMode, DiagnosticsRegistration, FramePresentMetrics, FrameRenderMetrics,
-    FrameSample,
-};
 use lgui_core::{
     application::{
         AppView, ApplicationBackend, ApplicationContext, ApplicationHandle, ApplicationTask,
@@ -51,6 +44,13 @@ use lgui_core::{
     session::UiSession,
     window::{ClosePolicy, WindowId, WindowMode, WindowOptions, WindowPosition},
 };
+#[cfg(feature = "diagnostics")]
+use lgui_diagnostics::{
+    DiagnosticPresentMode, DiagnosticsRegistration, FramePresentMetrics, FrameRenderMetrics,
+    FrameSample,
+};
+#[cfg(all(feature = "tray-win32", target_os = "windows"))]
+use lgui_services::{dispatch_tray_action, TrayRegistration};
 
 use lgui_core::backend::{application_root_view, WindowCommand};
 use lgui_render_api::{FrameInfo, FrameReason, MemoryPressure};

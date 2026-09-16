@@ -74,19 +74,19 @@ impl ApplicationBackend for WinitApplication {
         context.resources().provide(application_handle.clone());
         #[cfg(feature = "images")]
         if context
-            .try_resource::<lgui_core::assets::ImageCacheHandle>()
+            .try_resource::<lgui_assets::ImageCacheHandle>()
             .is_none()
         {
             let loader = context
-                .try_resource::<lgui_core::assets::RemoteImageLoaderHandle>()
+                .try_resource::<lgui_assets::RemoteImageLoaderHandle>()
                 .map(|loader| (*loader).clone())
-                .unwrap_or_else(lgui_core::assets::http_image_loader);
+                .unwrap_or_else(lgui_assets::http_image_loader);
             let image_wake = application_handle.clone();
             let budget = context
                 .memory()
                 .options()
                 .domain_budget(lgui_core::memory::CacheDomain::EncodedImage);
-            let cache = lgui_core::backend::async_image_cache(
+            let cache = lgui_assets::backend::async_image_cache(
                 loader,
                 move || image_wake.request_frame(),
                 budget,

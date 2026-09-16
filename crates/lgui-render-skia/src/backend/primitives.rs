@@ -182,7 +182,7 @@ pub(super) fn custom_scene(
     key: &str,
     rect: UiRect,
     style: lgui_core::core::CustomPaintStyle,
-) -> Result<Option<lgui_core::assets::SceneFragment>, String> {
+) -> Result<Option<lgui_assets::SceneFragment>, String> {
     let Some(provider) = render_resources().custom_paint().cloned() else {
         return Ok(None);
     };

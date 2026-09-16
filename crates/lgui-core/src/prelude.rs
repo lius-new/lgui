@@ -8,14 +8,6 @@ pub use crate::application::{
     feature = "renderer-skia"
 ))]
 pub use crate::application::{RendererKind, RendererProbeError};
-#[cfg(feature = "svg")]
-pub use crate::assets::SvgRenderer;
-#[cfg(feature = "images")]
-pub use crate::assets::{
-    AssetBytes, AssetError, AssetResolver, CustomPaintProvider, ImageCacheHandle, ImageData,
-    ImageLoader, ImageSource, ImageStatus, RemoteImageLoader, RemoteImageLoaderHandle,
-    RenderResources,
-};
 pub use crate::command::{
     invoke, Command, CommandContext, CommandFuture, CommandHandle, CommandHandler,
 };
@@ -24,17 +16,6 @@ pub use crate::core::{
     EdgeInsets, Element, ElementKey, ImageCachePolicy, ImageDecodePolicy, ImageRequest, RenderCx,
     RootComponent, ShadowStyle, Size, State, StateSetter, Stroke, TextAlign, TextStyle,
     UiAsyncContext, UiEventContext, UiRect, VisualStyle,
-};
-#[cfg(feature = "open-url")]
-pub use crate::desktop::{OpenUrlError, OpenUrlHandle, UrlOpener};
-#[cfg(feature = "diagnostics")]
-pub use crate::diagnostics::{
-    DiagnosticPresentMode, DiagnosticsProvider, DiagnosticsSink, FrameCollector,
-    FrameDiagnosticsSnapshot, FramePresentMetrics, FrameRenderMetrics, FrameSample,
-};
-#[cfg(feature = "dialogs")]
-pub use crate::dialogs::{
-    FileDialogFilter, FileDialogHandle, FileDialogOptions, FileDialogService,
 };
 pub use crate::events::{
     emit, listen, listen_async, listen_async_with, listen_with, AsyncEventHandler, Event,
@@ -49,12 +30,6 @@ pub use crate::platform::{
     InputSink, WakeHandle,
 };
 pub use crate::resources::Resources;
-pub use crate::services::{
-    Clipboard, ClipboardError, ClipboardHandle, Notification, NotificationError,
-    NotificationHandle, NotificationService, TrayMenuEntry, TrayMenuItem, TrayService,
-};
-#[cfg(feature = "tray")]
-pub use crate::services::{TrayAction, TrayOptions};
 pub use crate::session::UiSession;
 pub use crate::text::{
     FontAsset, TextAffinity, TextCluster, TextDirection, TextFeature, TextFontSlant, TextFontWidth,

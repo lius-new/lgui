@@ -2,56 +2,6 @@ use std::collections::VecDeque;
 
 use crate::core::ShadowStyle;
 
-/// Image completion can change a retained surface without changing scene commands.
-pub(crate) fn resolved_content_signature(
-    commands: &[crate::core::ScenePrimitive],
-    signature: u64,
-) -> u64 {
-    #[cfg(feature = "images")]
-    {
-        use crate::core::{ScenePrimitive, UiImageSource};
-        use std::hash::{Hash, Hasher};
-        fn visit(
-            commands: &[ScenePrimitive],
-            state: &mut Option<std::collections::hash_map::DefaultHasher>,
-            signature: u64,
-        ) {
-            for command in commands {
-                match command {
-                    ScenePrimitive::Image {
-                        request,
-                        source: UiImageSource::Url(_) | UiImageSource::File(_),
-                        ..
-                    } => {
-                        let hasher = state.get_or_insert_with(|| {
-                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                            signature.hash(&mut hasher);
-                            hasher
-                        });
-                        std::mem::discriminant(&crate::assets::request_image(request)).hash(hasher);
-                    }
-                    ScenePrimitive::CompositingLayer { commands, .. }
-                    | ScenePrimitive::StaticLayer { commands, .. }
-                    | ScenePrimitive::ScrollRaster { commands, .. }
-                    | ScenePrimitive::Clip { commands, .. }
-                    | ScenePrimitive::ClipPath { commands, .. } => {
-                        visit(commands, state, signature)
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let mut state = None;
-        visit(commands, &mut state, signature);
-        state.map_or(signature, |hasher| hasher.finish())
-    }
-    #[cfg(not(feature = "images"))]
-    {
-        let _ = commands;
-        signature
-    }
-}
-
 /// Composites an alpha-derived shadow behind a padded premultiplied BGRA surface.
 /// All backends share this filter so spread, blur and fractional offsets agree.
 pub(crate) fn composite_shadow(pixels: &mut [u8], width: usize, height: usize, style: ShadowStyle) {

@@ -14,10 +14,8 @@ use windows::Win32::Graphics::Gdi::{
     HDC,
 };
 
-use lgui_core::{
-    core::{Color, IconStyle, UiRect},
-    icons::{builtin_svg, SvgIconRegistry},
-};
+use lgui_assets::icons::{builtin_svg, SvgIconRegistry};
+use lgui_core::core::{Color, IconStyle, UiRect};
 
 static SVG_REGISTRY: OnceLock<SvgIconRegistry> = OnceLock::new();
 static SVG_FONT_REGISTRY: OnceLock<SvgFontRegistry> = OnceLock::new();

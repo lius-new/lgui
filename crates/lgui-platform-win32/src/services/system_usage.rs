@@ -15,7 +15,7 @@ use windows::Win32::{
     },
 };
 
-use lgui_core::diagnostics::{
+use lgui_diagnostics::{
     GpuUsageSnapshot, MachineUsageSnapshot, ProcessUsageSnapshot, SystemUsageSnapshot,
 };
 

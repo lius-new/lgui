@@ -63,7 +63,7 @@ impl GdiRenderer {
             return false;
         };
         let content_signature =
-            lgui_core::backend::resolved_content_signature(commands, *content_signature);
+            lgui_assets::backend::resolved_content_signature(commands, *content_signature);
         let width = rect.width().ceil().max(1.0) as i32;
         let height = rect.height().ceil().max(1.0) as i32;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
