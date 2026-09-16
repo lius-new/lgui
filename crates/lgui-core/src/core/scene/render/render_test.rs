@@ -572,7 +572,6 @@ fn cloned_scenes_share_command_storage_until_mutated() {
     assert!(!scene.shares_command_storage_with(&cloned));
 }
 
-#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
 #[test]
 fn backend_translation_preserves_nested_static_layer_local_commands() {
     let command = ScenePrimitive::StaticLayer {

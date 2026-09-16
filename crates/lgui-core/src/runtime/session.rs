@@ -3,15 +3,17 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{
+    frame::InvalidationSet,
+    host::{HostCommit, HostRuntime},
+};
+use crate::core::UiRect;
+use crate::{
     application::AppView,
     core::{
         ComponentRuntimeMetrics, HostProjectionMetrics, HostTree, HostTreeBuilder,
         LayoutCommitMetrics, LayoutRuntime, UiRuntime, UiScale, UiTaskSpawner, UiWake,
     },
-    frame::InvalidationSet,
-    host::{HostCommit, HostRuntime},
 };
-use crate::core::UiRect;
 
 /// Owns the complete retained UI state for one native window.
 ///
@@ -94,18 +96,18 @@ impl UiSession {
         !self.tree.nodes().is_empty()
     }
 
-    pub fn handle_input(&mut self, input: super::core::InputEvent) -> super::core::RuntimeOutput {
+    pub fn handle_input(&mut self, input: crate::core::InputEvent) -> crate::core::RuntimeOutput {
         self.runtime.handle_input(&self.tree, input)
     }
 
-    pub fn advance(&mut self, elapsed_ms: f32) -> super::core::RuntimeOutput {
+    pub fn advance(&mut self, elapsed_ms: f32) -> crate::core::RuntimeOutput {
         self.runtime.advance(&mut self.tree, elapsed_ms)
     }
 
     pub fn handle_default_action(
         &mut self,
-        action: super::core::UiDefaultAction,
-    ) -> super::core::RuntimeOutput {
+        action: crate::core::UiDefaultAction,
+    ) -> crate::core::RuntimeOutput {
         self.runtime.handle_default_action(&self.tree, action)
     }
 
@@ -252,7 +254,7 @@ impl UiSession {
         (builder.finish(), metrics)
     }
 
-    pub fn apply_pending_updates(&mut self) -> super::core::PendingUpdateOutput {
+    pub fn apply_pending_updates(&mut self) -> crate::core::PendingUpdateOutput {
         let updates = self.runtime.apply_pending_updates(&self.tree);
         if updates.focus_changed {
             self.invalidate_all();
@@ -272,7 +274,6 @@ impl UiSession {
         self.projection_metrics
     }
 
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn memory_usage(&self) -> (crate::memory::CacheUsage, crate::memory::CacheUsage) {
         let component = self.runtime.component_tree().output_memory_usage();
         let host_scene_bytes = self
@@ -293,7 +294,6 @@ impl UiSession {
         (component, host_scene)
     }
 
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn trim_component_outputs(&mut self, target_bytes: usize) -> usize {
         let released = self.runtime.component_tree().trim_outputs(target_bytes);
         if released > 0 {
@@ -302,7 +302,6 @@ impl UiSession {
         released
     }
 
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn trim_host_scene(&mut self) -> usize {
         let before = self.memory_usage().1.rebuildable_bytes;
         self.clear_host();
@@ -330,7 +329,6 @@ impl UiSession {
     }
 
     /// Releases retained drawing data while preserving state, hooks, effects and tasks.
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn suspend_rendering(&mut self) {
         self.runtime.suspend_rendering();
         self.trim_component_outputs(0);

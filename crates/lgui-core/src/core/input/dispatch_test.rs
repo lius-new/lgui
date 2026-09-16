@@ -39,7 +39,7 @@ fn click_handlers_are_executed_by_the_runtime_dispatch_loop() {
             move |_| calls.lock().unwrap().push("target")
         }),
     );
-    let mut runtime = super::super::UiRuntime::new();
+    let mut runtime = crate::core::UiRuntime::new();
     runtime.handle_input(
         &tree,
         InputEvent::PointerDown {

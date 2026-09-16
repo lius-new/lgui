@@ -25,6 +25,8 @@ fn source_tree_expresses_subsystem_boundaries() {
         "core/layout",
         "core/scene",
         "core/component/runtime",
+        "core/component/component_tree",
+        "core/input/event",
         "core/view/declarative",
         "core/view/tree",
         "core/scene/render",
@@ -98,6 +100,26 @@ fn source_tree_expresses_subsystem_boundaries() {
     }
 
     for leaf in [
+        "core/foundation/mod.rs",
+        "core/component/mod.rs",
+        "core/input/mod.rs",
+        "core/layout/mod.rs",
+        "core/scene/mod.rs",
+        "core/view/mod.rs",
+        "core/component/component_tree/identity.rs",
+        "core/component/component_tree/lifecycle.rs",
+        "core/component/component_tree/memory.rs",
+        "core/component/component_tree/storage.rs",
+        "core/input/event/animation.rs",
+        "core/input/event/dispatcher.rs",
+        "core/scene/render/scroll_cache.rs",
+        "core/scene/render/memory.rs",
+        "core/scene/render/projection.rs",
+        "core/scene/render/signature.rs",
+        "runtime/mod.rs",
+        "runtime/session.rs",
+        "runtime/frame/mod.rs",
+        "runtime/host/mod.rs",
         "runtime/host/commit.rs",
         "runtime/host/reconcile.rs",
         "runtime/host/scene.rs",
@@ -184,7 +206,12 @@ fn source_tree_uses_real_modules_instead_of_textual_includes() {
     );
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for facade in ["core/view/declarative.rs", "core/view/tree.rs"] {
+    for facade in [
+        "core/component/component_tree.rs",
+        "core/input/event.rs",
+        "core/view/declarative.rs",
+        "core/view/tree.rs",
+    ] {
         let source = fs::read_to_string(root.join(facade)).expect("read split facade");
         assert!(
             source.lines().count() <= 400,
@@ -194,6 +221,41 @@ fn source_tree_uses_real_modules_instead_of_textual_includes() {
     let static_layer = workspace_root().join("crates/lgui-render-win32-raster/src/static_layer.rs");
     let source = fs::read_to_string(&static_layer).expect("read static-layer facade");
     assert!(source.lines().count() <= 400);
+}
+
+#[test]
+fn core_manifest_has_no_concrete_backend_or_renderer_features() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).expect("read core manifest");
+
+    for forbidden in [
+        "backend-win32 =",
+        "backend-winit =",
+        "renderer-gdi =",
+        "renderer-d2d =",
+        "renderer-skia =",
+        "lgui-platform-win32",
+        "lgui-platform-winit",
+        "lgui-render-gdi",
+        "lgui-render-d2d",
+        "lgui-render-skia",
+    ] {
+        assert!(
+            !manifest.contains(forbidden),
+            "lgui-core manifest owns concrete capability `{forbidden}`"
+        );
+    }
+
+    let sources = rust_sources("src")
+        .into_iter()
+        .map(|(_, source)| source)
+        .collect::<String>();
+    for forbidden in ["GraphicsPreference", "RendererKind", "RendererProbeError"] {
+        assert!(
+            !sources.contains(forbidden),
+            "lgui-core owns facade renderer selection type `{forbidden}`"
+        );
+    }
 }
 
 #[test]

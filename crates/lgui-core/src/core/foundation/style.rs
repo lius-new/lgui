@@ -10,6 +10,13 @@ use std::hash::{Hash, Hasher};
 
 use super::geometry::normalized_f32_bits;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ImageFit {
+    Contain,
+    Cover,
+    Fill,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stroke {
     pub color: Color,
@@ -217,7 +224,7 @@ impl OverlayStyle {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BackdropBlurStyle {
     pub source: &'static str,
-    pub fit: super::ImageFit,
+    pub fit: ImageFit,
     pub source_rect: super::UiRect,
     pub radius: f32,
     pub opacity: f32,
@@ -226,11 +233,7 @@ pub struct BackdropBlurStyle {
 }
 
 impl BackdropBlurStyle {
-    pub const fn new(
-        source: &'static str,
-        fit: super::ImageFit,
-        source_rect: super::UiRect,
-    ) -> Self {
+    pub const fn new(source: &'static str, fit: ImageFit, source_rect: super::UiRect) -> Self {
         Self {
             source,
             fit,

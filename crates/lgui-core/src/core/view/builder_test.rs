@@ -23,7 +23,7 @@ struct TransactionRoot {
 }
 
 impl RootComponent for TransactionRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         let executions = Arc::clone(&self.executions);
         let effect_runs = Arc::clone(&self.effect_runs);
         let panic_during_render = self.panic_during_render;
@@ -36,13 +36,13 @@ impl RootComponent for TransactionRoot {
             if panic_during_render {
                 panic!("abandoned render");
             }
-            super::super::content_text(value.to_string())
+            crate::core::content_text(value.to_string())
         })
     }
 }
 
 impl RootComponent for CountingRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         let executions = Arc::clone(&self.executions);
         component(self.props, move |_cx, _props| {
             executions.fetch_add(1, Ordering::SeqCst);
@@ -104,7 +104,7 @@ struct RetainedProjectionRoot {
 }
 
 impl RootComponent for RetainedProjectionRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         let executions = Arc::clone(&self.executions);
         component(self.props, move |_cx, _| {
             executions.fetch_add(1, Ordering::SeqCst);
@@ -189,12 +189,12 @@ struct ComponentStateRoot {
 }
 
 impl RootComponent for ComponentStateRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         component((), move |cx, _| {
             self.executions.fetch_add(1, Ordering::SeqCst);
             let state_id = cx.use_stable_id();
             *self.state_id.lock().expect("state ID poisoned") = Some(state_id.clone());
-            super::super::Element::new(move |cx| {
+            crate::core::Element::new(move |cx| {
                 cx.context
                     .component_state_mut(&state_id, |state: &mut RetainedLocalState| {
                         state.value = 7;
@@ -263,17 +263,17 @@ fn clean_component_reuse_preserves_component_state_in_its_element_scope() {
 
 struct StatefulRoot {
     executions: Arc<AtomicUsize>,
-    state: Arc<Mutex<Option<super::super::State<u32>>>>,
+    state: Arc<Mutex<Option<crate::core::State<u32>>>>,
 }
 
 impl RootComponent for StatefulRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         component((), move |cx, _| {
             self.executions.fetch_add(1, Ordering::SeqCst);
             let state = cx.state(0_u32);
             let value = state.get();
             *self.state.lock().expect("state handle poisoned") = Some(state);
-            super::super::content_text(value.to_string())
+            crate::core::content_text(value.to_string())
         })
     }
 }
@@ -281,7 +281,7 @@ impl RootComponent for StatefulRoot {
 fn mount_stateful(
     runtime: &UiRuntime,
     executions: Arc<AtomicUsize>,
-    state: Arc<Mutex<Option<super::super::State<u32>>>>,
+    state: Arc<Mutex<Option<crate::core::State<u32>>>>,
 ) {
     let viewport = UiRect::new(0.0, 0.0, 10.0, 10.0);
     let interaction = runtime.interaction_state();
@@ -337,7 +337,7 @@ struct ContextRoot {
 }
 
 impl RootComponent for ContextRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         let observed = Arc::clone(&self.observed);
         context_provider(
             self.value,
@@ -345,7 +345,7 @@ impl RootComponent for ContextRoot {
                 observed
                     .lock()
                     .expect("context observation poisoned")
-                    .push(super::super::use_context::<u32>());
+                    .push(crate::core::use_context::<u32>());
                 group(UiRect::new(0.0, 0.0, 10.0, 10.0))
             }),
         )
@@ -391,7 +391,7 @@ struct KeyedListRoot {
 }
 
 impl RootComponent for KeyedListRoot {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         let rows = self
             .items
             .into_iter()
@@ -403,7 +403,7 @@ impl RootComponent for KeyedListRoot {
                         .expect("keyed execution counter poisoned")
                         .entry(*item)
                         .or_default() += 1;
-                    super::super::content_text(*item)
+                    crate::core::content_text(*item)
                 })
                 .key(item)
             })
@@ -493,17 +493,17 @@ struct RootBranchReplacement {
 }
 
 impl RootComponent for RootBranchReplacement {
-    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> super::super::Element {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
         if self.show_email {
             return component((), |_cx, _| {
-                group(UiRect::new(0.0, 0.0, 30.0, 30.0)).child(super::super::content_text("email"))
+                group(UiRect::new(0.0, 0.0, 30.0, 30.0)).child(crate::core::content_text("email"))
             })
             .key("email-form");
         }
 
         group(UiRect::new(0.0, 0.0, 30.0, 30.0)).content((
-            super::super::content_text("remembered"),
-            super::super::content_text("remembered details"),
+            crate::core::content_text("remembered"),
+            crate::core::content_text("remembered details"),
         ))
     }
 }

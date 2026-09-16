@@ -1,12 +1,12 @@
 use std::any::Any;
 
-use super::super::{
+use super::*;
+use crate::core::{
     compile_scene, AnimationBinding, ComponentActionOutcome, ComponentState,
     CompositingLayerAnimation, CompositingLayerSpec, ImeEvent, InputEvent, InteractionRole,
     KeyModifiers, KeyboardEvent, Point, PointerButton, PointerData, ScenePrimitive, UiNode,
     UiNodeKind, VisualStyle, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
 };
-use super::*;
 
 fn key_down(key: NamedKey, modifiers: KeyModifiers) -> InputEvent {
     InputEvent::Keyboard(KeyboardEvent {
@@ -33,7 +33,7 @@ impl CompositingLayerAnimation for RetainedLayerAnimation {
     }
 }
 
-fn compositing_content_signature(scene: &super::super::Scene) -> u64 {
+fn compositing_content_signature(scene: &crate::core::Scene) -> u64 {
     scene
         .commands()
         .iter()
@@ -229,7 +229,7 @@ fn retained_layer_animation_updates_composition_without_dirtying_component() {
         )
         .parent(layer_id.clone())
         .component_owner(owner)
-        .style(VisualStyle::filled(super::super::Color::WHITE)),
+        .style(VisualStyle::filled(crate::core::Color::WHITE)),
     );
     let _ = tree.take_projection_changes();
     let before_signature = compositing_content_signature(&compile_scene(&tree));
@@ -456,7 +456,7 @@ fn tab_focus_traversal_is_deferred_until_after_key_handlers() {
             UiRect::new(0.0, 0.0, 40.0, 20.0),
         )
         .interaction(InteractionRole::Button)
-        .on_event(super::super::UiEventKind::KeyDown, |context, _| {
+        .on_event(crate::core::UiEventKind::KeyDown, |context, _| {
             context.prevent_default();
         }),
     );
@@ -468,7 +468,7 @@ fn tab_focus_traversal_is_deferred_until_after_key_handlers() {
     assert_eq!(output.handler_events.len(), 1);
     assert_eq!(output.default_actions.len(), 1);
     assert_eq!(runtime.interaction_state().focused, Some(id));
-    let mut context = super::super::UiEventContext::new(
+    let mut context = crate::core::UiEventContext::new(
         crate::application::ApplicationContext::empty(crate::memory::test_memory_options()),
         crate::application::WindowId::new("test"),
     );
@@ -644,7 +644,7 @@ fn text_input_default_action_can_be_prevented_before_control_mutation() {
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
         .interaction(InteractionRole::Custom("input"))
-        .on_event(super::super::UiEventKind::Input, |context, _| {
+        .on_event(crate::core::UiEventKind::Input, |context, _| {
             context.prevent_default();
         }),
     );
@@ -675,7 +675,7 @@ fn change_event_is_emitted_only_when_the_default_action_changes_state() {
             UiNodeKind::Custom("test-input"),
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
-        .on_event(super::super::UiEventKind::Change, |_, _| {}),
+        .on_event(crate::core::UiEventKind::Change, |_, _| {}),
     );
     let mut runtime = UiRuntime::new();
     runtime
@@ -705,10 +705,10 @@ fn ime_lifecycle_and_commit_use_the_generic_focused_event_route() {
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
         .interaction(InteractionRole::Custom("input"))
-        .on_event(super::super::UiEventKind::CompositionStart, |_, _| {})
-        .on_event(super::super::UiEventKind::CompositionUpdate, |_, _| {})
-        .on_event(super::super::UiEventKind::CompositionEnd, |_, _| {})
-        .on_event(super::super::UiEventKind::Input, |_, _| {}),
+        .on_event(crate::core::UiEventKind::CompositionStart, |_, _| {})
+        .on_event(crate::core::UiEventKind::CompositionUpdate, |_, _| {})
+        .on_event(crate::core::UiEventKind::CompositionEnd, |_, _| {})
+        .on_event(crate::core::UiEventKind::Input, |_, _| {}),
     );
     let mut runtime = UiRuntime::new();
     runtime.handle_input(
@@ -733,13 +733,13 @@ fn ime_lifecycle_and_commit_use_the_generic_focused_event_route() {
     assert_eq!(start.handler_events[0].target, input_id);
     assert!(matches!(
         update.handler_events[0].payload,
-        super::super::UiEventPayload::CompositionUpdate { ref text, ref cursor }
+        crate::core::UiEventPayload::CompositionUpdate { ref text, ref cursor }
             if text == "nǐ" && cursor == &Some(1..1)
     ));
     assert_eq!(commit.default_actions.len(), 1);
     assert!(matches!(
         commit.handler_events[0].payload,
-        super::super::UiEventPayload::Input { ref text } if text == "中文"
+        crate::core::UiEventPayload::Input { ref text } if text == "中文"
     ));
     assert_eq!(
         commit.default_actions[0].action.payload_value(),

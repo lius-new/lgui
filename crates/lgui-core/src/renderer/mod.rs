@@ -1,13 +1,8 @@
 //! Internal renderer cache controls and shared rendering support.
 
 mod cache;
-#[cfg(any(
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    feature = "renderer-skia"
-))]
+#[cfg(feature = "raster-effects")]
 pub(crate) mod shadow;
 
-#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
 pub(crate) use cache::install_render_cache;
 pub use cache::*;

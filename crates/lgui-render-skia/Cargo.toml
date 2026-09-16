@@ -21,7 +21,7 @@ renderer-skia-metal = []
 [dependencies]
 ash = { version = "0.38", optional = true, default-features = false, features = ["loaded", "std"] }
 lgui-assets = { version = "0.2.0", path = "../lgui-assets", default-features = false, features = ["renderer-skia", "svg"] }
-lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["backend-winit", "renderer-skia"] }
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["raster-effects"] }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
 skia-safe = { version = "=0.99.0", default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout"] }
 unicode-bidi = "0.3"

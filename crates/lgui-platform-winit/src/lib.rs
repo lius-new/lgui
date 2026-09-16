@@ -32,7 +32,6 @@ use winit::{
 use lgui_core::{
     application::{
         AppView, ApplicationBackend, ApplicationContext, ApplicationHandle, ApplicationTask,
-        GraphicsPreference,
     },
     core::{
         dispatch_runtime_output, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState,
@@ -53,6 +52,7 @@ use lgui_diagnostics::{
 use lgui_services::{dispatch_tray_action, TrayRegistration};
 
 use lgui_core::backend::{application_root_view, WindowCommand};
+pub use lgui_render_api::GraphicsPreference;
 use lgui_render_api::{FrameInfo, FrameReason, MemoryPressure};
 #[cfg(feature = "renderer-skia")]
 use lgui_render_skia::SkiaSoftwareSurface;

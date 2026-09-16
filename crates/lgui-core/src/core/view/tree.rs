@@ -64,7 +64,6 @@ pub struct HostTree {
 
 impl HostTree {
     /// Returns a conservative estimate of retained tree storage, including shared node payloads.
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub fn estimated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(
@@ -90,11 +89,8 @@ pub(crate) struct ProjectionChanges {
     pub(crate) focus_sync: bool,
 }
 
-#[path = "tree/events.rs"]
 mod events;
-#[path = "tree/mutation.rs"]
 mod mutation;
-#[path = "tree/scene.rs"]
 mod scene;
 
 #[cfg(test)]

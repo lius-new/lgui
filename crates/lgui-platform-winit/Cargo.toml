@@ -19,16 +19,16 @@ clipboard = ["lgui-services/clipboard"]
 diagnostics = ["dep:lgui-diagnostics"]
 dialogs = ["lgui-services/dialogs"]
 images = ["dep:lgui-assets", "lgui-assets/backend-winit"]
-multi-window = ["lgui-core/multi-window"]
+multi-window = []
 notifications = ["lgui-services/notifications"]
 open-url = ["lgui-services/open-url"]
 persistent-cache = ["lgui-core/persistent-cache", "lgui-assets?/persistent-cache"]
 store = ["dep:lgui-store"]
 notifications-win32 = ["notifications", "dep:lgui-platform-win32", "lgui-platform-win32/backend-winit", "lgui-platform-win32/notifications-win32"]
-renderer-skia = ["dep:lgui-render-skia", "dep:skia-safe", "images", "lgui-core/renderer-skia"]
-renderer-skia-gl = ["renderer-skia", "dep:glutin", "lgui-core/renderer-skia-gl", "lgui-render-skia/renderer-skia-gl"]
-renderer-skia-vulkan = ["renderer-skia", "dep:ash", "dep:ash-window", "lgui-core/renderer-skia-vulkan", "lgui-render-skia/renderer-skia-vulkan"]
-renderer-skia-metal = ["renderer-skia", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-core-foundation", "dep:objc2-metal", "dep:objc2-quartz-core", "lgui-core/renderer-skia-metal", "lgui-render-skia/renderer-skia-metal"]
+renderer-skia = ["dep:lgui-render-skia", "dep:skia-safe", "images"]
+renderer-skia-gl = ["renderer-skia", "dep:glutin", "lgui-render-skia/renderer-skia-gl"]
+renderer-skia-vulkan = ["renderer-skia", "dep:ash", "dep:ash-window", "lgui-render-skia/renderer-skia-vulkan"]
+renderer-skia-metal = ["renderer-skia", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-core-foundation", "dep:objc2-metal", "dep:objc2-quartz-core", "lgui-render-skia/renderer-skia-metal"]
 svg = ["images", "lgui-assets/svg"]
 tray-win32 = ["dep:lgui-platform-win32", "lgui-services/tray", "lgui-platform-win32/backend-winit", "lgui-platform-win32/tray-win32"]
 
@@ -39,7 +39,7 @@ ash = { version = "0.38", optional = true, default-features = false, features = 
 ash-window = { version = "0.13", optional = true }
 glutin = { version = "0.32", optional = true }
 lgui-assets = { version = "0.2.0", path = "../lgui-assets", optional = true, default-features = false }
-lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["backend-winit"] }
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
 lgui-diagnostics = { version = "0.2.0", path = "../lgui-diagnostics", optional = true }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }
 lgui-render-skia = { version = "0.2.0", path = "../lgui-render-skia", optional = true, default-features = false }

@@ -1,24 +1,20 @@
 use std::{any::type_name, borrow::Cow, cell::Cell, future::Future, panic::Location, sync::Arc};
 
-use super::reactor::RenderCx;
 use super::{
     async_handler, AnimProperty, AnimationBinding, Color, ComponentId, CompositingLayerAnimation,
     CompositingLayerSpec, EventPolicy, InteractionRole, KeyboardEvent, LayoutSpec, OverlayStyle,
-    PathStyle, PointerData, RenderPhase, Semantics, Size, TextStyle, UiAsyncContext, UiElement,
-    UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId, UiInputEventBinding,
-    UiInputEventHandler, UiPath, UiRect, UiRenderContext, UiScope, VisualStyle, WheelDelta,
+    PathStyle, PointerData, RenderCx, RenderPhase, Semantics, Size, TextStyle, UiAsyncContext,
+    UiElement, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload, UiId,
+    UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, UiRenderContext, UiScope,
+    VisualStyle, WheelDelta,
 };
 
-#[path = "declarative/content.rs"]
 mod content;
-#[path = "declarative/element.rs"]
-mod declarative_element;
-#[path = "declarative/events.rs"]
+mod element;
 mod events;
-#[path = "declarative/primitives.rs"]
 mod primitives;
 
-pub use declarative_element::{
+pub use element::{
     DeclarativeView, Element, ElementKey, ElementRenderCx, Fragment, IntoElementContent,
 };
 pub use events::IntoClickHandler;

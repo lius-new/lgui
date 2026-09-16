@@ -137,12 +137,22 @@ assets, diagnostics, and desktop services depend on core as sibling crates and a
 `lgui::host`, and `lgui::frame` paths remain compatibility entry points. Core keeps the
 established flat `lgui::core::*` exports while its implementation is grouped by responsibility.
 
+The `core` implementation is divided into real Rust modules: `foundation` owns geometry, IDs, and
+styles; `component` owns component identity, hooks, effects, and update execution; `input` owns the
+portable event model and dispatch; `layout` owns layout and dirtiness; `scene` owns backend-neutral
+primitives and compilation; and `view` owns declarative elements and the retained host projection.
+Concrete backend selection and probing belong to the `lgui` facade, while renderer preference is a
+portable contract in `lgui-render-api`. `lgui-core` exposes no GDI, Direct2D, Skia, Win32, or Winit
+feature.
+
 Large implementations are split one level further:
 
 ```text
 lgui-core/src/core/component/runtime/                    # state, input, action, animation, focus
+lgui-core/src/core/component/component_tree/             # identity, lifecycle, output memory, storage
+lgui-core/src/core/input/event/                          # dispatch and animation event responses
 lgui-core/src/core/view/declarative/                     # element, content, events, primitives
-lgui-core/src/core/scene/render/                         # compiler, transform, scene, damage
+lgui-core/src/core/scene/render/                         # compiler, projection, signatures, cache, damage
 lgui-core/src/runtime/host/                              # retained model and commit pipeline
 lgui-router/src/router/declarative/                      # routes and retained outlets
 lgui-render-skia/src/backend/                            # text, cache, software, painter

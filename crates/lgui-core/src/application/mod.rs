@@ -5,7 +5,6 @@ mod builder;
 mod context;
 mod error;
 mod handle;
-mod renderer_selection;
 mod scope;
 mod view;
 
@@ -19,13 +18,6 @@ pub use context::ApplicationContext;
 pub(crate) use error::RenderErrorRegistration;
 pub use error::{RenderError, RenderErrorStage};
 pub use handle::{ApplicationHandle, ApplicationTask};
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
-pub use renderer_selection::RendererKind;
-pub use renderer_selection::{GraphicsPreference, RendererProbeError};
 pub(crate) use scope::{current_application, ApplicationScopeFuture};
 pub(crate) use view::application_root_view;
 pub use view::AppView;

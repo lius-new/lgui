@@ -15,40 +15,11 @@ categories = ["gui", "rendering"]
 [features]
 default = []
 async = []
-backend-winit = [
-  "renderer-skia",
-]
-accessibility = ["backend-winit"]
-advanced-rendering = [
-  "renderer-d2d",
-  "renderer-gdi",
-]
-renderer-skia = []
-renderer-skia-gl = [
-  "renderer-skia",
-  "backend-winit",
-]
-renderer-skia-vulkan = [
-  "renderer-skia",
-  "backend-winit",
-]
-renderer-skia-vulkan-windows = [
-  "renderer-skia-vulkan",
-]
-renderer-skia-vulkan-linux = [
-  "renderer-skia-vulkan",
-]
-renderer-skia-metal = [
-  "renderer-skia",
-  "backend-winit",
-]
-backend-win32 = []
+accessibility = []
 diagnostics-serde = ["dep:serde"]
 diagnostics-timing = []
 persistent-cache = ["dep:sha2"]
-multi-window = []
-renderer-gdi = ["backend-win32", "dep:image"]
-renderer-d2d = ["backend-win32", "dep:image"]
+raster-effects = ["dep:image"]
 tokio = ["async", "dep:tokio"]
 test-support = []
 

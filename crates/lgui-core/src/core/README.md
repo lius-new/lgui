@@ -1,7 +1,7 @@
 # UI Core Runtime
 
 `core` is the backend-independent retained UI runtime. The library boundary and public-crate
-constraints live in [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md).
+constraints live in [`../../../../ARCHITECTURE.md`](../../../../ARCHITECTURE.md).
 
 ## Public component model
 
@@ -58,6 +58,19 @@ Core contains no Win32, GDI, Direct2D, page, application route, settings, or dom
 Platform code translates native messages to `InputEvent`; applications provide theme data,
 pure Store types, and route values. Control-specific retained state (text editing, selection, scroll,
 slider, rich editor) remains separate from component Hook State.
+
+The implementation modules follow their ownership boundaries:
+
+- `foundation`: geometry, IDs, and backend-neutral styles.
+- `component`: component identity, hooks, contexts, effects, and update execution.
+- `input`: input vocabulary, dispatch, handler contracts, and interaction state.
+- `layout`: layout computation and dirty tracking.
+- `scene`: scene primitives, compilation, signatures, transforms, and retained raster snapshots.
+- `view`: declarative elements, host nodes, projection, and hit testing.
+
+`runtime` sits outside `core` and owns the per-window session, retained host commit pipeline, and
+frame invalidation. Renderer preference is defined by `lgui-render-api`; concrete renderer probing
+and selection is composed by the `lgui` facade.
 
 ## Identity rules
 

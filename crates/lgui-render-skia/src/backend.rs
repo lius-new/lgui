@@ -6,16 +6,13 @@ use std::{
 };
 
 use lgui_assets::backend::render_resources;
-use lgui_core::{
-    application::GraphicsPreference,
-    core::{
-        BackdropBlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
-        PhysicalRect, RasterCachePolicy, Scene, ScenePrimitive, StaticLayerBackground,
-        StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource, UiPath, UiPathCommand,
-        UiRect, VisualStyle,
-    },
+use lgui_core::core::{
+    BackdropBlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
+    PhysicalRect, RasterCachePolicy, Scene, ScenePrimitive, StaticLayerBackground,
+    StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource, UiPath, UiPathCommand, UiRect,
+    VisualStyle,
 };
-use lgui_render_api::{FrameInfo, MemoryPressure};
+use lgui_render_api::{FrameInfo, GraphicsPreference, MemoryPressure};
 use skia_safe::textlayout::{
     FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, RectHeightStyle, RectWidthStyle,
     TextAlign as SkTextAlign, TextDirection as SkTextDirection, TextStyle as SkTextStyle,

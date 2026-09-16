@@ -3,7 +3,6 @@
 //! This module is public so separately published backend crates can integrate
 //! with the core runtime. Applications should use the higher-level APIs.
 
-#[cfg(feature = "renderer-skia")]
 use std::sync::Arc;
 
 use crate::{
@@ -15,7 +14,6 @@ use crate::{
     window::{WindowId, WindowManager},
 };
 
-#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 use crate::{memory::CacheUsage, session::UiSession};
 
 pub use crate::window::WindowCommand;
@@ -75,13 +73,11 @@ pub fn install_font_environment(
     }
 }
 
-#[cfg(feature = "renderer-skia")]
 pub struct TextEnvironment {
     _fonts: FontEnvironment,
     _assets: crate::text::FontAssetsGuard,
 }
 
-#[cfg(feature = "renderer-skia")]
 pub fn install_text_environment(
     context: &ApplicationContext,
     system: TextSystemHandle,
@@ -95,12 +91,10 @@ pub fn install_text_environment(
     }
 }
 
-#[cfg(feature = "renderer-skia")]
 pub fn font_families() -> &'static [&'static str] {
     crate::text::font_families()
 }
 
-#[cfg(feature = "renderer-skia")]
 pub fn font_assets() -> Arc<Vec<crate::text::FontAsset>> {
     crate::text::font_assets()
 }
@@ -127,23 +121,17 @@ pub fn memory_finish_frame_budget_check(memory: &crate::memory::MemoryGovernor) 
     memory.finish_frame_budget_check();
 }
 
-#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
 pub struct RenderCacheEnvironment {
     _guard: crate::renderer::RenderCacheGuard,
 }
 
-#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
 pub fn install_render_cache(cache: crate::renderer::RenderCacheHandle) -> RenderCacheEnvironment {
     RenderCacheEnvironment {
         _guard: crate::renderer::install_render_cache(cache),
     }
 }
 
-#[cfg(any(
-    feature = "renderer-gdi",
-    feature = "renderer-d2d",
-    feature = "renderer-skia"
-))]
+#[cfg(feature = "raster-effects")]
 pub fn composite_shadow(
     pixels: &mut [u8],
     width: usize,
@@ -153,22 +141,18 @@ pub fn composite_shadow(
     crate::renderer::shadow::composite_shadow(pixels, width, height, style);
 }
 
-#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_suspend_rendering(session: &mut UiSession) {
     session.suspend_rendering();
 }
 
-#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_trim_component_outputs(session: &mut UiSession, target_bytes: usize) -> usize {
     session.trim_component_outputs(target_bytes)
 }
 
-#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_trim_host_scene(session: &mut UiSession) -> usize {
     session.trim_host_scene()
 }
 
-#[cfg(any(feature = "backend-winit", feature = "backend-win32"))]
 pub fn session_memory_usage(session: &UiSession) -> (CacheUsage, CacheUsage) {
     session.memory_usage()
 }

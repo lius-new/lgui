@@ -1,4 +1,4 @@
-use super::{primitive::*, scene::*, transform::*, *};
+use super::{primitive::*, scene::*, scroll_cache::*, signature::*, transform::*, *};
 
 pub fn compile_scene(tree: &HostTree) -> Scene {
     let mut list = Scene::new();

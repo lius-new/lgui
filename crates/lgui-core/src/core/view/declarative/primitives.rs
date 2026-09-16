@@ -1,4 +1,4 @@
-use super::declarative_element::{location_hash, stable_hash};
+use super::element::{location_hash, stable_hash};
 use super::*;
 
 pub fn group(rect: UiRect) -> Element {

@@ -1,4 +1,4 @@
-use super::{transform::command_signature_part, *};
+use super::{signature::command_signature_part, *};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RenderPhase {
@@ -229,13 +229,6 @@ impl Hash for ScrollRasterSpec {
         self.max_prefetch_tiles_per_frame.hash(state);
         self.max_prefetch_ms_per_frame.hash(state);
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ImageFit {
-    Contain,
-    Cover,
-    Fill,
 }
 
 impl ScenePrimitive {

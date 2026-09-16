@@ -17,12 +17,10 @@ default = []
 gdi = [
   "dep:lgui-assets",
   "dep:lgui-platform-win32",
-  "lgui-core/renderer-gdi",
 ]
 d2d = [
   "dep:lgui-assets",
   "dep:lgui-platform-win32",
-  "lgui-core/renderer-d2d",
 ]
 
 [dependencies]

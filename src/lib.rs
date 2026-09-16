@@ -1,5 +1,11 @@
 #![deny(unsafe_code)]
 
+#[cfg(any(
+    all(feature = "renderer-gdi", target_os = "windows"),
+    all(feature = "renderer-d2d", target_os = "windows"),
+    feature = "renderer-skia"
+))]
+mod renderer_selection;
 #[cfg(all(target_os = "windows", feature = "backend-win32"))]
 mod win32;
 
@@ -117,6 +123,12 @@ pub mod renderer {
 pub mod prelude {
     #[cfg(all(target_os = "windows", feature = "backend-win32"))]
     pub use crate::Win32Application;
+    #[cfg(any(
+        all(feature = "renderer-gdi", target_os = "windows"),
+        all(feature = "renderer-d2d", target_os = "windows"),
+        feature = "renderer-skia"
+    ))]
+    pub use crate::{RendererKind, RendererProbeError};
     #[cfg(feature = "images")]
     pub use lgui_assets::{
         AssetBytes, AssetError, AssetResolver, CustomPaintProvider, ImageCacheHandle, ImageData,
@@ -135,8 +147,8 @@ pub mod prelude {
     #[cfg(all(target_os = "windows", feature = "notifications-win32"))]
     pub use lgui_platform_win32::Win32NotificationApplicationExt;
     pub use lgui_render_api::{
-        ClipRegion, FrameInfo, FrameReason, MemoryPressure, RenderStats, RendererCapabilities,
-        SceneRenderer,
+        ClipRegion, FrameInfo, FrameReason, GraphicsPreference, MemoryPressure, RenderStats,
+        RendererCapabilities, SceneRenderer,
     };
     #[cfg(feature = "router")]
     pub use lgui_router::*;
@@ -164,9 +176,15 @@ pub mod prelude {
 }
 
 pub use lgui_render_api::{
-    ClipRegion, FrameInfo, FrameReason, MemoryPressure, RenderStats, RendererCapabilities,
-    SceneRenderer,
+    ClipRegion, FrameInfo, FrameReason, GraphicsPreference, MemoryPressure, RenderStats,
+    RendererCapabilities, SceneRenderer,
 };
+#[cfg(any(
+    all(feature = "renderer-gdi", target_os = "windows"),
+    all(feature = "renderer-d2d", target_os = "windows"),
+    feature = "renderer-skia"
+))]
+pub use renderer_selection::{RendererKind, RendererProbeError};
 
 #[cfg(all(target_os = "windows", feature = "system-diagnostics"))]
 pub fn system_usage_snapshot() -> lgui_diagnostics::SystemUsageSnapshot {

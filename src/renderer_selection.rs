@@ -1,8 +1,5 @@
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
+use lgui_render_api::GraphicsPreference;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RendererKind {
     #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
@@ -13,11 +10,6 @@ pub enum RendererKind {
     Skia(GraphicsPreference),
 }
 
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
 impl Default for RendererKind {
     fn default() -> Self {
         #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
@@ -43,28 +35,6 @@ impl Default for RendererKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum GraphicsPreference {
-    #[default]
-    Auto,
-    OpenGl,
-    Vulkan,
-    Metal,
-    Software,
-}
-
-impl GraphicsPreference {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::OpenGl => "opengl",
-            Self::Vulkan => "vulkan",
-            Self::Metal => "metal",
-            Self::Software => "software",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RendererProbeError(String);
 
@@ -76,11 +46,6 @@ impl std::fmt::Display for RendererProbeError {
 
 impl std::error::Error for RendererProbeError {}
 
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
 impl RendererKind {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -98,9 +63,12 @@ impl RendererKind {
             #[cfg(all(feature = "renderer-gdi", target_os = "windows"))]
             Self::Gdi => Ok(()),
             #[cfg(all(feature = "renderer-d2d", target_os = "windows"))]
-            Self::D2d => Ok(()),
+            Self::D2d => lgui_render_d2d::probe_d2d_support()
+                .map_err(|error| RendererProbeError(error.to_string())),
             #[cfg(feature = "renderer-skia")]
-            Self::Skia(_) => Ok(()),
+            Self::Skia(preference) => {
+                lgui_render_skia::probe_skia_support(preference).map_err(RendererProbeError)
+            }
         }
     }
 }

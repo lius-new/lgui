@@ -162,7 +162,6 @@ impl UiRuntime {
         self.hook_states.clear();
     }
 
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn suspend_rendering(&mut self) {
         self.clear_interaction_state();
         self.dirty = DirtyTracker::default();

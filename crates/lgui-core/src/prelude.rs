@@ -1,13 +1,7 @@
 pub use crate::application::{
-    AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle,
-    GraphicsPreference, RenderError, RenderErrorStage,
+    AppView, Application, ApplicationBackend, ApplicationContext, ApplicationHandle, RenderError,
+    RenderErrorStage,
 };
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
-pub use crate::application::{RendererKind, RendererProbeError};
 pub use crate::command::{
     invoke, Command, CommandContext, CommandFuture, CommandHandle, CommandHandler,
 };

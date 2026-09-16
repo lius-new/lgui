@@ -18,15 +18,14 @@ advanced-rendering = [
   "dep:lgui-render-win32-raster",
   "lgui-render-win32-raster/gdi",
   "lgui-assets/svg",
-  "lgui-core/advanced-rendering",
   "lgui-platform-win32/svg",
 ]
 diagnostics = ["dep:lgui-diagnostics", "lgui-platform-win32/diagnostics"]
-multi-window = ["lgui-core/multi-window", "lgui-platform-win32/multi-window"]
+multi-window = ["lgui-platform-win32/multi-window"]
 
 [dependencies]
 lgui-assets = { version = "0.2.0", path = "../lgui-assets", default-features = false, features = ["images"] }
-lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["renderer-gdi"] }
+lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["raster-effects"] }
 lgui-diagnostics = { version = "0.2.0", path = "../lgui-diagnostics", optional = true }
 lgui-platform-win32 = { version = "0.2.0", path = "../lgui-platform-win32", default-features = false, features = ["backend-win32", "images-win32"] }
 lgui-render-api = { version = "0.2.0", path = "../lgui-render-api" }

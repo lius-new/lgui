@@ -66,7 +66,7 @@ fn retained_layout_reuses_results_when_only_paint_content_changes() {
     second.push(
         UiNode::new(id, UiNodeKind::Text, UiRect::new(0.0, 0.0, 20.0, 10.0)).text(
             "changed",
-            super::super::TextStyle::new(super::super::Color::WHITE, 12.0, 400),
+            crate::core::TextStyle::new(crate::core::Color::WHITE, 12.0, 400),
         ),
     );
     let metrics = runtime.update(&mut second);

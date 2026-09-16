@@ -113,7 +113,6 @@ impl<B, M> Application<B, M> {
         self
     }
 
-    #[cfg(feature = "renderer-skia")]
     pub fn font_assets(self, assets: Vec<crate::text::FontAsset>) -> Self {
         self.resources
             .provide(crate::text::FontAssets(std::sync::Arc::new(assets)));

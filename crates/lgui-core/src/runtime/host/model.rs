@@ -156,7 +156,6 @@ pub struct HostRuntime {
 }
 
 impl HostRuntime {
-    #[cfg(any(test, feature = "backend-winit", feature = "backend-win32"))]
     pub(crate) fn estimated_bytes(&self) -> usize {
         let host_nodes = self
             .slots
