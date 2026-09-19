@@ -61,7 +61,7 @@ snapshots and rebalances the survivors. Zero is a valid domain budget and is for
 
 The Governor does not own cache entries or native handles. Portable caches may trim inline.
 Win32 adapters always post coalesced work through `Win32Dispatcher`; Winit adapters send a user
-event. GDI, D2D, Skia, Component, Host, Scene, and other native or retained objects are therefore
+event. Skia, Component, Host, Scene, and other native or retained objects are therefore
 released on their owning UI thread without extending the caller's input or frame stack. A later
 snapshot observes asynchronously completed native work.
 
@@ -124,10 +124,8 @@ crates/
 |-- lgui-widgets/src/          # theme tokens and reusable controls
 |-- lgui-render-api/src/       # backend-neutral renderer lifecycle
 |-- lgui-render-skia/src/      # portable Skia renderer
-|-- lgui-render-gdi/src/       # native and retained GDI renderer
-|-- lgui-render-d2d/src/       # D2D, D3D11, DXGI, and DirectComposition renderer
 |-- lgui-platform-winit/src/   # event loop, input, windows, Skia surfaces
-`-- lgui-platform-win32/src/   # native host, dispatcher, system adapters, pixel interop
+`-- lgui-platform-win32/src/   # system adapters, SVG icons, pixel interop
 ```
 
 `lgui-core` owns only contracts and runtime capabilities required by every application. Optional
@@ -141,7 +139,7 @@ styles; `component` owns component identity, hooks, effects, and update executio
 portable event model and dispatch; `layout` owns layout and dirtiness; `scene` owns backend-neutral
 primitives and compilation; and `view` owns declarative elements and the retained host projection.
 Concrete backend selection and probing belong to the `lgui` facade, while renderer preference is a
-portable contract in `lgui-render-api`. `lgui-core` exposes no GDI, Direct2D, Skia, Win32, or Winit
+portable contract in `lgui-render-api`. `lgui-core` exposes no Skia, Win32, or Winit
 feature.
 
 Large implementations are split one level further:
@@ -155,11 +153,6 @@ lgui-core/src/core/scene/render/                         # compiler, projection,
 lgui-core/src/runtime/host/                              # retained model and commit pipeline
 lgui-router/src/router/declarative/                      # routes and retained outlets
 lgui-render-skia/src/backend/                            # text, cache, software, painter
-lgui-render-d2d/src/backend/                             # D2D resources and drawing
-lgui-render-gdi/src/backend/                             # retained GDI renderer
-lgui-render-gdi/src/static_layer/                        # GDI retained layer rasterization
-lgui-platform-win32/src/render_support/                  # native image, BGRA, blur interop
-lgui-platform-win32/src/application/host/                # native host contract and loop
 lgui-platform-win32/src/services/tray/                   # native tray adapter
 ```
 
@@ -173,12 +166,9 @@ lines of test code.
 
 ## Rendering
 
-GDI, Direct2D, and Skia are peer renderer backends. The GDI and Direct2D factories implement the
-renderer host contract owned by `lgui-platform-win32`; Skia is hosted by the winit surface adapters.
-GDI owns its HDC static-layer rasterization and cache. Direct2D owns its bitmap and static-layer
-resources. The Win32 platform exposes only the native image, BGRA, and blur interoperability shared
-by its renderer integrations. Direct2D owns its D3D11, DXGI, and DirectComposition resources and
-recreates them after resize or presentation failure.
+Skia is the single renderer backend,
+hosted by the winit surface adapters and owning its own text, surface, cache, and bitmap
+resources.
 
 `CompositingLayer` is the backend-neutral retained composition boundary. Its children use
 layer-local coordinates while staying in the normal layout, input, accessibility, and popup
@@ -187,13 +177,8 @@ changes recreate a surface; opacity and transform changes reuse its pixels.
 
 Scene primitive translation is implemented once in `core::scene::render::transform`. Portable
 scene compilation translates nested static-layer commands, while backend rasterization preserves
-the already-local command list through an explicit policy. D2D, GDI static layers, and other
-backend consumers do not maintain private copies of the primitive transform match.
-
-GDI retains live compositing layers in renderer-scoped DIB surfaces. Transparent layers use
-black/white coverage reconstruction to preserve premultiplied alpha. Direct2D retains layers in
-`ID2D1Bitmap1` surfaces. Both redraw only layer-local damage and composite only its intersection
-with window damage.
+the already-local command list through an explicit policy. Backend
+consumers do not maintain private copies of the primitive transform match.
 
 ## Features
 
@@ -202,18 +187,16 @@ SVG stack, or diagnostics provider.
 
 Feature ownership is explicit:
 
-- `backend-win32` enables only the Win32 platform boundary.
-- `renderer-gdi` and `renderer-d2d` require `backend-win32`.
 - `backend-winit` requires `renderer-skia`, because its software fallback and presentation
   path are Skia-based.
 - `renderer-skia` remains portable and does not enable Win32.
 - GL, Vulkan, and Metal features add only their Winit surface adapters and target dependencies.
 - `notifications` and `tray` enable only portable APIs. `notifications-win32` and `tray-win32`
-  add the Windows adapters through `windows-platform`, without forcing the Win32 window backend.
+  add the Windows adapters without forcing a window backend.
 - Accessibility, images, SVG, and diagnostics stay independently gated.
 - `persistent-cache` adds the portable store contract and file-store implementation without
   enabling a renderer or platform backend.
 
-The CI matrix checks portable no-default tests, each Windows backend boundary, standalone Winit,
+The CI matrix checks portable no-default tests, standalone Winit,
 default tests, and all-feature tests. Architecture tests enforce directory ownership, dependency
 direction, real-module assembly, and the feature graph.

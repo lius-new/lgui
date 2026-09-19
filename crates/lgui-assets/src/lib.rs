@@ -21,7 +21,7 @@ mod resources;
 #[cfg(feature = "images")]
 use lgui_core::{core, memory};
 
-#[cfg(any(test, feature = "images-win32"))]
+#[cfg(test)]
 #[doc(hidden)]
 pub use cache::{load_url_image, prepare_image_bytes, validate_encoded_bytes};
 #[cfg(feature = "images")]

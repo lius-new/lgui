@@ -211,11 +211,11 @@ fn unbounded_transient_policy_does_not_serialize_maximum_sized_reservations() {
 #[test]
 fn domain_budgets_are_supplied_by_the_application_policy() {
     let mut options = test_memory_options();
-    options.domains.gdi_bytes = 40;
-    options.domains.d2d_bytes = 24;
+    options.domains.skia_bytes = 40;
+    options.domains.svg_bytes = 24;
     let governor = MemoryGovernor::new(options);
-    let gdi_budget = Arc::new(AtomicUsize::new(0));
-    let d2d_budget = Arc::new(AtomicUsize::new(0));
+    let skia_budget = Arc::new(AtomicUsize::new(0));
+    let svg_budget = Arc::new(AtomicUsize::new(0));
     let register = |domain, budget: Arc<AtomicUsize>| {
         governor.register(DomainRegistration::new(
             domain,
@@ -230,17 +230,17 @@ fn domain_budgets_are_supplied_by_the_application_policy() {
             ),
         ))
     };
-    let gdi = register(CacheDomain::Gdi, Arc::clone(&gdi_budget));
-    let second_gdi_budget = Arc::new(AtomicUsize::new(0));
-    let second_gdi = register(CacheDomain::Gdi, Arc::clone(&second_gdi_budget));
-    let _d2d = register(CacheDomain::D2d, Arc::clone(&d2d_budget));
+    let skia = register(CacheDomain::Skia, Arc::clone(&skia_budget));
+    let second_skia_budget = Arc::new(AtomicUsize::new(0));
+    let second_skia = register(CacheDomain::Skia, Arc::clone(&second_skia_budget));
+    let _svg = register(CacheDomain::Svg, Arc::clone(&svg_budget));
 
-    assert_eq!(gdi_budget.load(Ordering::Acquire), 20);
-    assert_eq!(second_gdi_budget.load(Ordering::Acquire), 20);
-    assert_eq!(d2d_budget.load(Ordering::Acquire), 24);
-    drop(second_gdi);
-    assert_eq!(gdi_budget.load(Ordering::Acquire), 40);
-    drop(gdi);
+    assert_eq!(skia_budget.load(Ordering::Acquire), 20);
+    assert_eq!(second_skia_budget.load(Ordering::Acquire), 20);
+    assert_eq!(svg_budget.load(Ordering::Acquire), 24);
+    drop(second_skia);
+    assert_eq!(skia_budget.load(Ordering::Acquire), 40);
+    drop(skia);
 }
 
 #[test]
@@ -438,7 +438,7 @@ fn finite_trim_targets_follow_active_application_domain_budgets() {
     options.budget.cache_soft_bytes = 100;
     options.budget.cache_hard_bytes = 120;
     options.domains.text_bytes = 60;
-    options.domains.gdi_bytes = 40;
+    options.domains.skia_bytes = 40;
     let governor = MemoryGovernor::new(options);
     let observed = Arc::new(Mutex::new(Vec::new()));
     let register = |domain| {
@@ -457,7 +457,7 @@ fn finite_trim_targets_follow_active_application_domain_budgets() {
         ))
     };
     let _text = register(CacheDomain::Text);
-    let _gdi = register(CacheDomain::Gdi);
+    let _skia = register(CacheDomain::Skia);
 
     governor.trim(TrimReason::Explicit, CacheScope::Memory, 50);
     let mut targets = observed.lock().unwrap().clone();
@@ -465,7 +465,7 @@ fn finite_trim_targets_follow_active_application_domain_budgets() {
 
     assert_eq!(
         targets,
-        vec![(CacheDomain::Text, 30), (CacheDomain::Gdi, 20)]
+        vec![(CacheDomain::Text, 30), (CacheDomain::Skia, 20)]
     );
 }
 
@@ -518,7 +518,7 @@ fn native_trim_drops_resources_on_the_adapter_owner_thread() {
     let trim_usage = Arc::clone(&usage);
     let trim_tx = command_tx.clone();
     let _registration = governor.register(DomainRegistration::new(
-        CacheDomain::Gdi,
+        CacheDomain::Skia,
         governor.next_instance_id(),
         "owner-thread-native",
         CacheAdapter::new(

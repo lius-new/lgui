@@ -42,7 +42,7 @@ default prevention, async spawning, Store/Router access, and the current Window 
   Host subtree without visiting descendants.
 - `LayoutRuntime` consumes projection changes and lays out only affected boundaries.
 - `HostRuntime` reconciles generated Host mutations, retained Scene nodes, and commit-driven damage.
-- GDI and Direct2D encode the same retained `Scene` owned by a window-level `UiSession`.
+- Skia encodes the same retained `Scene` owned by a window-level `UiSession`.
 
 The normal update chain is:
 
@@ -54,7 +54,7 @@ generic input -> Element handler -> queued update -> dirty component execution
 
 ## Dependency boundary
 
-Core contains no Win32, GDI, Direct2D, page, application route, settings, or domain-store types.
+Core contains no Win32, Skia, page, application route, settings, or domain-store types.
 Platform code translates native messages to `InputEvent`; applications provide theme data,
 pure Store types, and route values. Control-specific retained state (text editing, selection, scroll,
 slider, rich editor) remains separate from component Hook State.

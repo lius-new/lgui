@@ -58,8 +58,6 @@ pub const fn test_memory_options() -> MemoryOptions {
             text_bytes: 8 * MIB,
             static_layer_bytes: 8 * MIB,
             scroll_raster_bytes: 4 * MIB,
-            gdi_bytes: 16 * MIB,
-            d2d_bytes: 16 * MIB,
             skia_bytes: 16 * MIB,
             component_output_bytes: 4 * MIB,
             host_scene_bytes: 4 * MIB,

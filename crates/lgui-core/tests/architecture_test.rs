@@ -50,11 +50,6 @@ fn source_tree_expresses_subsystem_boundaries() {
         "crates/lgui-store/src/store",
         "crates/lgui-widgets/src/widgets",
         "crates/lgui-platform-winit/src/surface",
-        "crates/lgui-platform-win32/src/application/host",
-        "crates/lgui-platform-win32/src/window",
-        "crates/lgui-render-gdi/src/backend",
-        "crates/lgui-render-d2d/src/backend",
-        "crates/lgui-render-gdi/src/static_layer",
         "crates/lgui-platform-win32/src/assets",
         "crates/lgui-platform-win32/src/services",
     ] {
@@ -162,12 +157,6 @@ fn source_tree_expresses_subsystem_boundaries() {
         "crates/lgui-platform-winit/src/window.rs",
         "crates/lgui-platform-winit/src/renderer.rs",
         "crates/lgui-platform-winit/src/input.rs",
-        "crates/lgui-render-gdi/src/static_layer/draw.rs",
-        "crates/lgui-render-gdi/src/static_layer/raster.rs",
-        "crates/lgui-render-gdi/src/static_layer/scroll.rs",
-        "crates/lgui-platform-win32/src/render_support/blur.rs",
-        "crates/lgui-platform-win32/src/render_support/image.rs",
-        "crates/lgui-platform-win32/src/render_support/trace.rs",
         "crates/lgui-platform-win32/src/services/notification.rs",
         "crates/lgui-platform-win32/src/services/tray/host.rs",
         "crates/lgui-platform-win32/src/services/tray/icon.rs",
@@ -185,14 +174,6 @@ fn source_tree_expresses_subsystem_boundaries() {
             .join("crates/lgui-platform-win32/src/renderer")
             .exists(),
         "Win32 platform crate must not own renderer implementations"
-    );
-    assert!(
-        !workspace.join("crates/lgui-render-win32").exists(),
-        "GDI and Direct2D must remain independently publishable renderer crates"
-    );
-    assert!(
-        !workspace.join("crates/lgui-render-win32-raster").exists(),
-        "Win32 raster support must remain assigned to its owning platform and renderer modules"
     );
 }
 
@@ -225,9 +206,6 @@ fn source_tree_uses_real_modules_instead_of_textual_includes() {
             "responsibility facade `{facade}` grew beyond 400 lines"
         );
     }
-    let static_layer = workspace_root().join("crates/lgui-render-gdi/src/static_layer.rs");
-    let source = fs::read_to_string(&static_layer).expect("read static-layer facade");
-    assert!(source.lines().count() <= 400);
 }
 
 #[test]
@@ -263,21 +241,6 @@ fn core_manifest_has_no_concrete_backend_or_renderer_features() {
             "lgui-core owns facade renderer selection type `{forbidden}`"
         );
     }
-}
-
-#[test]
-fn win32_async_image_completion_is_wired_to_a_scene_repaint() {
-    let root = workspace_root().join("crates/lgui-platform-win32/src/application/host");
-    let backend = fs::read_to_string(root.join("backend.rs")).expect("read Win32 backend");
-    let message_loop =
-        fs::read_to_string(root.join("message_loop.rs")).expect("read Win32 message loop");
-
-    assert!(backend.contains("register_image_repaint_hwnd(hwnd)"));
-    assert!(message_loop.contains("WM_IMAGE_CACHE_INVALIDATED"));
-    assert!(message_loop.contains("take_image_cache_invalidations()"));
-    assert!(message_loop.contains("image_repaint_bounds"));
-    assert!(message_loop.contains("invalidations_mut().invalidate_rect(*bound)"));
-    assert!(message_loop.contains("clear_image_repaint_hwnd(hwnd)"));
 }
 
 fn workspace_root() -> PathBuf {
@@ -423,73 +386,6 @@ fn tray_host_owns_a_message_loop_outside_the_application_window_thread() {
             "independent tray host lost `{required}`"
         );
     }
-
-    let application = workspace_rust_sources("crates/lgui-platform-win32/src/application")
-        .into_iter()
-        .map(|(_, source)| source)
-        .collect::<String>();
-    for forbidden in ["handle_tray_message", "show_tray_menu", "TRAY_MESSAGE_ID"] {
-        assert!(
-            !application.contains(forbidden),
-            "application UI thread reclaimed tray responsibility through `{forbidden}`"
-        );
-    }
-}
-
-#[test]
-fn background_memory_optimization_is_owned_by_the_win32_window_lifecycle() {
-    let root = workspace_root().join("crates/lgui-platform-win32/src");
-    let background = fs::read_to_string(root.join("window/background.rs"))
-        .expect("read Win32 background memory lifecycle");
-    for required in ["EmptyWorkingSet"] {
-        assert!(
-            background.contains(required),
-            "background lifecycle lost `{required}`"
-        );
-    }
-
-    let application = workspace_rust_sources("crates/lgui-platform-win32/src/application")
-        .into_iter()
-        .map(|(_, source)| source)
-        .collect::<String>();
-    for required in [
-        "suspend_application_if_backgrounded",
-        "session_suspend_rendering(&mut window.session)",
-        "renderer.take()",
-        "render_hidden_window_once",
-        "MemoryEvent::AllWindowsHidden",
-    ] {
-        assert!(
-            application.contains(required),
-            "window lifecycle lost `{required}`"
-        );
-    }
-}
-
-#[test]
-fn image_runtime_is_owned_by_the_win32_application_lifecycle() {
-    let root = workspace_root().join("crates/lgui-platform-win32/src");
-    let gdiplus =
-        fs::read_to_string(root.join("assets/gdiplus.rs")).expect("read Win32 GDI+ lifecycle");
-    for required in [
-        "GdiplusStartup",
-        "GdiplusShutdown",
-        "trim_decoded_image_cache(0)",
-    ] {
-        assert!(
-            gdiplus.contains(required),
-            "GDI+ image lifecycle lost `{required}`"
-        );
-    }
-
-    let application = workspace_rust_sources("crates/lgui-platform-win32/src/application")
-        .into_iter()
-        .map(|(_, source)| source)
-        .collect::<String>();
-    assert!(
-        application.contains("GdiPlusRuntime::start()"),
-        "Win32 application no longer starts its image runtime"
-    );
 }
 
 #[test]
@@ -568,8 +464,6 @@ fn memory_governance_has_no_legacy_cache_bypasses() {
         "Blur",
         "StaticLayer",
         "ScrollRaster",
-        "Gdi",
-        "D2d",
         "Skia",
         "ComponentOutput",
         "HostScene",
@@ -700,12 +594,6 @@ fn portable_window_options_do_not_own_win32_policy() {
             "portable WindowOptions owns `{forbidden}`"
         );
     }
-
-    let win32 = workspace_rust_sources("crates/lgui-platform-win32/src/application")
-        .into_iter()
-        .map(|(_, source)| source)
-        .collect::<String>();
-    assert!(win32.contains("pub struct Win32WindowOptions"));
 }
 
 #[test]
@@ -795,7 +683,7 @@ fn desktop_service_features_separate_contracts_from_windows_adapters() {
     ] {
         let body = feature(adapter);
         assert!(body.contains(&format!("\"{contract}\"")));
-        assert!(body.contains("\"backend-win32\""));
+        assert!(!body.contains("backend-win32"));
         assert!(body.contains("lgui-platform-win32"));
     }
 }
@@ -874,8 +762,6 @@ fn framework_renderers_contain_no_liuguang_business_paint_keys() {
     ];
     let violations = [
         "crates/lgui-render-skia/src",
-        "crates/lgui-render-gdi/src",
-        "crates/lgui-render-d2d/src",
         "crates/lgui-platform-winit/src",
         "crates/lgui-platform-win32/src",
     ]
@@ -928,32 +814,4 @@ fn winit_backend_declares_its_skia_renderer_dependency() {
         feature.contains("dep:lgui-render-skia"),
         "winit renderer feature must express its Skia renderer dependency"
     );
-}
-
-#[test]
-fn win32_remote_images_are_owned_by_the_framework_asset_runtime() {
-    let root = workspace_root().join("crates/lgui-platform-win32/src");
-    let backend = fs::read_to_string(root.join("application/host/backend.rs"))
-        .expect("read Win32 application backend");
-    for required in ["install_remote_image_loader", "http_image_loader"] {
-        assert!(
-            backend.contains(required),
-            "Win32 application lost framework remote image setup `{required}`"
-        );
-    }
-
-    let cache =
-        fs::read_to_string(root.join("assets/image_cache.rs")).expect("read Win32 image cache");
-    for required in ["lgui-image-loader", "lgui_assets::load_url_image"] {
-        assert!(
-            cache.contains(required),
-            "Win32 image cache lost remote loading behavior `{required}`"
-        );
-    }
-    for forbidden in ["liugc", "crate::backend"] {
-        assert!(
-            !cache.contains(forbidden),
-            "framework image cache leaked application dependency `{forbidden}`"
-        );
-    }
 }

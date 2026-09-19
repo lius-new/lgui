@@ -10,8 +10,8 @@ renderer, and frame submission.
 
 The portable core provides typed component State, committed Effects, Commands, Events, Context,
 layout, input, and scene construction. Separate add-on crates provide Store, Router, themes, and
-widgets. Optional features compose those packages with the Win32 or winit platform backend, GDI,
-Direct2D, or Skia rendering, images, SVG, desktop services, diagnostics, and Tokio execution.
+widgets. Optional features compose those packages with the winit platform backend, Skia
+rendering, images, SVG, desktop services, diagnostics, and Tokio execution.
 
 Application resources are ordinary typed data. Asset resolvers and custom paint providers are
 provided to `Application`, while renderers own their native caches and device resources. Business
@@ -51,7 +51,7 @@ Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
     .run(app)?;
 ```
 
-The workspace publishes fifteen packages with one owner for each responsibility:
+The workspace publishes twelve packages with one owner for each responsibility:
 
 | Package | Responsibility |
 | --- | --- |
@@ -65,10 +65,8 @@ The workspace publishes fifteen packages with one owner for each responsibility:
 | `lgui-widgets` | Theme tokens and reusable controls |
 | `lgui-render-api` | Frame, damage, renderer lifecycle, and memory-pressure contracts |
 | `lgui-render-skia` | Skia scene painting, text layout, software surface, and renderer caches |
-| `lgui-render-gdi` | Native GDI renderer and optional retained GDI pipeline |
-| `lgui-render-d2d` | Direct2D, D3D11, DXGI, and DirectComposition renderer |
 | `lgui-platform-winit` | Portable desktop windows, input, event loop, and Skia surfaces |
-| `lgui-platform-win32` | Native Win32 windows, message dispatch, system services, renderer host contract, and native pixel interop |
+| `lgui-platform-win32` | Native Win32 desktop services (tray, notifications, diagnostics), SVG icon rasterization, and native pixel interop |
 
 Applications should normally depend only on `lgui`; the other packages are public so renderer and
 platform integrations can be developed and released independently.

@@ -1,4 +1,4 @@
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 use std::io::Cursor;
 use std::{cell::RefCell, sync::Arc};
 
@@ -17,7 +17,7 @@ use std::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{AssetBytes, ImageSource, ImageStatus};
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 use super::{AssetError, RemoteImageLoaderHandle};
 #[cfg(any(
     test,
@@ -25,7 +25,7 @@ use super::{AssetError, RemoteImageLoaderHandle};
     all(feature = "backend-winit", feature = "images")
 ))]
 use crate::core::ImageCachePolicy;
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 use crate::core::ImageDecodePolicy;
 use crate::core::ImageRequest;
 
@@ -509,7 +509,7 @@ fn finish_async_image(
 }
 
 #[doc(hidden)]
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 pub fn load_url_image(
     loader: &RemoteImageLoaderHandle,
     governor: &crate::memory::MemoryGovernor,
@@ -601,7 +601,7 @@ pub fn load_url_image(
 }
 
 #[doc(hidden)]
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 pub fn validate_encoded_bytes(bytes: AssetBytes, limit: usize) -> Result<AssetBytes, AssetError> {
     if bytes.len() > limit {
         return Err(AssetError::InvalidData(format!(
@@ -613,7 +613,7 @@ pub fn validate_encoded_bytes(bytes: AssetBytes, limit: usize) -> Result<AssetBy
 }
 
 #[doc(hidden)]
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 pub fn prepare_image_bytes(
     bytes: AssetBytes,
     request: &ImageRequest,
@@ -660,7 +660,7 @@ pub fn prepare_image_bytes(
     )
 }
 
-#[cfg(any(test, feature = "backend-winit", feature = "images-win32"))]
+#[cfg(any(test, feature = "backend-winit"))]
 fn validate_decoded_dimensions(
     width: u32,
     height: u32,

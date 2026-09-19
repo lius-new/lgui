@@ -18,12 +18,12 @@ pub(super) fn copy_wide(buffer: &mut [u16], value: &str) {
     }
 }
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 pub(super) fn windows_io_error(error: windows::core::Error) -> std::io::Error {
     std::io::Error::other(error.to_string())
 }
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 pub(super) fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }

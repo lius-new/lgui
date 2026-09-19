@@ -18,8 +18,6 @@ cargo package -p lgui-store --list
 cargo package -p lgui-widgets --list
 cargo package -p lgui-render-skia --list
 cargo package -p lgui-platform-win32 --list
-cargo package -p lgui-render-gdi --list
-cargo package -p lgui-render-d2d --list
 cargo package -p lgui-platform-winit --list
 cargo package -p lgui --list
 ```
@@ -48,18 +46,15 @@ cargo publish -p lgui-render-skia --dry-run
 cargo publish -p lgui-render-skia
 cargo publish -p lgui-platform-win32 --dry-run
 cargo publish -p lgui-platform-win32
-cargo publish -p lgui-render-gdi --dry-run
-cargo publish -p lgui-render-gdi
-cargo publish -p lgui-render-d2d --dry-run
-cargo publish -p lgui-render-d2d
 cargo publish -p lgui-platform-winit --dry-run
 cargo publish -p lgui-platform-winit
 cargo publish -p lgui --dry-run
 cargo publish -p lgui
 ```
 
-The removed 0.1 Skia feature bridge packages and `lgui-render-win32-raster` are not release
-artifacts. Renderer features must resolve through the concrete GDI, Direct2D, and Skia packages.
+The removed 0.1 Skia feature bridge packages, `lgui-render-win32-raster`, `lgui-render-gdi`, and
+`lgui-render-d2d` are not release artifacts. Renderer features must resolve through the concrete
+Skia package.
 
 Tag the commit that was published after all packages have been accepted:
 

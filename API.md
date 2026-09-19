@@ -3,8 +3,8 @@
 ## Application And Windows
 
 `Application::with_backend(backend).memory_options(...).window_options(...).run(root)` creates the
-main window and mounts the root component. Use `Win32Application::default()` for the default native
-Windows/GDI stack or `WinitApplication::new(GraphicsPreference)` for the portable desktop stack.
+main window and mounts the root component. Use `WinitApplication::new(GraphicsPreference)` for the
+desktop stack.
 `.provide(value)` adds Application-scoped typed data. A `RendererKind` resource selects the renderer
 used by a compatible backend. Optional `.tray(...)` and `.notifications(...)` configure the built-in Windows
 adapters when `tray-win32` and `notifications-win32` are enabled. `.notification_service(...)`
@@ -271,7 +271,7 @@ exists. Route lifecycle side effects belong in component Effects.
 
 ## Rendering And Resources
 
-Components produce backend-neutral Elements and Scenes. GDI and Direct2D render the same Scene
+Components produce backend-neutral Elements and Scenes. Skia renders the Scene
 contract. `RenderResources` carries application-provided asset resolution and custom paint data;
 it is supplied through `Application::provide` and scoped to the window render operation. Public
 font, icon, image-cache, render-cache, clipboard, desktop, notification, tray, and diagnostics
@@ -306,23 +306,14 @@ deviation, not a corner radius. Positive spread dilates the alpha mask and negat
 it (a square kernel rounded outward to physical pixels). An alpha of zero disables the effect.
 Layout and hit bounds are unchanged; scene paint bounds and dirty regions include filter padding.
 
-Shadowed subtrees use transparent retained surfaces. GDI, Direct2D and Skia share the same alpha
-filter; Direct2D reads the source surface back only when its content or shadow changes. The
-filtered result is cached and reused when the subtree moves. Changing the source or filter
+Shadowed subtrees use transparent retained surfaces. Skia applies the same alpha
+filter. The filtered result is cached and reused when the subtree moves. Changing the source or filter
 rebuilds that surface, so large, continuously changing shadowed groups can be expensive.
-The basic GDI feature retains its existing primitive limitations; enable `advanced-rendering`
-for paths, images and antialiased alpha rendering.
 
 Do not use a full-window compositing layer only to preserve z-order. A regular `group` already
 keeps retained scene commands in order, and dirty-region rendering replays only commands that
 intersect the changed rectangles. Reserve compositing surfaces for content that must be
 transformed, faded, or rerasterized independently; their backing storage scales with layer area.
-
-Direct2D keeps reusable image, icon, blur, and static-layer bitmaps only while their cache keys are
-reachable from the current Scene and within the backend cache budget. A transparent static layer
-whose only content is a baked image reuses that image bitmap instead of allocating a second
-same-sized render target. Overlay gradients are drawn with native Direct2D brushes, and their
-brush resources are reused while the matching overlay remains on the active Scene.
 
 Use `animated_compositing_layer::<T>(rect, configure)` with an application-owned
 `CompositingLayerAnimation` state when a layer changes every frame. `lgui` advances the state,

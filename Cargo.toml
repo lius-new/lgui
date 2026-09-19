@@ -19,8 +19,6 @@ members = [
   "crates/lgui-diagnostics",
   "crates/lgui-platform-win32",
   "crates/lgui-platform-winit",
-  "crates/lgui-render-d2d",
-  "crates/lgui-render-gdi",
   "crates/lgui-render-api",
   "crates/lgui-render-skia",
   "crates/lgui-router",
@@ -34,42 +32,36 @@ resolver = "2"
 license = "MIT OR Apache-2.0"
 
 [features]
-default = ["renderer-gdi", "router", "store", "widgets"]
+default = ["renderer-skia", "router", "store", "widgets"]
 async = ["lgui-core/async"]
 desktop = ["backend-winit", "clipboard", "open-url", "dialogs", "accessibility"]
 backend-winit = ["dep:lgui-platform-winit"]
 accessibility = ["backend-winit", "lgui-platform-winit/accessibility"]
-advanced-rendering = ["renderer-d2d", "renderer-gdi", "lgui-render-gdi?/advanced-rendering"]
 renderer-skia = ["dep:lgui-render-skia", "images", "svg", "lgui-assets/renderer-skia"]
 renderer-skia-gl = ["renderer-skia", "backend-winit", "lgui-platform-winit/renderer-skia-gl", "lgui-render-skia/renderer-skia-gl"]
 renderer-skia-vulkan = ["renderer-skia", "backend-winit", "lgui-platform-winit/renderer-skia-vulkan", "lgui-render-skia/renderer-skia-vulkan"]
 renderer-skia-vulkan-windows = ["renderer-skia-vulkan"]
 renderer-skia-vulkan-linux = ["renderer-skia-vulkan"]
 renderer-skia-metal = ["renderer-skia", "backend-winit", "lgui-platform-winit/renderer-skia-metal", "lgui-render-skia/renderer-skia-metal"]
-backend-win32 = ["dep:lgui-platform-win32", "lgui-platform-win32/backend-win32"]
 clipboard = ["lgui-services/clipboard", "lgui-platform-winit?/clipboard"]
 dialogs = ["lgui-services/dialogs", "lgui-platform-winit?/dialogs"]
 open-url = ["lgui-services/open-url", "lgui-platform-winit?/open-url"]
-diagnostics = ["dep:lgui-diagnostics", "lgui-platform-winit?/diagnostics", "lgui-platform-win32?/diagnostics", "lgui-render-d2d?/diagnostics", "lgui-render-gdi?/diagnostics"]
+diagnostics = ["dep:lgui-diagnostics", "lgui-platform-winit?/diagnostics", "lgui-platform-win32?/diagnostics"]
 diagnostics-serde = ["diagnostics", "lgui-core/diagnostics-serde", "lgui-diagnostics/serde"]
 diagnostics-timing = ["diagnostics", "lgui-core/diagnostics-timing", "lgui-platform-win32?/diagnostics-timing"]
 persistent-cache = ["lgui-core/persistent-cache", "lgui-assets?/persistent-cache", "lgui-platform-winit?/persistent-cache"]
-system-diagnostics = ["backend-win32", "diagnostics", "lgui-platform-win32/system-diagnostics"]
+system-diagnostics = ["diagnostics", "lgui-platform-win32/system-diagnostics"]
 images = ["dep:lgui-assets", "lgui-assets/images", "lgui-platform-winit?/images", "lgui-platform-win32?/images"]
-images-win32 = ["backend-win32", "images", "lgui-platform-win32/images-win32"]
-multi-window = ["lgui-platform-winit?/multi-window", "lgui-platform-win32?/multi-window", "lgui-render-d2d?/multi-window", "lgui-render-gdi?/multi-window"]
+multi-window = ["lgui-platform-winit?/multi-window"]
 notifications = ["lgui-services/notifications", "lgui-platform-winit?/notifications"]
-notifications-win32 = ["backend-win32", "notifications", "lgui-platform-winit?/notifications-win32", "lgui-platform-win32/notifications-win32"]
+notifications-win32 = ["notifications", "lgui-platform-winit?/notifications-win32", "lgui-platform-win32/notifications-win32"]
 router = ["dep:lgui-router"]
-renderer-gdi = ["backend-win32", "dep:lgui-render-gdi"]
-renderer-d2d = ["backend-win32", "dep:lgui-render-d2d"]
 store = ["dep:lgui-store", "lgui-platform-winit?/store", "lgui-platform-win32?/store"]
 svg = ["images", "lgui-assets/svg", "lgui-platform-winit?/svg", "lgui-platform-win32?/svg"]
 theme = ["dep:lgui-widgets"]
 tokio = ["lgui-core/tokio"]
 tray = ["lgui-services/tray"]
-tray-win32 = ["backend-win32", "tray", "lgui-platform-winit?/tray-win32", "lgui-platform-win32/tray-win32"]
-windows-platform = ["backend-win32"]
+tray-win32 = ["tray", "lgui-platform-winit?/tray-win32", "lgui-platform-win32/tray-win32"]
 widgets = ["theme", "lgui-widgets/widgets"]
 
 [dependencies]
@@ -86,8 +78,6 @@ lgui-widgets = { version = "0.2.0", path = "crates/lgui-widgets", optional = tru
 
 [target.'cfg(windows)'.dependencies]
 lgui-platform-win32 = { version = "0.2.0", path = "crates/lgui-platform-win32", optional = true, default-features = false }
-lgui-render-d2d = { version = "0.2.0", path = "crates/lgui-render-d2d", optional = true, default-features = false }
-lgui-render-gdi = { version = "0.2.0", path = "crates/lgui-render-gdi", optional = true, default-features = false }
 
 [[example]]
 name = "counter"

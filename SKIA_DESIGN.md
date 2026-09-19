@@ -1,8 +1,9 @@
 # LGUI Cross-Platform Skia Design
 
 Status: implementation complete for the portable Scene, unified text system, software renderer,
-winit desktop backend, and OpenGL, Vulkan, and Metal drivers. Native Linux/macOS workflow
-validation and the final GDI/D2D default switch/removal remain acceptance work.
+winit desktop backend, and OpenGL, Vulkan, and Metal drivers. GDI and Direct2D renderers have been
+removed; Skia is now the sole renderer backend. Native Linux/macOS workflow validation remains
+acceptance work.
 
 This document is both the implementation contract and the current status record for making
 `lgui` a desktop-first, cross-platform Rust GUI framework with Skia as its primary renderer.

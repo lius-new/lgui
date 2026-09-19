@@ -1,6 +1,6 @@
 use std::io;
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 use windows::{
     core::HSTRING,
@@ -10,23 +10,23 @@ use windows::{
 
 use lgui_services::{Notification, NotificationService};
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 use lgui_core::application::{Application, ApplicationContext};
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 use lgui_services::{NotificationError, NotificationHandle};
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 pub(crate) struct Win32NotificationRegistration {
     identity: String,
 }
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 pub trait Win32NotificationApplicationExt: Sized {
     /// Configures the built-in Windows toast notification adapter.
     fn notifications(self, identity: impl Into<String>) -> Self;
 }
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 impl<B, M> Win32NotificationApplicationExt for Application<B, M> {
     fn notifications(self, identity: impl Into<String>) -> Self {
         self.provide(Win32NotificationRegistration {
@@ -51,13 +51,13 @@ impl Win32NotificationService {
     }
 }
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 fn initialize_process_identity(app_user_model_id: &str) -> io::Result<()> {
     unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(app_user_model_id)) }
         .map_err(windows_error)
 }
 
-#[cfg(any(feature = "backend-win32", feature = "backend-winit"))]
+#[cfg(feature = "backend-winit")]
 #[doc(hidden)]
 pub fn install_notification_service(context: &ApplicationContext) -> io::Result<()> {
     let Some(registration) = context.try_resource::<Win32NotificationRegistration>() else {

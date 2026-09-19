@@ -1,13 +1,7 @@
 #![deny(unsafe_code)]
 
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
+#[cfg(feature = "renderer-skia")]
 mod renderer_selection;
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-mod win32;
 
 pub use lgui_core::*;
 
@@ -94,40 +88,10 @@ pub use lgui_widgets::widgets::*;
 pub mod renderer {
     pub use lgui_core::renderer::*;
     pub use lgui_render_api::*;
-    #[cfg(all(
-        target_os = "windows",
-        any(feature = "renderer-gdi", feature = "renderer-d2d")
-    ))]
-    pub mod win32 {
-        pub use lgui_platform_win32::{
-            Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,
-        };
-
-        #[cfg(feature = "renderer-d2d")]
-        pub mod d2d {
-            pub use lgui_render_d2d::*;
-        }
-        #[cfg(feature = "renderer-d2d")]
-        pub use lgui_render_d2d::{probe_d2d_support, D2dRenderer, D2dRendererFactory};
-        #[cfg(feature = "renderer-gdi")]
-        pub mod gdi {
-            pub use lgui_render_gdi::*;
-        }
-        #[cfg(all(feature = "renderer-gdi", feature = "multi-window"))]
-        pub use lgui_render_gdi::{rect_size, AlphaPolicy, LayeredBackbuffer};
-        #[cfg(feature = "renderer-gdi")]
-        pub use lgui_render_gdi::{GdiRenderer, GdiRendererFactory};
-    }
 }
 
 pub mod prelude {
-    #[cfg(all(target_os = "windows", feature = "backend-win32"))]
-    pub use crate::Win32Application;
-    #[cfg(any(
-        all(feature = "renderer-gdi", target_os = "windows"),
-        all(feature = "renderer-d2d", target_os = "windows"),
-        feature = "renderer-skia"
-    ))]
+    #[cfg(feature = "renderer-skia")]
     pub use crate::{RendererKind, RendererProbeError};
     #[cfg(feature = "images")]
     pub use lgui_assets::{
@@ -179,11 +143,7 @@ pub use lgui_render_api::{
     ClipRegion, FrameInfo, FrameReason, GraphicsPreference, MemoryPressure, RenderStats,
     RendererCapabilities, SceneRenderer,
 };
-#[cfg(any(
-    all(feature = "renderer-gdi", target_os = "windows"),
-    all(feature = "renderer-d2d", target_os = "windows"),
-    feature = "renderer-skia"
-))]
+#[cfg(feature = "renderer-skia")]
 pub use renderer_selection::{RendererKind, RendererProbeError};
 
 #[cfg(all(target_os = "windows", feature = "system-diagnostics"))]
@@ -196,24 +156,11 @@ pub fn system_usage_sample_interval_ms() -> u64 {
     lgui_platform_win32::system_usage_sample_interval_ms()
 }
 
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub use lgui_platform_win32 as platform_win32;
 #[cfg(all(target_os = "windows", feature = "tray-win32"))]
 pub use lgui_platform_win32::{TrayIconHandle, Win32TrayIcon};
 #[cfg(all(target_os = "windows", feature = "notifications-win32"))]
 pub use lgui_platform_win32::{Win32NotificationApplicationExt, Win32NotificationService};
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub use lgui_platform_win32::{
-    Win32RenderError, Win32RenderTarget, Win32RendererFactory, Win32SceneRenderer,
-    Win32WindowOptions,
-};
 #[cfg(feature = "backend-winit")]
 pub use lgui_platform_winit::{WinitApplication, WinitApplicationError};
-#[cfg(all(target_os = "windows", feature = "renderer-d2d"))]
-pub use lgui_render_d2d::{D2dRenderer, D2dRendererFactory};
-#[cfg(all(target_os = "windows", feature = "renderer-gdi"))]
-pub use lgui_render_gdi::{GdiRenderer, GdiRendererFactory};
 #[cfg(feature = "renderer-skia")]
 pub use lgui_render_skia as render_skia;
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub use win32::Win32Application;

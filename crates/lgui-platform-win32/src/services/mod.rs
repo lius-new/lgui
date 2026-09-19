@@ -7,20 +7,14 @@ mod system_usage;
 #[cfg(feature = "tray-win32")]
 mod tray;
 
-#[cfg(all(
-    feature = "notifications-win32",
-    any(feature = "backend-win32", feature = "backend-winit")
-))]
+#[cfg(all(feature = "notifications-win32", feature = "backend-winit"))]
 #[doc(hidden)]
 pub use notification::install_notification_service;
 #[cfg(feature = "notifications-win32")]
 pub use notification::{Win32NotificationApplicationExt, Win32NotificationService};
 #[cfg(feature = "system-diagnostics")]
 pub use system_usage::{system_usage_sample_interval_ms, system_usage_snapshot};
-#[cfg(all(
-    feature = "tray-win32",
-    any(feature = "backend-win32", feature = "backend-winit")
-))]
+#[cfg(all(feature = "tray-win32", feature = "backend-winit"))]
 #[doc(hidden)]
 pub use tray::Win32TrayHost;
 #[cfg(feature = "tray-win32")]

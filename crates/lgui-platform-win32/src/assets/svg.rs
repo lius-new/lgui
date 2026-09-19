@@ -1,18 +1,11 @@
 use std::{
     borrow::Cow,
     cell::RefCell,
-    ffi::c_void,
-    ptr::null_mut,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 
 use tiny_skia::{Pixmap, Transform};
-use windows::Win32::Graphics::Gdi::{
-    AlphaBlend, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject,
-    AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
-    HDC,
-};
 
 use lgui_assets::icons::{builtin_svg, SvgIconRegistry};
 use lgui_core::core::{Color, IconStyle, UiRect};
@@ -82,27 +75,6 @@ thread_local! {
             svg_telemetry().clone(),
         )
     );
-}
-
-#[cfg(feature = "backend-win32")]
-pub(crate) fn svg_bitmap_cache_usage() -> lgui_core::memory::CacheUsage {
-    svg_telemetry().snapshot()
-}
-
-#[cfg(feature = "backend-win32")]
-pub(crate) fn trim_svg_bitmap_cache(target_bytes: usize) -> usize {
-    SVG_CACHE.with(|cache| cache.borrow_mut().trim_to(target_bytes))
-}
-
-#[cfg(feature = "backend-win32")]
-pub(crate) fn set_svg_bitmap_cache_budget(budget_bytes: usize) {
-    SVG_CACHE.with(|cache| cache.borrow_mut().set_budget(budget_bytes));
-}
-
-pub fn draw_svg_icon(hdc: HDC, key: &'static str, rect: UiRect, style: IconStyle) {
-    if let Some(bitmap) = rasterize_svg_icon_bgra(key, rect, style) {
-        draw_bitmap(hdc, rect, &bitmap);
-    }
 }
 
 pub fn rasterize_svg_icon_bgra(
@@ -191,67 +163,6 @@ fn rgba_to_premultiplied_bgra(rgba: &[u8]) -> Vec<u8> {
         bgra.push(pixel[3]);
     }
     bgra
-}
-
-fn draw_bitmap(hdc: HDC, rect: UiRect, bitmap: &SvgBitmap) {
-    unsafe {
-        let memory_dc = CreateCompatibleDC(Some(hdc));
-        if memory_dc.is_invalid() {
-            return;
-        }
-
-        let mut bits: *mut c_void = null_mut();
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: bitmap.width,
-                biHeight: -bitmap.height,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let Ok(dib) = CreateDIBSection(Some(hdc), &info, DIB_RGB_COLORS, &mut bits, None, 0) else {
-            let _ = DeleteDC(memory_dc);
-            return;
-        };
-        if dib.is_invalid() || bits.is_null() {
-            let _ = DeleteDC(memory_dc);
-            return;
-        }
-
-        std::ptr::copy_nonoverlapping(
-            bitmap.premultiplied_bgra.as_ptr(),
-            bits as *mut u8,
-            bitmap.premultiplied_bgra.len(),
-        );
-
-        let old_bitmap = SelectObject(memory_dc, dib.into());
-        let blend = BLENDFUNCTION {
-            BlendOp: AC_SRC_OVER as u8,
-            BlendFlags: 0,
-            SourceConstantAlpha: 255,
-            AlphaFormat: AC_SRC_ALPHA as u8,
-        };
-        let _ = AlphaBlend(
-            hdc,
-            rect.left.round() as i32,
-            rect.top.round() as i32,
-            bitmap.width,
-            bitmap.height,
-            memory_dc,
-            0,
-            0,
-            bitmap.width,
-            bitmap.height,
-            blend,
-        );
-        let _ = SelectObject(memory_dc, old_bitmap);
-        let _ = DeleteObject(dib.into());
-        let _ = DeleteDC(memory_dc);
-    }
 }
 
 pub(crate) fn resolve_svg(key: &str) -> Option<Cow<'static, str>> {
