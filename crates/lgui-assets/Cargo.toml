@@ -27,3 +27,6 @@ image = { version = "0.25", optional = true, default-features = false, features 
 lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
 ureq = { version = "2.12", optional = true, default-features = true, features = ["native-certs"] }
 
+[dev-dependencies]
+lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false, features = ["test-support"] }
+
