@@ -9,7 +9,6 @@ use crate::{
     application::RenderErrorStage,
     application::{AppView, ApplicationContext, RenderError},
     core::UiTaskSpawner,
-    memory::CacheRegistration,
     text::TextSystemHandle,
     window::{WindowId, WindowManager},
 };
@@ -46,10 +45,6 @@ pub fn report_render_error(context: &ApplicationContext, error: RenderError) {
 
 pub fn task_spawner(context: &ApplicationContext) -> Option<UiTaskSpawner> {
     context.task_spawner()
-}
-
-pub fn retain_memory_registration(context: &ApplicationContext, registration: CacheRegistration) {
-    context.retain_memory_registration(registration);
 }
 
 pub struct FontEnvironment {
@@ -111,14 +106,6 @@ pub fn full_semantic_update(
     focus: Option<crate::core::UiId>,
 ) -> crate::core::SemanticUpdate {
     crate::core::SemanticUpdate::full_from_tree(tree, focus)
-}
-
-pub fn memory_begin_frame_budget_check(memory: &crate::memory::MemoryGovernor) -> bool {
-    memory.begin_frame_budget_check()
-}
-
-pub fn memory_finish_frame_budget_check(memory: &crate::memory::MemoryGovernor) {
-    memory.finish_frame_budget_check();
 }
 
 pub struct RenderCacheEnvironment {

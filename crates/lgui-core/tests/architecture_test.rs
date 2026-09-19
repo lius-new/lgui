@@ -434,8 +434,6 @@ fn memory_governance_has_no_legacy_cache_bypasses() {
         "MemoryProfile",
         "for_profile",
         "domain_weight",
-        "MemoryOptions::default",
-        "impl Default for MemoryOptions",
     ] {
         assert!(
             !memory.contains(forbidden),
@@ -445,36 +443,21 @@ fn memory_governance_has_no_legacy_cache_bypasses() {
 
     let builder = fs::read_to_string(root.join("src/application/builder.rs"))
         .expect("read application builder");
-    for required in [
-        "pub struct MemoryOptionsMissing",
-        "pub struct MemoryOptionsConfigured",
-        "impl<B> Application<B, MemoryOptionsMissing>",
-        "impl<B> Application<B, MemoryOptionsConfigured>",
-    ] {
+    assert!(
+        builder.contains("pub fn memory_options"),
+        "application construction lost the optional memory policy hook"
+    );
+    for removed in ["MemoryOptionsMissing", "MemoryOptionsConfigured"] {
         assert!(
-            builder.contains(required),
-            "application construction no longer requires explicit memory policy through `{required}`"
+            !builder.contains(removed),
+            "application construction still requires explicit memory policy via `{removed}`"
         );
     }
 
-    let registrations = [
-        "EncodedImage",
-        "DecodedImage",
-        "Svg",
-        "Blur",
-        "StaticLayer",
-        "ScrollRaster",
-        "Skia",
-        "ComponentOutput",
-        "HostScene",
-        "Diagnostics",
-    ];
-    for domain in registrations {
-        assert!(
-            source.contains(&format!("CacheDomain::{domain}")),
-            "cache domain `{domain}` has no registration or lifecycle adapter"
-        );
-    }
+    assert!(
+        !source.contains("CacheDomain"),
+        "the per-domain cache budget registry (`CacheDomain`) was not removed"
+    );
 }
 
 #[test]

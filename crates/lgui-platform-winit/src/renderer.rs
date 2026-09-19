@@ -326,23 +326,7 @@ impl WinitSkiaRenderer {
         }
     }
 
-    pub(super) fn set_cache_budget(&mut self, _budget_bytes: usize) {
-        match self {
-            #[cfg(feature = "renderer-skia")]
-            Self::Software { renderer, .. } => renderer.set_cache_budget(_budget_bytes),
-            #[cfg(feature = "renderer-skia-gl")]
-            Self::OpenGl(renderer) => renderer.set_cache_budget(_budget_bytes),
-            #[cfg(all(
-                feature = "renderer-skia-vulkan",
-                any(target_os = "windows", target_os = "linux")
-            ))]
-            Self::Vulkan(renderer) => renderer.set_cache_budget(_budget_bytes),
-            #[cfg(all(feature = "renderer-skia-metal", target_os = "macos"))]
-            Self::Metal(renderer) => renderer.set_cache_budget(_budget_bytes),
-            Self::Unavailable => {}
-        }
-    }
-
+    #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
     pub(super) fn cache_stats(&self) -> WinitRendererCacheStats {
         match self {
             #[cfg(feature = "renderer-skia")]

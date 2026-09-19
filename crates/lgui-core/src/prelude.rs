@@ -15,10 +15,7 @@ pub use crate::events::{
     emit, listen, listen_async, listen_async_with, listen_with, AsyncEventHandler, Event,
     EventFuture, EventKey, EventSubscription, InvalidEventKey,
 };
-pub use crate::memory::{
-    CacheDomain, CachePriority, CacheScope, MemoryAction, MemoryBudget, MemoryDomainBudgets,
-    MemoryEventPolicy, MemoryOptions, MemorySnapshot, RetentionClass, TrimReason,
-};
+pub use crate::memory::{CachePriority, MemoryBudget, MemoryOptions, RetentionClass};
 pub use crate::platform::{
     dpi::{ScaleContext, ScalePreference, WorkArea},
     InputSink, WakeHandle,

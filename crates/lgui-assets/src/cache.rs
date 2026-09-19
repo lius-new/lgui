@@ -29,6 +29,13 @@ use crate::core::ImageCachePolicy;
 use crate::core::ImageDecodePolicy;
 use crate::core::ImageRequest;
 
+/// Safety ceiling for a single encoded image (bytes on the wire/disk).
+#[cfg(any(test, feature = "backend-winit"))]
+const MAX_ENCODED_RESOURCE_BYTES: usize = 32 * 1024 * 1024;
+/// Safety ceiling for a single decoded image (RGBA pixel buffer).
+#[cfg(any(test, feature = "backend-winit"))]
+const MAX_DECODED_RESOURCE_BYTES: usize = 128 * 1024 * 1024;
+
 #[derive(Clone)]
 pub struct ImageCacheHandle {
     request: Arc<dyn Fn(&ImageRequest) -> ImageStatus + Send + Sync>,
@@ -260,13 +267,8 @@ pub(crate) fn async_image_cache(
             }
         }
         drop(state);
-        let budget = bytes_governor.options().budget;
-        let _reservation = bytes_governor.try_reserve_task(
-            budget
-                .max_decoded_resource_bytes
-                .min(budget.transient_hard_bytes),
-        )?;
-        prepare_image_bytes(bytes, request, budget).ok()
+        let _reservation = bytes_governor.try_reserve_task(MAX_DECODED_RESOURCE_BYTES)?;
+        prepare_image_bytes(bytes, request).ok()
     };
     let stats_state = Arc::clone(&state);
     let stats_budget = Arc::clone(&budget);
@@ -407,8 +409,7 @@ fn request_async_image(
         );
         epoch
     };
-    let reservation_bytes = governor.options().budget.max_encoded_resource_bytes;
-    let Some(task_reservation) = governor.try_reserve_task(reservation_bytes) else {
+    let Some(task_reservation) = governor.try_reserve_task(MAX_ENCODED_RESOURCE_BYTES) else {
         finish_async_image(
             &state,
             &key,
@@ -518,7 +519,9 @@ pub fn load_url_image(
 ) -> Result<AssetBytes, AssetError> {
     #[cfg(not(feature = "persistent-cache"))]
     let _ = request;
-    let limit = governor.options().budget.max_encoded_resource_bytes;
+    #[cfg(not(feature = "persistent-cache"))]
+    let _ = governor;
+    let limit = MAX_ENCODED_RESOURCE_BYTES;
     #[cfg(feature = "persistent-cache")]
     if let ImageCachePolicy::Persistent {
         max_age,
@@ -617,16 +620,15 @@ pub fn validate_encoded_bytes(bytes: AssetBytes, limit: usize) -> Result<AssetBy
 pub fn prepare_image_bytes(
     bytes: AssetBytes,
     request: &ImageRequest,
-    budget: crate::memory::MemoryBudget,
 ) -> Result<AssetBytes, AssetError> {
-    let bytes = validate_encoded_bytes(bytes, budget.max_encoded_resource_bytes)?;
+    let bytes = validate_encoded_bytes(bytes, MAX_ENCODED_RESOURCE_BYTES)?;
     let reader = image::ImageReader::new(Cursor::new(bytes.as_ref()))
         .with_guessed_format()
         .map_err(|error| AssetError::InvalidData(error.to_string()))?;
     let (width, height) = reader
         .into_dimensions()
         .map_err(|error| AssetError::InvalidData(error.to_string()))?;
-    validate_decoded_dimensions(width, height, budget.max_decoded_resource_bytes)?;
+    validate_decoded_dimensions(width, height, MAX_DECODED_RESOURCE_BYTES)?;
 
     let ImageDecodePolicy::FitTarget(target) = request.decode_policy_value() else {
         return Ok(bytes);
@@ -641,7 +643,7 @@ pub fn prepare_image_bytes(
     validate_decoded_dimensions(
         target_width,
         target_height,
-        budget.max_decoded_resource_bytes,
+        MAX_DECODED_RESOURCE_BYTES,
     )?;
     if width <= target_width && height <= target_height {
         return Ok(bytes);
@@ -656,7 +658,7 @@ pub fn prepare_image_bytes(
         .map_err(|error| AssetError::InvalidData(error.to_string()))?;
     validate_encoded_bytes(
         Arc::from(encoded.into_inner()),
-        budget.max_encoded_resource_bytes,
+        MAX_ENCODED_RESOURCE_BYTES,
     )
 }
 

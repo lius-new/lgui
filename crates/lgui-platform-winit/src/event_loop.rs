@@ -5,12 +5,6 @@ pub(crate) enum WinitUserEvent {
     Window(WindowCommand),
     Wake(WindowId),
     RequestAllFrames,
-    MemoryTrim(
-        WindowId,
-        lgui_core::memory::CacheDomain,
-        lgui_core::memory::TrimRequest,
-    ),
-    MemoryBudget(WindowId, usize),
     #[cfg(all(feature = "tray-win32", target_os = "windows"))]
     SetVisible(WindowId, bool),
     #[cfg(feature = "accessibility")]
@@ -116,16 +110,6 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
                     window.window.request_redraw();
                 }
             }
-            WinitUserEvent::MemoryTrim(id, domain, request) => {
-                if let Some(window) = self.window_by_id_mut(&id) {
-                    window.apply_memory_trim(domain, request);
-                }
-            }
-            WinitUserEvent::MemoryBudget(id, budget) => {
-                if let Some(window) = self.window_by_id_mut(&id) {
-                    window.set_memory_budget(budget);
-                }
-            }
             #[cfg(all(feature = "tray-win32", target_os = "windows"))]
             WinitUserEvent::SetVisible(id, visible) => {
                 self.set_window_visibility(&id, visible);
@@ -191,11 +175,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
         }
     }
 
-    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.context
-            .memory()
-            .notify(lgui_core::memory::MemoryEvent::ApplicationShutdown);
-    }
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {}
 }
 
 impl WinitHost {
@@ -298,7 +278,8 @@ impl WinitHost {
             .context
             .memory()
             .options()
-            .domain_budget(lgui_core::memory::CacheDomain::Skia)
+            .budget
+            .cache_bytes
             .checked_div(self.windows.len().saturating_add(1))
             .unwrap_or(0);
         let renderer = create_renderer(
@@ -314,111 +295,6 @@ impl WinitHost {
         }
         let id = options.id.clone();
         let memory_instance = self.context.memory().next_instance_id();
-        let memory_usage = Arc::new(Mutex::new(lgui_core::memory::CacheUsage::default()));
-        let stats_usage = Arc::clone(&memory_usage);
-        let trim_usage = Arc::clone(&memory_usage);
-        let trim_proxy = self.proxy.clone();
-        let trim_id = id.clone();
-        let memory_registration =
-            self.context
-                .memory()
-                .register(lgui_core::memory::DomainRegistration::new(
-                    lgui_core::memory::CacheDomain::Skia,
-                    memory_instance,
-                    format!("window:{}", id.as_str()),
-                    lgui_core::memory::CacheAdapter::managed(
-                        move || *stats_usage.lock().expect("Skia memory usage poisoned"),
-                        move |request| {
-                            let before = trim_usage
-                                .lock()
-                                .expect("Skia memory usage poisoned")
-                                .resident_bytes();
-                            let _ = trim_proxy.send_event(WinitUserEvent::MemoryTrim(
-                                trim_id.clone(),
-                                lgui_core::memory::CacheDomain::Skia,
-                                request,
-                            ));
-                            lgui_core::memory::TrimResult {
-                                before_bytes: before,
-                                after_bytes: before,
-                            }
-                        },
-                        {
-                            let budget_proxy = self.proxy.clone();
-                            let budget_id = id.clone();
-                            move |budget| {
-                                let _ = budget_proxy.send_event(WinitUserEvent::MemoryBudget(
-                                    budget_id.clone(),
-                                    budget,
-                                ));
-                            }
-                        },
-                    ),
-                ));
-        let component_memory = Arc::new(Mutex::new(lgui_core::memory::CacheUsage::default()));
-        let host_scene_memory = Arc::new(Mutex::new(lgui_core::memory::CacheUsage::default()));
-        let component_registration = {
-            let usage = Arc::clone(&component_memory);
-            let trim_usage = Arc::clone(&component_memory);
-            let proxy = self.proxy.clone();
-            let id = id.clone();
-            self.context
-                .memory()
-                .register(lgui_core::memory::DomainRegistration::new(
-                    lgui_core::memory::CacheDomain::ComponentOutput,
-                    memory_instance,
-                    format!("window:{}", id.as_str()),
-                    lgui_core::memory::CacheAdapter::new(
-                        move || *usage.lock().expect("component memory usage poisoned"),
-                        move |request| {
-                            let before = trim_usage
-                                .lock()
-                                .expect("component memory usage poisoned")
-                                .resident_bytes();
-                            let _ = proxy.send_event(WinitUserEvent::MemoryTrim(
-                                id.clone(),
-                                lgui_core::memory::CacheDomain::ComponentOutput,
-                                request,
-                            ));
-                            lgui_core::memory::TrimResult {
-                                before_bytes: before,
-                                after_bytes: before,
-                            }
-                        },
-                    ),
-                ))
-        };
-        let host_scene_registration = {
-            let usage = Arc::clone(&host_scene_memory);
-            let trim_usage = Arc::clone(&host_scene_memory);
-            let proxy = self.proxy.clone();
-            let id = id.clone();
-            self.context
-                .memory()
-                .register(lgui_core::memory::DomainRegistration::new(
-                    lgui_core::memory::CacheDomain::HostScene,
-                    memory_instance,
-                    format!("window:{}", id.as_str()),
-                    lgui_core::memory::CacheAdapter::new(
-                        move || *usage.lock().expect("host scene memory usage poisoned"),
-                        move |request| {
-                            let before = trim_usage
-                                .lock()
-                                .expect("host scene memory usage poisoned")
-                                .resident_bytes();
-                            let _ = proxy.send_event(WinitUserEvent::MemoryTrim(
-                                id.clone(),
-                                lgui_core::memory::CacheDomain::HostScene,
-                                request,
-                            ));
-                            lgui_core::memory::TrimResult {
-                                before_bytes: before,
-                                after_bytes: before,
-                            }
-                        },
-                    ),
-                ))
-        };
         session.set_wake(Arc::new({
             let proxy = self.proxy.clone();
             let id = id.clone();
@@ -461,12 +337,6 @@ impl WinitHost {
                 recovery,
                 memory_instance,
                 memory_budget: renderer_budget,
-                memory_usage,
-                _memory_registration: memory_registration,
-                component_memory,
-                host_scene_memory,
-                _component_registration: component_registration,
-                _host_scene_registration: host_scene_registration,
                 #[cfg(feature = "diagnostics")]
                 diagnostics: self.context.try_resource::<DiagnosticsRegistration>(),
                 #[cfg(feature = "diagnostics")]
@@ -520,9 +390,6 @@ impl WinitHost {
             }
             WindowCommand::SetScalePreference(preference) => {
                 self.scale_preference = Some(preference);
-                self.context
-                    .memory()
-                    .notify(lgui_core::memory::MemoryEvent::ThemeOrScaleChanged);
                 for window in self.windows.values_mut() {
                     window.options.scale_preference = preference;
                     window.update_scale();
@@ -703,13 +570,6 @@ impl WinitHost {
                 window.suspend_rendering(true);
             }
         }
-        if backgrounded != self.backgrounded {
-            self.context.memory().notify(if backgrounded {
-                lgui_core::memory::MemoryEvent::AllWindowsHidden
-            } else {
-                lgui_core::memory::MemoryEvent::WindowShown
-            });
-            self.backgrounded = backgrounded;
-        }
+        self.backgrounded = backgrounded;
     }
 }

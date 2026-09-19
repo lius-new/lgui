@@ -18,10 +18,7 @@ pub use render::{
     ScenePrimitiveKind, ScrollRasterSpec,
 };
 pub(crate) use render::{estimate_scene_commands_bytes, patch_compositing_layer_spec};
-pub(crate) use render::{
-    scroll_raster_command_cache_usage, set_scroll_raster_command_cache_budget,
-    trim_scroll_raster_command_cache,
-};
+pub(crate) use render::set_scroll_raster_command_cache_budget;
 pub use shadow::ShadowStyle;
 pub use static_layer::{
     RasterCachePolicy, StaticLayerBackground, StaticLayerSource, StaticLayerSpec,

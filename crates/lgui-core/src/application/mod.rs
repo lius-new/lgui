@@ -13,7 +13,7 @@ pub use crate::window::{
     WindowId, WindowManager, WindowMode, WindowOptions, WindowPosition,
 };
 pub use backend::ApplicationBackend;
-pub use builder::{Application, MemoryOptionsConfigured, MemoryOptionsMissing};
+pub use builder::Application;
 pub use context::ApplicationContext;
 pub(crate) use error::RenderErrorRegistration;
 pub use error::{RenderError, RenderErrorStage};

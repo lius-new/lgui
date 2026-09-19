@@ -50,36 +50,6 @@ fn scroll_raster_command_cache() -> &'static Mutex<ScrollRasterCommandCache> {
     CACHE.get_or_init(|| Mutex::new(ScrollRasterCommandCache::default()))
 }
 
-pub(crate) fn scroll_raster_command_cache_usage() -> crate::memory::CacheUsage {
-    let cache = scroll_raster_command_cache()
-        .lock()
-        .expect("scroll raster command cache poisoned");
-    crate::memory::CacheUsage {
-        rebuildable_bytes: cache.bytes,
-        cpu_bytes: cache.bytes,
-        entries: cache.entries.len(),
-        hits: cache.hits,
-        misses: cache.misses,
-        evictions: cache.evictions,
-        largest_entry_bytes: cache
-            .entries
-            .values()
-            .map(|entry| entry.bytes)
-            .max()
-            .unwrap_or(0),
-        ..Default::default()
-    }
-}
-
-pub(crate) fn trim_scroll_raster_command_cache(target_bytes: usize) -> usize {
-    let mut cache = scroll_raster_command_cache()
-        .lock()
-        .expect("scroll raster command cache poisoned");
-    let before = cache.bytes;
-    evict_scroll_raster_commands(&mut cache, target_bytes, SCROLL_RASTER_COMMAND_CACHE_LIMIT);
-    before.saturating_sub(cache.bytes)
-}
-
 pub(crate) fn set_scroll_raster_command_cache_budget(budget_bytes: usize) {
     let mut cache = scroll_raster_command_cache()
         .lock()

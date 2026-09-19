@@ -6,7 +6,7 @@ pub trait AssetsApplicationExt: Sized {
     fn svg_icons(self, registry: SvgIconRegistry) -> Self;
 }
 
-impl<B, M> AssetsApplicationExt for Application<B, M> {
+impl<B> AssetsApplicationExt for Application<B> {
     fn svg_icons(self, registry: SvgIconRegistry) -> Self {
         self.provide(IconRegistration(std::sync::Arc::new(registry)))
     }

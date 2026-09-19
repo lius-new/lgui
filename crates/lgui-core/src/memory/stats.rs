@@ -1,4 +1,3 @@
-use super::{CacheDomain, DomainInstanceId, MemoryOptions, TrimReason};
 use std::sync::{Arc, Mutex};
 
 #[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
@@ -50,38 +49,6 @@ impl CacheUsage {
         self.largest_entry_bytes = self.largest_entry_bytes.max(other.largest_entry_bytes);
         self.in_flight = self.in_flight.saturating_add(other.in_flight);
     }
-}
-
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DomainSnapshot {
-    pub registration_id: u64,
-    pub domain: CacheDomain,
-    pub instance: DomainInstanceId,
-    pub owner: String,
-    pub usage: CacheUsage,
-}
-
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TrimSnapshot {
-    pub reason: TrimReason,
-    pub requested_at_epoch: u64,
-    pub released_bytes: usize,
-    pub duration_micros: u64,
-}
-
-#[cfg_attr(feature = "diagnostics-serde", derive(serde::Serialize))]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MemorySnapshot {
-    pub epoch: u64,
-    pub options: MemoryOptions,
-    pub usage: CacheUsage,
-    pub transient_reserved_bytes: usize,
-    pub large_tasks_in_flight: usize,
-    pub pinned_overflow_bytes: usize,
-    pub domains: Vec<DomainSnapshot>,
-    pub last_trim: Option<TrimSnapshot>,
 }
 
 #[derive(Clone, Default)]

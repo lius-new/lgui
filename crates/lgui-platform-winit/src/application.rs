@@ -82,56 +82,13 @@ impl ApplicationBackend for WinitApplication {
                 .map(|loader| (*loader).clone())
                 .unwrap_or_else(lgui_assets::http_image_loader);
             let image_wake = application_handle.clone();
-            let budget = context
-                .memory()
-                .options()
-                .domain_budget(lgui_core::memory::CacheDomain::EncodedImage);
+            let budget = context.memory().options().budget.cache_bytes;
             let cache = lgui_assets::backend::async_image_cache(
                 loader,
                 move || image_wake.request_frame(),
                 budget,
                 context.memory().clone(),
             );
-            let stats_cache = cache.clone();
-            let trim_cache = cache.clone();
-            let registration =
-                context
-                    .memory()
-                    .register(lgui_core::memory::DomainRegistration::new(
-                        lgui_core::memory::CacheDomain::EncodedImage,
-                        context.memory().next_instance_id(),
-                        "application:winit-images",
-                        lgui_core::memory::CacheAdapter::managed(
-                            move || {
-                                let stats = stats_cache.stats();
-                                lgui_core::memory::CacheUsage {
-                                    cache_bytes: stats.resident_bytes,
-                                    cpu_bytes: stats.resident_bytes,
-                                    pinned_bytes: stats.pinned_bytes,
-                                    entries: stats.entries,
-                                    hits: stats.hits,
-                                    misses: stats.misses,
-                                    evictions: stats.evictions,
-                                    largest_entry_bytes: stats.largest_entry_bytes,
-                                    in_flight: stats.in_flight,
-                                    ..Default::default()
-                                }
-                            },
-                            move |request| {
-                                let before = trim_cache.stats().resident_bytes;
-                                trim_cache.trim_to(request.target_bytes);
-                                lgui_core::memory::TrimResult {
-                                    before_bytes: before,
-                                    after_bytes: trim_cache.stats().resident_bytes,
-                                }
-                            },
-                            {
-                                let cache = cache.clone();
-                                move |budget| cache.set_budget(budget)
-                            },
-                        ),
-                    ));
-            lgui_core::backend::retain_memory_registration(&context, registration);
             context.resources().provide(cache);
         }
         #[cfg(feature = "store")]

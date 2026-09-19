@@ -59,7 +59,7 @@ pub trait ServicesApplicationExt: Sized {
     ) -> Self;
 }
 
-impl<B, M> ServicesApplicationExt for Application<B, M> {
+impl<B> ServicesApplicationExt for Application<B> {
     #[cfg(feature = "notifications")]
     fn notification_service(self, service: crate::NotificationHandle) -> Self {
         self.provide(service)

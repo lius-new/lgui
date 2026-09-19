@@ -6,7 +6,7 @@ pub trait DiagnosticsApplicationExt: Sized {
     fn diagnostics_sink(self, sink: impl DiagnosticsSink + 'static) -> Self;
 }
 
-impl<B, M> DiagnosticsApplicationExt for Application<B, M> {
+impl<B> DiagnosticsApplicationExt for Application<B> {
     fn diagnostics_sink(self, sink: impl DiagnosticsSink + 'static) -> Self {
         self.provide(DiagnosticsRegistration::new(sink))
     }

@@ -16,23 +16,19 @@ use super::{
     RenderErrorRegistration, WindowOptions,
 };
 
-pub struct MemoryOptionsMissing;
-
-pub struct MemoryOptionsConfigured(MemoryOptions);
-
-pub struct Application<B, M = MemoryOptionsMissing> {
+pub struct Application<B> {
     backend: B,
     window: WindowOptions,
     resources: Resources,
     executor: Option<UiTaskSpawner>,
     commands: CommandRegistry,
     events: EventBus,
-    memory_options: M,
+    memory_options: MemoryOptions,
     #[cfg(feature = "persistent-cache")]
     persistent_cache: Option<Arc<dyn PersistentCacheStore>>,
 }
 
-impl<B> Application<B, MemoryOptionsMissing> {
+impl<B> Application<B> {
     pub fn with_backend(backend: B) -> Self {
         Self {
             backend,
@@ -41,31 +37,20 @@ impl<B> Application<B, MemoryOptionsMissing> {
             executor: None,
             commands: CommandRegistry::default(),
             events: EventBus::default(),
-            memory_options: MemoryOptionsMissing,
+            memory_options: MemoryOptions::default(),
             #[cfg(feature = "persistent-cache")]
             persistent_cache: None,
         }
     }
 
-    pub fn memory_options(self, options: MemoryOptions) -> Application<B, MemoryOptionsConfigured> {
+    pub fn memory_options(mut self, options: MemoryOptions) -> Self {
         options
             .validate()
             .expect("invalid application memory policy");
-        Application {
-            backend: self.backend,
-            window: self.window,
-            resources: self.resources,
-            executor: self.executor,
-            commands: self.commands,
-            events: self.events,
-            memory_options: MemoryOptionsConfigured(options),
-            #[cfg(feature = "persistent-cache")]
-            persistent_cache: self.persistent_cache,
-        }
+        self.memory_options = options;
+        self
     }
-}
 
-impl<B, M> Application<B, M> {
     pub fn window_options(mut self, options: WindowOptions) -> Self {
         self.window = options;
         self
@@ -120,7 +105,7 @@ impl<B, M> Application<B, M> {
     }
 }
 
-impl<B> Application<B, MemoryOptionsConfigured>
+impl<B> Application<B>
 where
     B: ApplicationBackend,
 {
@@ -136,7 +121,7 @@ where
             self.executor,
             self.commands,
             self.events,
-            self.memory_options.0,
+            self.memory_options,
             #[cfg(feature = "persistent-cache")]
             self.persistent_cache,
         );

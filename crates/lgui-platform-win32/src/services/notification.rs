@@ -27,7 +27,7 @@ pub trait Win32NotificationApplicationExt: Sized {
 }
 
 #[cfg(feature = "backend-winit")]
-impl<B, M> Win32NotificationApplicationExt for Application<B, M> {
+impl<B> Win32NotificationApplicationExt for Application<B> {
     fn notifications(self, identity: impl Into<String>) -> Self {
         self.provide(Win32NotificationRegistration {
             identity: identity.into(),

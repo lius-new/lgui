@@ -32,10 +32,6 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
         .provide(RendererKind::Skia(GraphicsPreference::Auto))
-        .memory_options(MemoryOptions::unbounded(
-            ImageCachePolicy::WhileVisible,
-            false,
-        ))
         .window_options(
             WindowOptions::new("counter")
                 .title("lgui counter")

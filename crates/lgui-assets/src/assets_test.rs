@@ -189,12 +189,8 @@ fn target_decode_downsamples_large_sources() {
                 PhysicalSize::new(16, 16),
             ));
 
-    let resized = prepare_image_bytes(
-        Arc::from(encoded.into_inner()),
-        &request,
-        crate::memory::test_memory_options().budget,
-    )
-    .expect("downsample image");
+    let resized = prepare_image_bytes(Arc::from(encoded.into_inner()), &request)
+        .expect("downsample image");
     let decoded = image::load_from_memory(resized.as_ref()).expect("decode resized image");
 
     assert!(decoded.width() <= 16);

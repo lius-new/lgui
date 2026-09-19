@@ -24,12 +24,6 @@ pub(super) struct WinitWindow {
     #[cfg_attr(not(feature = "images"), allow(dead_code))]
     pub(super) memory_instance: lgui_core::memory::DomainInstanceId,
     pub(super) memory_budget: usize,
-    pub(super) memory_usage: Arc<Mutex<lgui_core::memory::CacheUsage>>,
-    pub(super) _memory_registration: lgui_core::memory::CacheRegistration,
-    pub(super) component_memory: Arc<Mutex<lgui_core::memory::CacheUsage>>,
-    pub(super) host_scene_memory: Arc<Mutex<lgui_core::memory::CacheUsage>>,
-    pub(super) _component_registration: lgui_core::memory::CacheRegistration,
-    pub(super) _host_scene_registration: lgui_core::memory::CacheRegistration,
     #[cfg(feature = "diagnostics")]
     pub(super) diagnostics: Option<Arc<DiagnosticsRegistration>>,
     #[cfg(feature = "diagnostics")]
@@ -457,10 +451,6 @@ impl WinitWindow {
             },
             _ => RendererRecoveryState::Healthy,
         };
-        self.update_memory_usage();
-        self.context
-            .memory()
-            .notify(lgui_core::memory::MemoryEvent::FrameCommitted);
         #[cfg(feature = "diagnostics")]
         if let Some(diagnostics) = self.diagnostics.clone() {
             self.frame_index = self.frame_index.wrapping_add(1);
@@ -589,7 +579,6 @@ impl WinitWindow {
                 }
                 let fallback_reason = renderer.fallback_reason();
                 self.renderer = renderer;
-                self.update_memory_usage();
                 if let Some(reason) = fallback_reason {
                     self.recovery = RendererRecoveryState::Fallback {
                         reason,
@@ -651,94 +640,9 @@ impl WinitWindow {
             lgui_assets::backend::update_image_reachability(self.memory_instance, &[]);
             self.renderer.trim(MemoryPressure::Critical);
             lgui_core::backend::session_suspend_rendering(&mut self.session);
-            self.update_memory_usage();
         }
     }
 
-    pub(super) fn apply_memory_trim(
-        &mut self,
-        domain: lgui_core::memory::CacheDomain,
-        request: lgui_core::memory::TrimRequest,
-    ) {
-        match domain {
-            lgui_core::memory::CacheDomain::Skia => {
-                let pressure = match request.reason {
-                    lgui_core::memory::TrimReason::SoftBudget
-                    | lgui_core::memory::TrimReason::ModeratePressure => MemoryPressure::Moderate,
-                    _ => MemoryPressure::Critical,
-                };
-                self.renderer.trim(pressure);
-            }
-            lgui_core::memory::CacheDomain::ComponentOutput => {
-                lgui_core::backend::session_trim_component_outputs(
-                    &mut self.session,
-                    request.target_bytes,
-                );
-                self.full_redraw = true;
-                self.window.request_redraw();
-            }
-            lgui_core::memory::CacheDomain::HostScene if should_trim_host_scene(request) => {
-                lgui_core::backend::session_trim_host_scene(&mut self.session);
-                self.full_redraw = true;
-                self.window.request_redraw();
-            }
-            _ => {}
-        }
-        self.update_memory_usage();
-    }
-
-    pub(super) fn set_memory_budget(&mut self, budget_bytes: usize) {
-        self.memory_budget = budget_bytes;
-        self.renderer.set_cache_budget(budget_bytes);
-        self.update_memory_usage();
-    }
-
-    fn update_memory_usage(&self) {
-        let stats = self.renderer.cache_stats();
-        let gpu_bytes = if self.renderer.is_gpu() {
-            stats.resident_bytes.saturating_mul(2) / 3
-        } else {
-            0
-        };
-        *self
-            .memory_usage
-            .lock()
-            .expect("Skia memory usage poisoned") = lgui_core::memory::CacheUsage {
-            cache_bytes: stats.resident_bytes,
-            cpu_bytes: stats.resident_bytes.saturating_sub(gpu_bytes),
-            gpu_estimated_bytes: gpu_bytes,
-            entries: stats.entries.saturating_add(stats.text_entries),
-            hits: stats.hits.saturating_add(stats.text_hits),
-            misses: stats.misses.saturating_add(stats.text_misses),
-            evictions: stats.evictions.saturating_add(stats.text_evictions),
-            largest_entry_bytes: stats
-                .largest_entry_bytes
-                .max(stats.largest_text_entry_bytes),
-            ..Default::default()
-        };
-        let (component, host_scene) = lgui_core::backend::session_memory_usage(&self.session);
-        *self
-            .component_memory
-            .lock()
-            .expect("component memory usage poisoned") = component;
-        *self
-            .host_scene_memory
-            .lock()
-            .expect("host scene memory usage poisoned") = host_scene;
-    }
-}
-
-fn should_trim_host_scene(request: lgui_core::memory::TrimRequest) -> bool {
-    request.scope == lgui_core::memory::CacheScope::AllRebuildable
-        || matches!(
-            request.reason,
-            lgui_core::memory::TrimReason::WindowHidden
-                | lgui_core::memory::TrimReason::AllWindowsHidden
-                | lgui_core::memory::TrimReason::SessionUnmounted
-                | lgui_core::memory::TrimReason::CriticalPressure
-                | lgui_core::memory::TrimReason::Explicit
-                | lgui_core::memory::TrimReason::Shutdown
-        )
 }
 
 impl Drop for WinitWindow {

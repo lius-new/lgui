@@ -166,12 +166,7 @@ impl WinitMetalRenderer {
         }
     }
 
-    pub(crate) fn set_cache_budget(&mut self, budget_bytes: usize) {
-        self.cache.set_budget(cpu_cache_budget(budget_bytes));
-        self.skia_context
-            .set_resource_cache_limit(gpu_cache_budget(budget_bytes));
-    }
-
+    #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
     pub(crate) fn cache_stats(&self) -> SkiaCacheStats {
         with_gpu_cache_usage(self.cache.stats(), &self.skia_context)
     }

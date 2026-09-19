@@ -32,10 +32,7 @@ pub use primitive::{RenderPhase, ScenePrimitive, ScenePrimitiveKind, ScrollRaste
 pub(crate) use scene::patch_compositing_layer_spec;
 pub use scene::Scene;
 pub use scroll_cache::scroll_raster_command_snapshot_exists;
-pub(crate) use scroll_cache::{
-    scroll_raster_command_cache_usage, set_scroll_raster_command_cache_budget,
-    trim_scroll_raster_command_cache,
-};
+pub(crate) use scroll_cache::set_scroll_raster_command_cache_budget;
 #[doc(hidden)]
 pub use transform::translate_scene_primitive_for_backend;
 
