@@ -1,7 +1,7 @@
 [package]
 name = "lgui-render-skia"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 publish = ["crates-io"]
 description = "Skia renderer for LGUI"
 license.workspace = true

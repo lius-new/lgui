@@ -1,7 +1,7 @@
 [package]
 name = "lgui"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 publish = ["crates-io"]
 description = "A reactive Rust GUI library with native and portable rendering backends"
 license.workspace = true

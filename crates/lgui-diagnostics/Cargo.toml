@@ -1,7 +1,7 @@
 [package]
 name = "lgui-diagnostics"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 publish = ["crates-io"]
 description = "Frame diagnostics contracts and collection for LGUI"
 license.workspace = true

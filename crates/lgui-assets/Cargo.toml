@@ -1,7 +1,7 @@
 [package]
 name = "lgui-assets"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 publish = ["crates-io"]
 description = "Image, custom paint, and SVG asset runtime for LGUI"
 license.workspace = true

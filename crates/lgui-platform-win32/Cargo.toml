@@ -1,7 +1,7 @@
 [package]
 name = "lgui-platform-win32"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 publish = ["crates-io"]
 description = "Native Win32 window and system integration for LGUI"
 license.workspace = true

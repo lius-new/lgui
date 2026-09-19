@@ -182,7 +182,7 @@ impl ApplicationContext {
     ///
     /// LGUI task APIs apply this automatically. Use `scope` when an
     /// application-owned Future is submitted to an external executor.
-    pub fn scope<F>(&self, future: F) -> impl Future<Output = F::Output>
+    pub fn scope<F>(&self, future: F) -> impl Future<Output = F::Output> + use<F>
     where
         F: Future,
     {
