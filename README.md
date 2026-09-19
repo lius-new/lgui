@@ -83,7 +83,7 @@ Add the Windows-native default configuration to an application with:
 
 ```toml
 [dependencies]
-lgui = "0.2.1"
+lgui = "0.2.2"
 ```
 
 For the portable winit + Skia backend, disable the Windows-oriented defaults and select a Skia
@@ -91,7 +91,7 @@ presentation feature explicitly:
 
 ```toml
 [dependencies]
-lgui = { version = "0.2.1", default-features = false, features = ["renderer-skia-gl", "widgets"] }
+lgui = { version = "0.2.2", default-features = false, features = ["renderer-skia-gl", "widgets"] }
 ```
 
 Run the same example source through the portable winit + Skia backend on Windows, Linux, or

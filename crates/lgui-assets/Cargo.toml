@@ -1,6 +1,6 @@
 [package]
 name = "lgui-assets"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 description = "Image, custom paint, and SVG asset runtime for LGUI"
@@ -24,9 +24,9 @@ test-support = ["lgui-core/test-support"]
 [dependencies]
 icondata = { version = "0.7.0", optional = true, default-features = false, features = ["lucide"] }
 image = { version = "0.25", optional = true, default-features = false, features = ["gif", "jpeg", "png", "webp"] }
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }
 ureq = { version = "2.12", optional = true, default-features = true, features = ["native-certs"] }
 
 [dev-dependencies]
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false, features = ["test-support"] }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false, features = ["test-support"] }
 

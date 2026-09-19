@@ -1,6 +1,6 @@
 [package]
 name = "lgui-router"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 description = "Declarative routing for LGUI applications"
@@ -13,7 +13,7 @@ keywords = ["gui", "router", "desktop", "reactive"]
 categories = ["gui"]
 
 [dependencies]
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }
 
 [dev-dependencies]
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false, features = ["test-support"] }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false, features = ["test-support"] }

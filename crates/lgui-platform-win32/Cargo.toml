@@ -1,6 +1,6 @@
 [package]
 name = "lgui-platform-win32"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 description = "Native Win32 window and system integration for LGUI"
@@ -26,19 +26,19 @@ tray-win32 = ["svg", "lgui-services/tray"]
 
 [dependencies]
 image = { version = "0.25", optional = true, default-features = false, features = ["gif", "jpeg", "png", "webp"] }
-lgui-assets = { version = "0.2.1", path = "../lgui-assets", optional = true, default-features = false }
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
-lgui-diagnostics = { version = "0.2.1", path = "../lgui-diagnostics", optional = true }
-lgui-render-api = { version = "0.2.1", path = "../lgui-render-api" }
-lgui-services = { version = "0.2.1", path = "../lgui-services", default-features = false }
-lgui-store = { version = "0.2.1", path = "../lgui-store", optional = true }
+lgui-assets = { version = "0.2.2", path = "../lgui-assets", optional = true, default-features = false }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }
+lgui-diagnostics = { version = "0.2.2", path = "../lgui-diagnostics", optional = true }
+lgui-render-api = { version = "0.2.2", path = "../lgui-render-api" }
+lgui-services = { version = "0.2.2", path = "../lgui-services", default-features = false }
+lgui-store = { version = "0.2.2", path = "../lgui-store", optional = true }
 resvg = { version = "0.45", optional = true }
 tiny-skia = { version = "0.11", optional = true }
 usvg = { version = "0.45", optional = true }
 
 [dev-dependencies]
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false, features = ["test-support"] }
-lgui-render-api = { version = "0.2.1", path = "../lgui-render-api", features = ["test-support"] }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false, features = ["test-support"] }
+lgui-render-api = { version = "0.2.2", path = "../lgui-render-api", features = ["test-support"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

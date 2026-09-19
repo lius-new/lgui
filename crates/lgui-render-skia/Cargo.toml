@@ -1,6 +1,6 @@
 [package]
 name = "lgui-render-skia"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 description = "Skia renderer for LGUI"
@@ -20,16 +20,16 @@ renderer-skia-metal = []
 
 [dependencies]
 ash = { version = "0.38", optional = true, default-features = false, features = ["loaded", "std"] }
-lgui-assets = { version = "0.2.1", path = "../lgui-assets", default-features = false, features = ["renderer-skia", "svg"] }
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false, features = ["raster-effects"] }
-lgui-render-api = { version = "0.2.1", path = "../lgui-render-api" }
+lgui-assets = { version = "0.2.2", path = "../lgui-assets", default-features = false, features = ["renderer-skia", "svg"] }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false, features = ["raster-effects"] }
+lgui-render-api = { version = "0.2.2", path = "../lgui-render-api" }
 skia-safe = { version = "=0.99.0", default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "pdf", "svg", "textlayout"] }
 unicode-bidi = "0.3"
 unicode-segmentation = "1.12"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
-lgui-render-api = { version = "0.2.1", path = "../lgui-render-api", features = ["test-support"] }
+lgui-render-api = { version = "0.2.2", path = "../lgui-render-api", features = ["test-support"] }
 
 [target.'cfg(windows)'.dependencies]
 skia-safe = { version = "=0.99.0", default-features = false, features = ["d3d", "vulkan"] }

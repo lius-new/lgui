@@ -1,6 +1,6 @@
 [package]
 name = "lgui-render-api"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 description = "Backend-neutral rendering contracts for LGUI"
@@ -18,4 +18,4 @@ test-support = ["dep:image"]
 
 [dependencies]
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }

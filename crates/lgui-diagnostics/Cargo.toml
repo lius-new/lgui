@@ -1,6 +1,6 @@
 [package]
 name = "lgui-diagnostics"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 publish = ["crates-io"]
 description = "Frame diagnostics contracts and collection for LGUI"
@@ -17,6 +17,6 @@ default = []
 serde = ["dep:serde"]
 
 [dependencies]
-lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
+lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }
 serde = { version = "1", optional = true, features = ["derive"] }
 
