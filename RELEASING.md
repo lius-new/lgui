@@ -59,6 +59,6 @@ Skia package.
 Tag the commit that was published after all packages have been accepted:
 
 ```powershell
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```

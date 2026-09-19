@@ -1,6 +1,6 @@
 [package]
 name = "lgui-widgets"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 publish = ["crates-io"]
 description = "Theme tokens and reusable widgets for LGUI"
@@ -17,7 +17,7 @@ default = ["widgets"]
 widgets = []
 
 [dependencies]
-lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false }
+lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false }
 
 [dev-dependencies]
-lgui-core = { version = "0.2.0", path = "../lgui-core", default-features = false, features = ["test-support"] }
+lgui-core = { version = "0.2.1", path = "../lgui-core", default-features = false, features = ["test-support"] }

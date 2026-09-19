@@ -1,6 +1,6 @@
 [package]
 name = "lgui"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 publish = ["crates-io"]
 description = "A reactive Rust GUI library with native and portable rendering backends"
@@ -66,19 +66,19 @@ tray-win32 = ["tray", "lgui-platform-winit?/tray-win32", "lgui-platform-win32/tr
 widgets = ["theme", "lgui-widgets/widgets"]
 
 [dependencies]
-lgui-assets = { version = "0.2.0", path = "crates/lgui-assets", optional = true, default-features = false }
-lgui-core = { version = "0.2.0", path = "crates/lgui-core", default-features = false }
-lgui-diagnostics = { version = "0.2.0", path = "crates/lgui-diagnostics", optional = true }
-lgui-platform-winit = { version = "0.2.0", path = "crates/lgui-platform-winit", optional = true, default-features = false }
-lgui-render-api = { version = "0.2.0", path = "crates/lgui-render-api" }
-lgui-render-skia = { version = "0.2.0", path = "crates/lgui-render-skia", optional = true, default-features = false }
-lgui-router = { version = "0.2.0", path = "crates/lgui-router", optional = true }
-lgui-services = { version = "0.2.0", path = "crates/lgui-services", default-features = false }
-lgui-store = { version = "0.2.0", path = "crates/lgui-store", optional = true }
-lgui-widgets = { version = "0.2.0", path = "crates/lgui-widgets", optional = true, default-features = false }
+lgui-assets = { version = "0.2.1", path = "crates/lgui-assets", optional = true, default-features = false }
+lgui-core = { version = "0.2.1", path = "crates/lgui-core", default-features = false }
+lgui-diagnostics = { version = "0.2.1", path = "crates/lgui-diagnostics", optional = true }
+lgui-platform-winit = { version = "0.2.1", path = "crates/lgui-platform-winit", optional = true, default-features = false }
+lgui-render-api = { version = "0.2.1", path = "crates/lgui-render-api" }
+lgui-render-skia = { version = "0.2.1", path = "crates/lgui-render-skia", optional = true, default-features = false }
+lgui-router = { version = "0.2.1", path = "crates/lgui-router", optional = true }
+lgui-services = { version = "0.2.1", path = "crates/lgui-services", default-features = false }
+lgui-store = { version = "0.2.1", path = "crates/lgui-store", optional = true }
+lgui-widgets = { version = "0.2.1", path = "crates/lgui-widgets", optional = true, default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-lgui-platform-win32 = { version = "0.2.0", path = "crates/lgui-platform-win32", optional = true, default-features = false }
+lgui-platform-win32 = { version = "0.2.1", path = "crates/lgui-platform-win32", optional = true, default-features = false }
 
 [[example]]
 name = "counter"

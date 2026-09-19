@@ -1,6 +1,6 @@
 [package]
 name = "lgui-core"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 publish = ["crates-io"]
 description = "Platform-neutral runtime and UI primitives for LGUI"
