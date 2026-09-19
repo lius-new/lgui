@@ -6,7 +6,11 @@ publish = false
 description = "Frosted-glass window demo for LGUI: blurs the desktop content behind the window"
 
 [dependencies]
-lgui = { path = "../..", features = ["renderer-skia-software", "widgets"] }
+# `renderer-skia-gl` (OpenGL) is required: it is the only Skia driver that presents a
+# per-pixel-alpha (transparent) window. The software renderer goes through softbuffer,
+# which drops the alpha channel, so transparent windows show a black background and the
+# text anti-aliasing (stored in alpha) is destroyed.
+lgui = { path = "../..", features = ["renderer-skia-gl", "widgets"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
