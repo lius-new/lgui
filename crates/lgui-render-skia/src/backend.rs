@@ -7,7 +7,7 @@ use std::{
 
 use lgui_assets::backend::render_resources;
 use lgui_core::core::{
-    BackdropBlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
+    BlurEdgeMode, BlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
     PhysicalRect, RasterCachePolicy, Scene, ScenePrimitive, StaticLayerBackground,
     StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource, UiPath, UiPathCommand, UiRect,
     VisualStyle,

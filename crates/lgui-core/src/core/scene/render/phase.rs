@@ -49,6 +49,10 @@ pub fn commands_for_phase(
             phase: command_phase,
             ..
         }
+        | ScenePrimitive::ContentBlur {
+            phase: command_phase,
+            ..
+        }
         | ScenePrimitive::Overlay {
             phase: command_phase,
             ..

@@ -3,7 +3,7 @@ use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use crate::memory::ImageCachePolicy;
 
 use super::{
-    ActionId, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
+    ActionId, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec,
     CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, PhysicalSize,
     RenderPhase, ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction,
     UiActionBinding, UiActionHandler, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload,
@@ -20,6 +20,7 @@ pub enum UiNodeKind {
     Glow,
     BackdropBlur,
     BackdropBlurPath,
+    ContentBlur,
     Overlay,
     Line,
     Path,
@@ -257,10 +258,12 @@ pub struct UiNode {
     pub path_style: PathStyle,
     pub image_request: Option<ImageRequest>,
     pub image_fit: ImageFit,
+    pub image_blur: Option<BlurStyle>,
     pub icon_key: Option<&'static str>,
     pub icon_style: IconStyle,
     pub glow: Option<(Color, u8)>,
-    pub backdrop_blur_style: Option<BackdropBlurStyle>,
+    pub backdrop_blur_style: Option<BlurStyle>,
+    pub content_blur_style: Option<BlurStyle>,
     pub overlay_style: Option<OverlayStyle>,
     pub custom_style: Option<CustomPaintStyle>,
     pub compositing_layer: Option<CompositingLayerSpec>,
@@ -307,10 +310,12 @@ impl UiNode {
             path_style: PathStyle::default(),
             image_request: None,
             image_fit: ImageFit::Contain,
+            image_blur: None,
             icon_key: None,
             icon_style: IconStyle::new(Color::WHITE),
             glow: None,
             backdrop_blur_style: None,
+            content_blur_style: None,
             overlay_style: None,
             custom_style: None,
             compositing_layer: None,
@@ -384,10 +389,12 @@ impl UiNode {
             && self.path_style == other.path_style
             && self.image_request == other.image_request
             && self.image_fit == other.image_fit
+            && self.image_blur == other.image_blur
             && self.icon_key == other.icon_key
             && self.icon_style == other.icon_style
             && self.glow == other.glow
             && self.backdrop_blur_style == other.backdrop_blur_style
+            && self.content_blur_style == other.content_blur_style
             && self.overlay_style == other.overlay_style
             && self.custom_style == other.custom_style
             && self.compositing_layer == other.compositing_layer
@@ -601,6 +608,11 @@ impl UiNode {
         self
     }
 
+    pub fn image_blur(mut self, blur: BlurStyle) -> Self {
+        self.image_blur = Some(blur);
+        self
+    }
+
     pub fn icon(mut self, key: &'static str) -> Self {
         self.icon_key = Some(key);
         self
@@ -621,8 +633,13 @@ impl UiNode {
         self
     }
 
-    pub fn backdrop_blur(mut self, style: BackdropBlurStyle) -> Self {
+    pub fn backdrop_blur(mut self, style: BlurStyle) -> Self {
         self.backdrop_blur_style = Some(style);
+        self
+    }
+
+    pub fn content_blur(mut self, style: BlurStyle) -> Self {
+        self.content_blur_style = Some(style);
         self
     }
 

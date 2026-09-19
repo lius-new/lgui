@@ -58,6 +58,7 @@ pub enum ScenePrimitive {
         source: UiImageSource,
         request: ImageRequest,
         fit: ImageFit,
+        blur: Option<BlurStyle>,
         phase: RenderPhase,
     },
     Icon {
@@ -77,14 +78,22 @@ pub enum ScenePrimitive {
     BackdropBlur {
         id: UiId,
         rect: UiRect,
-        style: BackdropBlurStyle,
+        style: BlurStyle,
         phase: RenderPhase,
     },
     BackdropBlurPath {
         id: UiId,
         rect: UiRect,
         path: UiPath,
-        style: BackdropBlurStyle,
+        style: BlurStyle,
+        phase: RenderPhase,
+    },
+    ContentBlur {
+        id: UiId,
+        rect: UiRect,
+        style: BlurStyle,
+        commands: Vec<ScenePrimitive>,
+        child_signature: u64,
         phase: RenderPhase,
     },
     Overlay {
@@ -148,6 +157,7 @@ pub enum ScenePrimitiveKind {
     Glow,
     BackdropBlur,
     BackdropBlurPath,
+    ContentBlur,
     Overlay,
     CompositingLayer,
     StaticLayer,
@@ -157,7 +167,7 @@ pub enum ScenePrimitiveKind {
 }
 
 impl ScenePrimitiveKind {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Rect,
         Self::Ellipse,
         Self::Text,
@@ -169,6 +179,7 @@ impl ScenePrimitiveKind {
         Self::Glow,
         Self::BackdropBlur,
         Self::BackdropBlurPath,
+        Self::ContentBlur,
         Self::Overlay,
         Self::CompositingLayer,
         Self::StaticLayer,
@@ -190,6 +201,7 @@ impl ScenePrimitiveKind {
             Self::Glow => "Glow",
             Self::BackdropBlur => "BackdropBlur",
             Self::BackdropBlurPath => "BackdropBlurPath",
+            Self::ContentBlur => "ContentBlur",
             Self::Overlay => "Overlay",
             Self::CompositingLayer => "CompositingLayer",
             Self::StaticLayer => "StaticLayer",
@@ -239,6 +251,7 @@ impl ScenePrimitive {
             }
             Self::StaticLayer { commands, .. }
             | Self::ScrollRaster { commands, .. }
+            | Self::ContentBlur { commands, .. }
             | Self::Clip { commands, .. }
             | Self::ClipPath { commands, .. } => commands.iter().any(Self::contains_shadow),
             _ => false,
@@ -258,6 +271,7 @@ impl ScenePrimitive {
             Self::Glow { .. } => ScenePrimitiveKind::Glow,
             Self::BackdropBlur { .. } => ScenePrimitiveKind::BackdropBlur,
             Self::BackdropBlurPath { .. } => ScenePrimitiveKind::BackdropBlurPath,
+            Self::ContentBlur { .. } => ScenePrimitiveKind::ContentBlur,
             Self::Overlay { .. } => ScenePrimitiveKind::Overlay,
             Self::CompositingLayer { .. } => ScenePrimitiveKind::CompositingLayer,
             Self::StaticLayer { .. } => ScenePrimitiveKind::StaticLayer,
@@ -280,6 +294,7 @@ impl ScenePrimitive {
             | ScenePrimitive::Glow { id, .. }
             | ScenePrimitive::BackdropBlur { id, .. }
             | ScenePrimitive::BackdropBlurPath { id, .. }
+            | ScenePrimitive::ContentBlur { id, .. }
             | ScenePrimitive::Overlay { id, .. }
             | ScenePrimitive::CompositingLayer { id, .. }
             | ScenePrimitive::StaticLayer { id, .. }
@@ -302,6 +317,7 @@ impl ScenePrimitive {
             | ScenePrimitive::Glow { phase, .. }
             | ScenePrimitive::BackdropBlur { phase, .. }
             | ScenePrimitive::BackdropBlurPath { phase, .. }
+            | ScenePrimitive::ContentBlur { phase, .. }
             | ScenePrimitive::Overlay { phase, .. }
             | ScenePrimitive::CompositingLayer { phase, .. }
             | ScenePrimitive::StaticLayer { phase, .. }
@@ -323,6 +339,7 @@ impl ScenePrimitive {
             | ScenePrimitive::Glow { rect, .. }
             | ScenePrimitive::BackdropBlur { rect, .. }
             | ScenePrimitive::BackdropBlurPath { rect, .. }
+            | ScenePrimitive::ContentBlur { rect, .. }
             | ScenePrimitive::Overlay { rect, .. } => *rect,
             ScenePrimitive::CompositingLayer { rect, .. } => *rect,
             ScenePrimitive::StaticLayer { rect, spec, .. } => {
@@ -356,7 +373,16 @@ impl ScenePrimitive {
             }
             _ => 0.0,
         };
-        let outset = (stroke_width.max(0.0) + 1.0) / 2.0;
+        let blur_outset = match self {
+            ScenePrimitive::BackdropBlur { style, .. }
+            | ScenePrimitive::BackdropBlurPath { style, .. }
+            | ScenePrimitive::ContentBlur { style, .. } => style.outset(),
+            ScenePrimitive::Image {
+                blur: Some(blur), ..
+            } => blur.outset(),
+            _ => 0.0,
+        };
+        let outset = (stroke_width.max(0.0) + 1.0) / 2.0 + blur_outset;
         rect.inflate(outset, outset)
     }
 

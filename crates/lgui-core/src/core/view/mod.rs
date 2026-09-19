@@ -1,6 +1,6 @@
 use super::{
     async_handler, compile_scene, ActionId, AnimProperty, AnimationBinding, AnimationRegistry,
-    BackdropBlurStyle, Color, ComponentId, ComponentStateStore, ComponentTree,
+    BlurStyle, Color, ComponentId, ComponentStateStore, ComponentTree,
     CompositingLayerAnimation, CompositingLayerSpec, ContextRegistry, CustomPaintStyle,
     EffectRegistry, HookStateStore, IconStyle, ImageFit, KeyboardEvent, LayoutSpec, OverlayStyle,
     PathStyle, PhysicalSize, Point, PointerData, RenderCx, RenderPhase, Scene, ScrollRasterSpec,
@@ -19,10 +19,10 @@ mod tree;
 
 pub use builder::{HostProjectionMetrics, HostTreeBuilder, RootComponent};
 pub use declarative::{
-    animated_compositing_layer, clip, clip_path, component, compositing_layer, content_text,
-    context_provider, ellipse, fragment, glow, group, line, overlay, path, precompiled, text,
-    DeclarativeView, Element, ElementKey, ElementRenderCx, Fragment, IntoClickHandler,
-    IntoElementContent,
+    animated_compositing_layer, backdrop_blur, backdrop_blur_path, clip, clip_path, component,
+    compositing_layer, content_blur, content_text, context_provider, ellipse, fragment, glow,
+    group, line, overlay, path, precompiled, text, DeclarativeView, Element, ElementKey,
+    ElementRenderCx, Fragment, IntoClickHandler, IntoElementContent,
 };
 pub use element::{UiComponent, UiElement};
 pub use node::{

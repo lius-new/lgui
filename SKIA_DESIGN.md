@@ -60,7 +60,7 @@ The implementation currently provides:
 
 - a backend-neutral retained Host tree, incremental Scene, logical floating-point geometry,
   outward-rounded physical damage, and renderer lifecycle;
-- real Skia paint paths for all 17 `ScenePrimitive` variants, including nested clips, custom
+- real Skia paint paths for all 18 `ScenePrimitive` variants, including nested clips, custom
   `SceneFragment` content, static/compositing layers, scroll raster content, images, SVG, blur,
   overlays, opacity, and DPI projection;
 - one SkParagraph text path for measurement and painting with bidi layout, grapheme clusters,
@@ -285,6 +285,7 @@ animation frequency, but input, exposure, and final layout remain responsive.
 | `Icon` | Skia SVG DOM or recorded picture | parsed SVG and raster/GPU resources |
 | `Glow` | mask/image filter or bounded layer | filter keyed by radius/color |
 | `BackdropBlur`, `BackdropBlurPath` | bounded backdrop filter | filter; no full-window copy |
+| `ContentBlur` | offscreen layer plus image filter | budgeted blurred-layer cache |
 | `Overlay` | native Skia gradient shader | shader keyed by gradient specification |
 | `Clip`, `ClipPath` | Canvas save, clip, restore | cached path where applicable |
 | `StaticLayer` | SkSurface snapshot or SkPicture | budgeted layer cache |

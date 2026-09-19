@@ -267,6 +267,7 @@ fn is_scene_container(kind: UiNodeKind) -> bool {
         UiNodeKind::CompositingLayer
             | UiNodeKind::StaticLayer
             | UiNodeKind::ScrollRaster
+            | UiNodeKind::ContentBlur
             | UiNodeKind::Clip
             | UiNodeKind::ClipPath
     )

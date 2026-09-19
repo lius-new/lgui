@@ -1,7 +1,7 @@
 use std::{borrow::Cow, future::Future, sync::Arc};
 
 use super::{
-    async_handler, AnimationBinding, BackdropBlurStyle, Color, ComponentId, CompositingLayerSpec,
+    async_handler, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec,
     CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, ImageRequest,
     InteractionRole, LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec,
     StaticLayerSpec, TextStyle, UiAction, UiAsyncContext, UiEventContext, UiEventHandler,
@@ -123,7 +123,7 @@ impl UiElement {
         Self::new(id, UiNodeKind::Glow, rect).glow_effect(color, alpha)
     }
 
-    pub fn backdrop_blur(id: UiId, rect: UiRect, style: BackdropBlurStyle) -> Self {
+    pub fn backdrop_blur(id: UiId, rect: UiRect, style: BlurStyle) -> Self {
         Self::new(id, UiNodeKind::BackdropBlur, rect).backdrop_blur_style(style)
     }
 
@@ -131,11 +131,15 @@ impl UiElement {
         id: UiId,
         rect: UiRect,
         path: UiPath,
-        style: BackdropBlurStyle,
+        style: BlurStyle,
     ) -> Self {
         Self::new(id, UiNodeKind::BackdropBlurPath, rect)
             .path_content(path, PathStyle::default())
             .backdrop_blur_style(style)
+    }
+
+    pub fn content_blur(id: UiId, rect: UiRect, style: BlurStyle) -> Self {
+        Self::new(id, UiNodeKind::ContentBlur, rect).content_blur_style(style)
     }
 
     pub fn overlay(id: UiId, rect: UiRect, style: OverlayStyle) -> Self {
@@ -358,6 +362,11 @@ impl UiElement {
         self
     }
 
+    pub fn image_blur(mut self, blur: BlurStyle) -> Self {
+        self.node = self.node.image_blur(blur);
+        self
+    }
+
     pub fn icon_key(mut self, key: &'static str) -> Self {
         self.node = self.node.icon(key);
         self
@@ -378,8 +387,13 @@ impl UiElement {
         self
     }
 
-    pub fn backdrop_blur_style(mut self, style: BackdropBlurStyle) -> Self {
+    pub fn backdrop_blur_style(mut self, style: BlurStyle) -> Self {
         self.node = self.node.backdrop_blur(style);
+        self
+    }
+
+    pub fn content_blur_style(mut self, style: BlurStyle) -> Self {
+        self.node = self.node.content_blur(style);
         self
     }
 

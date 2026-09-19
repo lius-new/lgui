@@ -6,6 +6,23 @@ This document records the intended blur semantics and backend ownership before t
 implementation is refactored. It exists to keep the next implementation pass focused and may be
 replaced by the relevant architecture and API documentation after the design is implemented.
 
+The desktop stack is Skia-only after the removal of the GDI and Direct2D renderers; all blur work
+below is scoped to the single Skia backend.
+
+Implementation status (2026):
+
+- `BackdropBlurStyle` was replaced by the portable `BlurStyle` (`sigma_x`, `sigma_y`, `edge_mode`,
+  `opacity`, `tint`, `tint_alpha`); the misleading `source`/`fit`/`source_rect`/`radius` fields
+  were removed.
+- `BackdropBlur`/`BackdropBlurPath` now sample the accumulated render target via
+  `SkCanvas::SaveLayerRec::backdrop` (no image source).
+- A new `ContentBlur` primitive and `UiNodeKind::ContentBlur`/`Element::content_blur` were added;
+  the Skia backend rasterizes the subtree and blurs it with an image filter.
+- `Image` primitives accept an optional `blur: BlurStyle`.
+- `examples/backdrop.rs` demonstrates all three effects; `lgui-render-skia` gained two backdrop
+  conformance tests (`backdrop_blur_samples_pixels_behind_and_reacts_to_them`,
+  `backdrop_blur_softens_edges_and_respects_opacity`).
+
 ## Decision Summary
 
 - Blur is a renderer effect. It is not an image asset capability and does not belong to a window
@@ -14,9 +31,6 @@ replaced by the relevant architecture and API documentation after the design is 
   the pixels already drawn behind an element are other possible inputs.
 - `lgui-core` owns portable effect semantics and Scene representation. Concrete renderers own the
   algorithms and native resources used to implement those semantics.
-- GDI implements blur with renderer-owned offscreen BGRA buffers and a CPU algorithm.
-- Direct2D implements blur with `ID2D1Effect` and `CLSID_D2D1GaussianBlur` when the input is
-  available as a Direct2D image or intermediate surface.
 - Skia implements blur with its image-filter, mask-filter, and layer mechanisms as appropriate.
   In Skia, "image filter" means a filter over rasterized pixels; it is not limited to image assets.
 - The public blur amount should use Gaussian standard deviation (`sigma`) in logical units. Each
@@ -92,8 +106,8 @@ that every backend follows the same order.
 - Backends may use a separable Gaussian, repeated box blur, downsampling, or a native optimized
   implementation, provided conformance images stay within the accepted tolerance.
 
-The current `radius` field is ambiguous: Skia treats it as sigma while the CPU path treats it as a
-box-kernel radius. The refactor must not preserve that mismatch under a new name.
+The current `radius` field is ambiguous: Skia treats it as sigma while the historical CPU path
+treated it as a box-kernel radius. The refactor must not preserve that mismatch under a new name.
 
 ## Ownership
 
@@ -101,51 +115,19 @@ box-kernel radius. The refactor must not preserve that mismatch under a new name
 lgui-core
     portable effect types, Scene commands, ordering, projection, damage
 
-lgui-render-gdi
-    offscreen BGRA capture, CPU blur, clipping, composition, GDI cache
-
-lgui-render-d2d
-    intermediate Direct2D images, GaussianBlur effect graph, D2D cache
-
 lgui-render-skia
-    SkImageFilter/SkMaskFilter and filtered-layer integration, Skia cache
-
-lgui-platform-win32
-    Win32 window/surface integration and generic native pixel interop only
+    SkImageFilter/SkMaskFilter and filtered-layer integration, backdrop sampling, Skia caches
 
 lgui-assets
     image loading, decoding, identity, and lifetime; no blur algorithm
 ```
 
-Shared conformance fixtures can live outside individual backends. Production blur algorithms and
-native effect objects must remain owned by the backend that executes them. A CPU implementation
-may be extracted into a renderer-neutral raster utility only if more than one renderer actually
-uses the same algorithm and pixel contract; it must not be placed in `lgui-platform-win32` merely
-because GDI and Direct2D run on Windows.
+Shared conformance fixtures can live outside the renderer. Production blur algorithms and native
+effect objects must remain owned by the renderer that executes them. With a single Skia renderer
+there is no shared CPU helper; a raster utility may exist inside `lgui-render-skia` but must not
+be placed in `lgui-platform-win32` or `lgui-assets`.
 
 ## Backend Notes
-
-### GDI
-
-Classic GDI has no native Gaussian-blur filter. The GDI backend can still support all portable blur
-semantics by rendering or copying the required region into a 32-bit premultiplied BGRA DIB,
-filtering it on the CPU, and compositing it back with the correct clip and alpha.
-
-True backdrop blur should operate on the renderer's current offscreen frame whenever possible.
-Reading arbitrary screen pixels is not a reliable substitute and would produce incorrect results
-with occlusion or desktop composition. Large sigma values may use downsampling and repeated box
-passes, but they must conform to the same sigma and edge contract as the other backends.
-
-### Direct2D
-
-The Direct2D backend should render the effect input to an intermediate image or command list and
-feed that image to `CLSID_D2D1GaussianBlur`. The implementation should set standard deviation,
-optimization, and border properties deliberately. Hardware acceleration is expected when the
-active Direct2D device supports it, but semantic correctness cannot depend on the work running on
-the GPU.
-
-Backdrop blur still requires the renderer to make previously drawn content available as an input;
-creating a Gaussian effect alone does not establish backdrop semantics.
 
 ### Skia
 
@@ -153,22 +135,31 @@ Skia's `SkImageFilter` filters rasterized drawing output. It can therefore proce
 the output of shapes and text drawn into a saved layer, or another filter's output. Image assets do
 not own this capability.
 
-The Skia backend should select the appropriate filter/layer path for each target. The active Skia
-surface decides whether work runs through a GPU implementation or the raster pipeline; the public
-effect semantics remain identical.
+The Skia backend should select the appropriate filter/layer path for each target:
+
+- image blur uses an image filter over the decoded image;
+- content blur rasterizes the subtree into an offscreen layer and filters that layer;
+- backdrop blur samples the accumulated render target behind the element (or an intermediate
+  surface capturing the background), filters an outset-expanded region, and composites it through
+  the clip.
+
+The active Skia surface decides whether work runs through a GPU implementation or the raster
+pipeline; the public effect semantics remain identical across drivers.
 
 ## Current Implementation Mismatch
 
-The current `BackdropBlurStyle` contains `source`, `fit`, and `source_rect`. All three renderers use
-that source image and blur its pixels:
+The current `BackdropBlurStyle` contains `source`, `fit`, `source_rect`, and `radius`. The Skia
+backend loads that source image and blurs its pixels:
 
-- Skia loads the image, installs `image_filters::blur` on a paint, and draws that image.
-- Direct2D calls the shared Win32 CPU helper, uploads the resulting BGRA pixels, and draws a bitmap.
-- GDI calls the same shared Win32 CPU helper and blits the resulting bitmap.
+- `draw_backdrop` resolves the image from `UiImageSource::Static(style.source)`, installs
+  `image_filters::blur((radius, radius), Clamp)` on the paint, and draws that image clipped to the
+  element rect or path, then applies tint.
 
-This behavior is image blur or background-image blur, not backdrop blur. The shared CPU blur and
-its caches currently live under `lgui-platform-win32/src/render_support/blur.rs`, even though the
-algorithm is renderer behavior. Direct2D also does not currently use its native Gaussian effect.
+This behavior is image blur or background-image blur, not backdrop blur. The `radius` value is
+passed directly to Skia as a Gaussian sigma even though the field name suggests a radius. The
+former GDI and Direct2D backends and their shared CPU blur helper under
+`lgui-platform-win32/src/render_support/blur.rs` were removed in the Skia-only refactor; this
+Skia path is the only remaining implementation.
 
 ## Migration Plan
 
@@ -179,20 +170,21 @@ algorithm is renderer behavior. Direct2D also does not currently use its native 
 3. Introduce the portable Gaussian blur parameter contract and normalize sigma, scale projection,
    edge handling, tint order, opacity, and damage expansion.
 4. Add true backdrop and filtered-content Scene semantics with explicit ordering and clip bounds.
-5. Move the CPU blur implementation and its cache from `lgui-platform-win32` into
-   `lgui-render-gdi`.
-6. Replace the Direct2D CPU/upload path with a Direct2D effect graph and renderer-owned cache.
-7. Update Skia to use the appropriate layer or backdrop input rather than a required static source.
-8. Remove the old misleading types and compatibility path after all internal callers migrate.
-9. Add cross-backend conformance scenes for image, content, backdrop, and mask blur at multiple
-   scale factors, sigma values, edge modes, clips, opacity values, and moving backgrounds.
-10. Update `API.md`, `ARCHITECTURE.md`, crate READMEs, and examples, then retire this draft.
+5. Update the Skia backend to sample the accumulated render target or an intermediate layer for
+   backdrop, and to use filtered layers for content blur, rather than requiring a static source
+   image.
+6. Remove the old misleading types and compatibility path after all internal callers migrate.
+7. Add conformance scenes for image, content, backdrop, and mask blur at multiple scale factors,
+   sigma values, edge modes, clips, opacity values, and moving backgrounds, run across the Skia
+   GPU and software drivers.
+8. Update `API.md`, `ARCHITECTURE.md`, crate READMEs, and examples, then retire this draft.
 
 ## Acceptance Criteria
 
 - No public type named backdrop blur requires an image source.
-- Blur ownership does not reside in `lgui-assets` or either platform crate.
-- GDI, Direct2D, and Skia render the same Scene effect with comparable bounds and intensity.
+- Blur ownership does not reside in `lgui-assets` or the platform crates.
+- The Skia GPU and software drivers render the same Scene effect with comparable bounds and
+  intensity.
 - Backdrop output changes when an earlier intersecting Scene command changes, including when the
   backdrop element and its style are otherwise unchanged.
 - Cache keys include every dependency that can affect filtered pixels; stale backdrop content is
@@ -207,6 +199,4 @@ algorithm is renderer behavior. Direct2D also does not currently use its native 
 - Whether the first public API exposes only Gaussian blur or a general ordered effect chain.
 - Whether image effects are fields on image primitives or represented by a general filtered layer.
 - Whether backdrop tint belongs to the backdrop primitive or a following compositing command.
-- The exact visual tolerance and reference backend for cross-renderer conformance tests.
-- Whether GDI uses an exact separable Gaussian at small sigma and a downsampled approximation at
-  large sigma, or one approximation strategy for all values.
+- The exact visual tolerance and reference driver for GPU-vs-software conformance tests.

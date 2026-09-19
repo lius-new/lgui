@@ -231,6 +231,7 @@ fn primitive_inventory() -> Vec<ScenePrimitive> {
             source: image_source.clone(),
             request: lgui_core::core::ImageRequest::new(image_source),
             fit: ImageFit::Fill,
+            blur: None,
             phase: RenderPhase::Content,
         },
         ScenePrimitive::Icon {
@@ -250,14 +251,22 @@ fn primitive_inventory() -> Vec<ScenePrimitive> {
         ScenePrimitive::BackdropBlur {
             id: test_id("blur"),
             rect,
-            style: BackdropBlurStyle::new("test.pixel", ImageFit::Fill, rect).radius(2.0),
+            style: BlurStyle::new(2.0),
             phase: RenderPhase::Content,
         },
         ScenePrimitive::BackdropBlurPath {
             id: test_id("blur-path"),
             rect,
             path: triangle(rect),
-            style: BackdropBlurStyle::new("test.pixel", ImageFit::Fill, rect).radius(2.0),
+            style: BlurStyle::new(2.0),
+            phase: RenderPhase::Content,
+        },
+        ScenePrimitive::ContentBlur {
+            id: test_id("content-blur"),
+            rect,
+            style: BlurStyle::new(2.0),
+            commands: child.clone(),
+            child_signature: 1,
             phase: RenderPhase::Content,
         },
         ScenePrimitive::Overlay {
@@ -438,6 +447,96 @@ fn every_scene_primitive_has_a_real_skia_paint_path() {
             &[PhysicalRect::new(0, 0, 32, 32)],
         );
     }
+}
+
+#[test]
+fn backdrop_blur_samples_pixels_behind_and_reacts_to_them() {
+    let full = [PhysicalRect::new(0, 0, 32, 32)];
+    let panel = |name: &str| ScenePrimitive::BackdropBlur {
+        id: test_id(name),
+        rect: UiRect::new(8.0, 8.0, 24.0, 24.0),
+        style: BlurStyle::new(3.0),
+        phase: RenderPhase::Content,
+    };
+
+    // Red background with the frosted panel on top.
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
+    let mut red = Scene::new();
+    red.push(rect_command(
+        "bg",
+        UiRect::new(0.0, 0.0, 32.0, 32.0),
+        Color(0xFF0000),
+    ));
+    red.push(panel("blur"));
+    draw_scene(&mut surface, &red, true, &full);
+
+    // BGRA layout: [B, G, R, A]. The panel center must sample the red background
+    // (no image source), so it cannot be transparent.
+    let center = pixel(&surface, 16, 16);
+    assert!(center[3] > 0, "backdrop must be opaque, got {center:?}");
+    assert!(center[2] > 0, "backdrop must sample red, got {center:?}");
+
+    // Change the background behind the unchanged panel and redraw.
+    let mut blue = Scene::new();
+    blue.push(rect_command(
+        "bg",
+        UiRect::new(0.0, 0.0, 32.0, 32.0),
+        Color(0x0000FF),
+    ));
+    blue.push(panel("blur"));
+    draw_scene(&mut surface, &blue, true, &full);
+
+    let center_after = pixel(&surface, 16, 16);
+    assert!(center_after[0] > 0, "backdrop must sample blue, got {center_after:?}");
+    assert_ne!(center, center_after, "backdrop must react to the background behind it");
+}
+
+#[test]
+fn backdrop_blur_softens_edges_and_respects_opacity() {
+    let full = [PhysicalRect::new(0, 0, 32, 32)];
+    let panel = |opacity: f32| ScenePrimitive::BackdropBlur {
+        id: test_id("blur"),
+        rect: UiRect::new(8.0, 8.0, 24.0, 24.0),
+        style: BlurStyle::new(4.0).opacity(opacity),
+        phase: RenderPhase::Content,
+    };
+
+    // A sharp vertical edge between red and blue sits behind the panel.
+    let background = vec![
+        rect_command("red", UiRect::new(0.0, 0.0, 16.0, 32.0), Color(0xFF0000)),
+        rect_command("blue", UiRect::new(16.0, 0.0, 32.0, 32.0), Color(0x0000FF)),
+    ];
+
+    let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
+    let mut scene = Scene::new();
+    for command in background {
+        scene.push(command);
+    }
+    scene.push(panel(1.0));
+    draw_scene(&mut surface, &scene, true, &full);
+
+    // At the edge, full-opacity backdrop blur mixes the two colors (BGRA: [B, G, R, A]).
+    let blurred = pixel(&surface, 16, 16);
+    assert!(blurred[0] > 0 && blurred[2] > 0, "blur must mix red and blue, got {blurred:?}");
+
+    // At zero opacity the frost disappears and the raw sharp edge shows through.
+    let mut scene = Scene::new();
+    scene.push(rect_command(
+        "red",
+        UiRect::new(0.0, 0.0, 16.0, 32.0),
+        Color(0xFF0000),
+    ));
+    scene.push(rect_command(
+        "blue",
+        UiRect::new(16.0, 0.0, 32.0, 32.0),
+        Color(0x0000FF),
+    ));
+    scene.push(panel(0.0));
+    draw_scene(&mut surface, &scene, true, &full);
+
+    let raw = pixel(&surface, 16, 16);
+    assert_eq!(raw[0], 255, "zero opacity must reveal the raw blue edge, got {raw:?}");
+    assert_eq!(raw[2], 0, "zero opacity must reveal the raw blue edge, got {raw:?}");
 }
 
 #[test]

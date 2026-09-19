@@ -74,10 +74,12 @@ pub(super) fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.path_style != next.path_style
         || previous.image_request != next.image_request
         || previous.image_fit != next.image_fit
+        || previous.image_blur != next.image_blur
         || previous.icon_key != next.icon_key
         || previous.icon_style != next.icon_style
         || previous.glow != next.glow
         || previous.backdrop_blur_style != next.backdrop_blur_style
+        || previous.content_blur_style != next.content_blur_style
         || previous.overlay_style != next.overlay_style
         || previous.custom_style != next.custom_style
         || previous.compositing_layer != next.compositing_layer

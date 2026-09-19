@@ -221,32 +221,53 @@ impl OverlayStyle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BlurEdgeMode {
+    /// Pixels sampled outside the affected region are treated as transparent.
+    Transparent,
+    /// Pixels sampled outside the affected region clamp to the nearest edge pixel.
+    Clamp,
+}
+
+/// A portable Gaussian blur effect.
+///
+/// `sigma_x` and `sigma_y` are Gaussian standard deviations in logical UI units.
+/// They are projected to the target coordinate space by the renderer, so an
+/// effect stays visually consistent across scale factors.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BackdropBlurStyle {
-    pub source: &'static str,
-    pub fit: ImageFit,
-    pub source_rect: super::UiRect,
-    pub radius: f32,
+pub struct BlurStyle {
+    pub sigma_x: f32,
+    pub sigma_y: f32,
+    pub edge_mode: BlurEdgeMode,
     pub opacity: f32,
     pub tint: Color,
     pub tint_alpha: f32,
 }
 
-impl BackdropBlurStyle {
-    pub const fn new(source: &'static str, fit: ImageFit, source_rect: super::UiRect) -> Self {
+impl BlurStyle {
+    pub const fn new(sigma: f32) -> Self {
         Self {
-            source,
-            fit,
-            source_rect,
-            radius: 24.0,
+            sigma_x: sigma,
+            sigma_y: sigma,
+            edge_mode: BlurEdgeMode::Clamp,
             opacity: 1.0,
             tint: Color::BLACK,
             tint_alpha: 0.0,
         }
     }
 
-    pub const fn radius(mut self, radius: f32) -> Self {
-        self.radius = radius;
+    pub const fn sigma_x(mut self, sigma: f32) -> Self {
+        self.sigma_x = sigma;
+        self
+    }
+
+    pub const fn sigma_y(mut self, sigma: f32) -> Self {
+        self.sigma_y = sigma;
+        self
+    }
+
+    pub const fn edge_mode(mut self, mode: BlurEdgeMode) -> Self {
+        self.edge_mode = mode;
         self
     }
 
@@ -259,6 +280,17 @@ impl BackdropBlurStyle {
         self.tint = tint;
         self.tint_alpha = alpha;
         self
+    }
+
+    /// Largest Gaussian sigma across both axes, used to size blur outsets.
+    pub fn sigma(self) -> f32 {
+        self.sigma_x.max(self.sigma_y).max(0.0)
+    }
+
+    /// Amount by which the affected region must be expanded so blurred pixels
+    /// are not clipped (approximately `3 * sigma` on each side).
+    pub fn outset(self) -> f32 {
+        3.0 * self.sigma()
     }
 }
 

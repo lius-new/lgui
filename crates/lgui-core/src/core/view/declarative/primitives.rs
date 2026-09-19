@@ -116,6 +116,24 @@ pub fn overlay(rect: UiRect, style: OverlayStyle) -> Element {
     Element::new(move |cx: ElementRenderCx<'_, '_, '_>| UiElement::overlay(cx.id, rect, style))
 }
 
+pub fn backdrop_blur(rect: UiRect, style: BlurStyle) -> Element {
+    Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+        UiElement::backdrop_blur(cx.id, rect, style)
+    })
+}
+
+pub fn backdrop_blur_path(rect: UiRect, path: UiPath, style: BlurStyle) -> Element {
+    Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+        UiElement::backdrop_blur_path(cx.id, rect, path, style)
+    })
+}
+
+pub fn content_blur(rect: UiRect, style: BlurStyle) -> Element {
+    Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+        UiElement::content_blur(cx.id, rect, style).children(cx.children)
+    })
+}
+
 pub fn clip(rect: UiRect, offset_x: f32, offset_y: f32) -> Element {
     Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
         UiElement::clip(cx.id, rect, offset_x, offset_y).children(cx.children)

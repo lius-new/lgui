@@ -1,5 +1,5 @@
 use super::{
-    normalized_f32_bits, BackdropBlurStyle, Color, CustomPaintStyle, HostTree, IconStyle, ImageFit,
+    normalized_f32_bits, BlurStyle, Color, CustomPaintStyle, HostTree, IconStyle, ImageFit,
     ImageRequest, OverlayStyle, PathStyle, Point, Stroke, TextStyle, UiId, UiImageSource, UiNode,
     UiNodeKind, UiPath, UiPathCommand, UiRect, UiScale, VisualStyle,
 };

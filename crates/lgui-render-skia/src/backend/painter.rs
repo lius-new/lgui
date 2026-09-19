@@ -35,10 +35,22 @@ impl SkiaPainter<'_> {
             }
             ScenePrimitive::Path { path, style, .. } => draw_path(canvas, path, *style),
             ScenePrimitive::Image {
-                rect, request, fit, ..
+                rect,
+                request,
+                fit,
+                blur,
+                ..
             } => {
                 if let Some(image) = self.image(request)? {
-                    draw_image(canvas, &image, *rect, *fit, None);
+                    match blur {
+                        Some(blur) if blur.sigma() > 0.0 => {
+                            let mut paint = Paint::default();
+                            paint.set_alpha_f(blur.opacity.clamp(0.0, 1.0));
+                            paint.set_image_filter(blur_image_filter(*blur));
+                            draw_image(canvas, &image, *rect, *fit, Some(&paint));
+                        }
+                        _ => draw_image(canvas, &image, *rect, *fit, None),
+                    }
                 }
             }
             ScenePrimitive::Icon {
@@ -58,6 +70,14 @@ impl SkiaPainter<'_> {
             ScenePrimitive::BackdropBlurPath {
                 rect, path, style, ..
             } => self.draw_backdrop(canvas, *rect, Some(path), *style)?,
+            ScenePrimitive::ContentBlur {
+                id,
+                rect,
+                style,
+                commands,
+                child_signature,
+                ..
+            } => self.draw_content_blur(canvas, id, *rect, *style, commands, *child_signature)?,
             ScenePrimitive::Overlay { rect, style, .. } => draw_overlay(canvas, *rect, style),
             ScenePrimitive::Custom {
                 rect, key, style, ..
@@ -313,33 +333,66 @@ impl SkiaPainter<'_> {
         canvas: &Canvas,
         rect: UiRect,
         path: Option<&UiPath>,
-        style: BackdropBlurStyle,
+        style: BlurStyle,
     ) -> Result<(), String> {
-        let Some(image) = self.image(&ImageRequest::new(UiImageSource::Static(style.source)))?
-        else {
-            return Ok(());
-        };
         canvas.save();
         if let Some(path) = path {
             canvas.clip_path(&sk_path(path), None, true);
         } else {
             canvas.clip_rect(sk_rect(rect), None, true);
         }
-        let mut paint = Paint::default();
-        paint.set_alpha_f(style.opacity.clamp(0.0, 1.0));
-        paint.set_image_filter(skia_safe::image_filters::blur(
-            (style.radius.max(0.0), style.radius.max(0.0)),
-            TileMode::Clamp,
-            None,
-            None,
-        ));
-        draw_image(canvas, &image, style.source_rect, style.fit, Some(&paint));
+        if let Some(filter) = blur_image_filter(style) {
+            let filter = scaled_by_alpha(filter, style.opacity);
+            let bounds_rect = sk_rect(rect.inflate(style.outset(), style.outset()));
+            let rec = skia_safe::canvas::SaveLayerRec::default()
+                .bounds(&bounds_rect)
+                .backdrop(&filter)
+                .backdrop_tile_mode(blur_tile_mode(style.edge_mode));
+            canvas.save_layer(&rec);
+            canvas.restore();
+        }
         if style.tint_alpha > 0.0 {
             let mut tint = color_paint(style.tint, (style.tint_alpha * 255.0).round() as u8);
             tint.set_blend_mode(BlendMode::SrcOver);
             canvas.draw_rect(sk_rect(rect), &tint);
         }
         canvas.restore();
+        Ok(())
+    }
+
+    fn draw_content_blur(
+        &mut self,
+        canvas: &Canvas,
+        id: &lgui_core::core::UiId,
+        rect: UiRect,
+        style: BlurStyle,
+        commands: &[ScenePrimitive],
+        child_signature: u64,
+    ) -> Result<(), String> {
+        let key = format!(
+            "content-blur:{}:{}:{}x{}:{:?}",
+            id.as_str(),
+            child_signature,
+            rect.width().ceil(),
+            rect.height().ceil(),
+            style.edge_mode,
+        );
+        let content = if let Some(image) = self.cache.get(&key) {
+            image
+        } else {
+            let mut surface = layer_surface(rect.width(), rect.height())?;
+            let layer_canvas = surface.canvas();
+            layer_canvas.clear(SkColor::TRANSPARENT);
+            layer_canvas.translate((-rect.left, -rect.top));
+            self.draw_commands(layer_canvas, commands, Some(rect))?;
+            self.cache.insert(key, surface.image_snapshot())
+        };
+        let mut paint = Paint::default();
+        paint.set_alpha_f(style.opacity.clamp(0.0, 1.0));
+        if let Some(filter) = blur_image_filter(style) {
+            paint.set_image_filter(filter);
+        }
+        canvas.draw_image_rect(content, None, &sk_rect(rect), &paint);
         Ok(())
     }
 
@@ -417,4 +470,37 @@ impl SkiaPainter<'_> {
         canvas.restore();
         Ok(())
     }
+}
+
+fn blur_tile_mode(mode: BlurEdgeMode) -> TileMode {
+    match mode {
+        BlurEdgeMode::Clamp => TileMode::Clamp,
+        BlurEdgeMode::Transparent => TileMode::Decal,
+    }
+}
+
+fn blur_image_filter(style: BlurStyle) -> Option<skia_safe::ImageFilter> {
+    let sigma = style.sigma();
+    if sigma <= 0.0 {
+        return None;
+    }
+    skia_safe::image_filters::blur(
+        (style.sigma_x.max(0.0), style.sigma_y.max(0.0)),
+        blur_tile_mode(style.edge_mode),
+        None,
+        None,
+    )
+}
+
+fn scaled_by_alpha(filter: skia_safe::ImageFilter, opacity: f32) -> skia_safe::ImageFilter {
+    let opacity = opacity.clamp(0.0, 1.0);
+    if opacity >= 1.0 {
+        return filter;
+    }
+    let matrix: [f32; 20] = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, opacity, 0.0,
+    ];
+    let alpha = skia_safe::color_filters::matrix_row_major(&matrix, None);
+    skia_safe::image_filters::color_filter(alpha, filter.clone(), None).unwrap_or(filter)
 }

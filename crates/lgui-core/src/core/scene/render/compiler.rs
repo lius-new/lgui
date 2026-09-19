@@ -25,6 +25,7 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
             UiNodeKind::CompositingLayer
                 | UiNodeKind::StaticLayer
                 | UiNodeKind::ScrollRaster
+                | UiNodeKind::ContentBlur
                 | UiNodeKind::Clip
                 | UiNodeKind::ClipPath
         ) {
@@ -100,6 +101,21 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
                     });
                 }
             }
+            if let UiNodeKind::ContentBlur = node.kind {
+                if let Some(style) = node.content_blur_style {
+                    let commands =
+                        compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
+                    let child_signature = command_signature(&commands);
+                    list.push(ScenePrimitive::ContentBlur {
+                        id: node.id.clone(),
+                        rect: node.layout_rect,
+                        style,
+                        commands,
+                        child_signature,
+                        phase: node.render_phase,
+                    });
+                }
+            }
             translate_popup_root_commands(&mut list, tree, node, command_start);
             continue;
         }
@@ -129,6 +145,7 @@ pub fn scene_root_ids(tree: &HostTree) -> Vec<UiId> {
                 UiNodeKind::CompositingLayer
                     | UiNodeKind::StaticLayer
                     | UiNodeKind::ScrollRaster
+                    | UiNodeKind::ContentBlur
                     | UiNodeKind::Clip
                     | UiNodeKind::ClipPath
             )
@@ -176,6 +193,7 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
         UiNodeKind::CompositingLayer
             | UiNodeKind::StaticLayer
             | UiNodeKind::ScrollRaster
+            | UiNodeKind::ContentBlur
             | UiNodeKind::Clip
             | UiNodeKind::ClipPath
     ) {
@@ -235,6 +253,21 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
                     id: node.id.clone(),
                     rect: node.clip_rect.unwrap_or(node.layout_rect),
                     path,
+                    commands,
+                    child_signature,
+                    phase: node.render_phase,
+                });
+            }
+        }
+        if let UiNodeKind::ContentBlur = node.kind {
+            if let Some(style) = node.content_blur_style {
+                let commands =
+                    compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
+                let child_signature = command_signature(&commands);
+                list.push(ScenePrimitive::ContentBlur {
+                    id: node.id.clone(),
+                    rect: node.layout_rect,
+                    style,
                     commands,
                     child_signature,
                     phase: node.render_phase,
@@ -511,6 +544,22 @@ fn push_node_and_children(
         }
         return;
     }
+    if let UiNodeKind::ContentBlur = node.kind {
+        if let Some(style) = node.content_blur_style {
+            let layer_commands =
+                compile_static_layer_commands(tree, node, skip, include_popup_subtree);
+            let child_signature = command_signature(&layer_commands);
+            commands.push(ScenePrimitive::ContentBlur {
+                id: node.id.clone(),
+                rect: node.layout_rect,
+                style,
+                commands: layer_commands,
+                child_signature,
+                phase: node.render_phase,
+            });
+        }
+        return;
+    }
     if !matches!(
         node.kind,
         UiNodeKind::Group
@@ -518,6 +567,7 @@ fn push_node_and_children(
             | UiNodeKind::CompositingLayer
             | UiNodeKind::StaticLayer
             | UiNodeKind::ScrollRaster
+            | UiNodeKind::ContentBlur
             | UiNodeKind::ClipPath
     ) {
         push_node_commands_vec(commands, node);
@@ -610,6 +660,7 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
                 source: request.source().clone(),
                 request: request.clone(),
                 fit: node.image_fit,
+                blur: node.image_blur,
                 phase: node.render_phase,
             });
         }

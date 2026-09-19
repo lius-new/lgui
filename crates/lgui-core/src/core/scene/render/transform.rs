@@ -133,6 +133,7 @@ fn translate_command_with_policy(
             source,
             request,
             fit,
+            blur,
             phase,
         } => ScenePrimitive::Image {
             id: id.clone(),
@@ -140,6 +141,7 @@ fn translate_command_with_policy(
             source: source.clone(),
             request: request.clone(),
             fit: *fit,
+            blur: *blur,
             phase: *phase,
         },
         ScenePrimitive::Icon {
@@ -190,6 +192,21 @@ fn translate_command_with_policy(
             rect: translate_rect(*rect),
             path: translate_path(path, dx, dy),
             style: *style,
+            phase: *phase,
+        },
+        ScenePrimitive::ContentBlur {
+            id,
+            rect,
+            style,
+            commands,
+            child_signature,
+            phase,
+        } => ScenePrimitive::ContentBlur {
+            id: id.clone(),
+            rect: translate_rect(*rect),
+            style: *style,
+            commands: translate_commands_with_policy(commands.clone(), dx, dy, nested_static_layer),
+            child_signature: *child_signature,
             phase: *phase,
         },
         ScenePrimitive::Overlay {

@@ -96,6 +96,7 @@ pub(super) fn command_signature_part(command: &ScenePrimitive, hasher: &mut Defa
             source,
             request,
             fit,
+            blur,
             phase,
         } => {
             "image".hash(hasher);
@@ -104,6 +105,13 @@ pub(super) fn command_signature_part(command: &ScenePrimitive, hasher: &mut Defa
             source.hash(hasher);
             request.hash(hasher);
             fit.hash(hasher);
+            match blur {
+                Some(blur) => {
+                    1u8.hash(hasher);
+                    hash_blur(blur, hasher);
+                }
+                None => 0u8.hash(hasher),
+            }
             phase.hash(hasher);
         }
         ScenePrimitive::Icon {
@@ -143,7 +151,7 @@ pub(super) fn command_signature_part(command: &ScenePrimitive, hasher: &mut Defa
             "backdrop-blur".hash(hasher);
             id.hash(hasher);
             hash_rect(rect, hasher);
-            hash_backdrop_blur_style(style, hasher);
+            hash_blur(style, hasher);
             phase.hash(hasher);
         }
         ScenePrimitive::BackdropBlurPath {
@@ -157,7 +165,22 @@ pub(super) fn command_signature_part(command: &ScenePrimitive, hasher: &mut Defa
             id.hash(hasher);
             hash_rect(rect, hasher);
             hash_path(path, hasher);
-            hash_backdrop_blur_style(style, hasher);
+            hash_blur(style, hasher);
+            phase.hash(hasher);
+        }
+        ScenePrimitive::ContentBlur {
+            id,
+            rect,
+            style,
+            child_signature,
+            phase,
+            ..
+        } => {
+            "content-blur".hash(hasher);
+            id.hash(hasher);
+            hash_rect(rect, hasher);
+            hash_blur(style, hasher);
+            child_signature.hash(hasher);
             phase.hash(hasher);
         }
         ScenePrimitive::Overlay {
@@ -259,11 +282,10 @@ fn hash_custom_paint_style(style: &Option<CustomPaintStyle>, hasher: &mut Defaul
     }
 }
 
-fn hash_backdrop_blur_style(style: &BackdropBlurStyle, hasher: &mut DefaultHasher) {
-    style.source.hash(hasher);
-    style.fit.hash(hasher);
-    hash_rect(&style.source_rect, hasher);
-    normalized_f32_bits(style.radius).hash(hasher);
+fn hash_blur(style: &BlurStyle, hasher: &mut DefaultHasher) {
+    normalized_f32_bits(style.sigma_x).hash(hasher);
+    normalized_f32_bits(style.sigma_y).hash(hasher);
+    style.edge_mode.hash(hasher);
     style.opacity.to_bits().hash(hasher);
     hash_color(&style.tint, hasher);
     style.tint_alpha.to_bits().hash(hasher);

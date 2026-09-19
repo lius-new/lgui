@@ -25,6 +25,7 @@ fn estimate_scene_primitive_dynamic_bytes(command: &ScenePrimitive) -> usize {
         ScenePrimitive::CompositingLayer { commands, .. }
         | ScenePrimitive::StaticLayer { commands, .. }
         | ScenePrimitive::ScrollRaster { commands, .. }
+        | ScenePrimitive::ContentBlur { commands, .. }
         | ScenePrimitive::Clip { commands, .. }
         | ScenePrimitive::ClipPath { commands, .. } => estimate_scene_commands_bytes(commands),
         _ => 0,

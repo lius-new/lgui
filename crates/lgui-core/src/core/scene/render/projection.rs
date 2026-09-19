@@ -84,6 +84,7 @@ pub(super) fn project_command(command: &ScenePrimitive, scale: UiScale) -> Scene
             source,
             request,
             fit,
+            blur,
             phase,
         } => ScenePrimitive::Image {
             id: id.clone(),
@@ -91,6 +92,7 @@ pub(super) fn project_command(command: &ScenePrimitive, scale: UiScale) -> Scene
             source: source.clone(),
             request: request.clone(),
             fit: *fit,
+            blur: blur.map(|blur| project_blur_style(blur, scale)),
             phase: *phase,
         },
         ScenePrimitive::Icon {
@@ -127,7 +129,7 @@ pub(super) fn project_command(command: &ScenePrimitive, scale: UiScale) -> Scene
         } => ScenePrimitive::BackdropBlur {
             id: id.clone(),
             rect: scale.physical_ui_rect(*rect),
-            style: project_backdrop_blur_style(*style, scale),
+            style: project_blur_style(*style, scale),
             phase: *phase,
         },
         ScenePrimitive::BackdropBlurPath {
@@ -140,7 +142,25 @@ pub(super) fn project_command(command: &ScenePrimitive, scale: UiScale) -> Scene
             id: id.clone(),
             rect: scale.physical_ui_rect(*rect),
             path: project_path(path, scale),
-            style: project_backdrop_blur_style(*style, scale),
+            style: project_blur_style(*style, scale),
+            phase: *phase,
+        },
+        ScenePrimitive::ContentBlur {
+            id,
+            rect,
+            style,
+            commands,
+            child_signature,
+            phase,
+        } => ScenePrimitive::ContentBlur {
+            id: id.clone(),
+            rect: scale.physical_ui_rect(*rect),
+            style: project_blur_style(*style, scale),
+            commands: commands
+                .iter()
+                .map(|command| project_command(command, scale))
+                .collect(),
+            child_signature: *child_signature,
             phase: *phase,
         },
         ScenePrimitive::Overlay {
@@ -312,9 +332,9 @@ fn project_text_style(mut style: TextStyle, scale: UiScale) -> TextStyle {
     style
 }
 
-fn project_backdrop_blur_style(mut style: BackdropBlurStyle, scale: UiScale) -> BackdropBlurStyle {
-    style.source_rect = scale.physical_ui_rect(style.source_rect);
-    style.radius = scale.physical_ui_length(style.radius);
+fn project_blur_style(mut style: BlurStyle, scale: UiScale) -> BlurStyle {
+    style.sigma_x = scale.physical_ui_length(style.sigma_x);
+    style.sigma_y = scale.physical_ui_length(style.sigma_y);
     style
 }
 

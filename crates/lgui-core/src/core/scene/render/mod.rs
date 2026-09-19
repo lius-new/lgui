@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::{
-    normalized_f32_bits, BackdropBlurStyle, Color, CompositingLayerSpec, CustomPaintStyle,
+    normalized_f32_bits, BlurStyle, Color, CompositingLayerSpec, CustomPaintStyle,
     HostTree, IconStyle, ImageFit, ImageRequest, OverlayStyle, PathStyle, Point, StaticLayerSpec,
     Stroke, TextStyle, UiId, UiImageSource, UiNode, UiNodeKind, UiPath, UiPathCommand, UiRect,
     UiScale, VisualStyle,
