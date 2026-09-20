@@ -35,9 +35,9 @@ impl WindowManager {
         &self,
         options: WindowOptions,
         view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> bool {
         self.send(WindowCommand::Show {
             options,
@@ -53,9 +53,9 @@ impl WindowManager {
         &self,
         options: WindowOptions,
         view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> bool {
         self.send(WindowCommand::Toggle {
             options,
@@ -84,6 +84,10 @@ impl WindowManager {
             id: id.into(),
             mode,
         })
+    }
+
+    pub fn toggle_maximize(&self, id: impl Into<WindowId>) -> bool {
+        self.send(WindowCommand::ToggleMaximize(id.into()))
     }
 
     pub fn send_input(&self, id: impl Into<WindowId>, input: InputEvent) -> bool {
@@ -151,5 +155,9 @@ impl WindowHandle {
 
     pub fn set_mode(&self, mode: WindowMode) -> bool {
         self.windows.set_mode(self.id.clone(), mode)
+    }
+
+    pub fn toggle_maximize(&self) -> bool {
+        self.windows.toggle_maximize(self.id.clone())
     }
 }

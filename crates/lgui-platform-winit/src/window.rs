@@ -1,5 +1,19 @@
 use super::*;
 
+/// Two presses within this window on the title bar count as a double click.
+const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Logical-pixel movement beyond this while the title bar is held starts an
+/// OS window move instead of waiting for a possible double click.
+const DRAG_START_THRESHOLD: f32 = 4.0;
+
+/// A left press on the window drag region that hasn't resolved into a move,
+/// a double click, or a plain click yet.
+pub(super) struct DragPending {
+    pressed_at: Instant,
+    point: Point,
+}
+
 pub(super) struct WinitWindow {
     pub(super) id: WindowId,
     pub(super) options: WindowOptions,
@@ -18,6 +32,8 @@ pub(super) struct WinitWindow {
     pub(super) owner_suppressed: bool,
     pub(super) occluded: bool,
     pub(super) was_offscreen: bool,
+    pub(super) drag_pending: Option<DragPending>,
+    pub(super) left_pressed: bool,
     pub(super) ime_allowed: bool,
     pub(super) last_frame: Instant,
     pub(super) next_frame: Option<Instant>,
@@ -55,6 +71,50 @@ impl WinitWindow {
             origin.x + point.x,
             origin.y + point.y,
         ))
+    }
+
+    /// A press on the title bar: resolve a double click immediately, otherwise
+    /// defer the OS move until the pointer actually moves (see `CursorMoved`).
+    fn begin_titlebar_press(&mut self, point: Point) {
+        if let Some(pending) = &self.drag_pending {
+            if pending.pressed_at.elapsed() < DOUBLE_CLICK_INTERVAL {
+                self.drag_pending = None;
+                self.toggle_maximize();
+                return;
+            }
+        }
+        self.drag_pending = Some(DragPending {
+            pressed_at: Instant::now(),
+            point,
+        });
+    }
+
+    pub(super) fn toggle_maximize(&mut self) {
+        let mode = if self.options.mode == WindowMode::Maximized {
+            WindowMode::Windowed
+        } else {
+            WindowMode::Maximized
+        };
+        self.options.mode = mode;
+        match mode {
+            WindowMode::Windowed => {
+                self.window.set_maximized(false);
+                self.window.set_fullscreen(None);
+            }
+            WindowMode::Maximized => {
+                self.window.set_fullscreen(None);
+                self.window.set_maximized(true);
+            }
+            WindowMode::Fullscreen => {
+                self.window.set_maximized(false);
+                self.window
+                    .set_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+        }
+        #[cfg(target_os = "windows")]
+        super::winit_windows::set_corner_radius(&self.window, self.options.corner_radius, mode);
+        self.full_redraw = true;
+        self.window.request_redraw();
     }
 
     pub(super) fn handle_event(&mut self, event: WindowEvent) {
@@ -97,6 +157,20 @@ impl WinitWindow {
                     position.x.round() as i32,
                     position.y.round() as i32,
                 ));
+                if self.left_pressed {
+                    let should_start_drag = self.drag_pending.as_ref().is_some_and(|pending| {
+                        let dx = point.x - pending.point.x;
+                        let dy = point.y - pending.point.y;
+                        (dx * dx + dy * dy).sqrt() > DRAG_START_THRESHOLD
+                    });
+                    if should_start_drag {
+                        self.drag_pending = None;
+                        #[cfg(target_os = "windows")]
+                        super::winit_windows::begin_os_move(&self.window);
+                        #[cfg(not(target_os = "windows"))]
+                        let _ = self.window.drag_window();
+                    }
+                }
                 self.cursor = Some(point);
                 self.sync_cursor(point);
                 self.dispatch_input(InputEvent::PointerMove(PointerData::mouse(point)));
@@ -118,28 +192,26 @@ impl WinitWindow {
                     && button == PointerButton::Left
                     && !self.options.native_titlebar
                 {
+                    self.left_pressed = true;
                     let size = self.window.inner_size();
                     let physical = self.scale.physical_point(pointer.point);
-                    if self.options.resizable {
-                        if let Some(direction) = resize_direction(
-                            physical,
-                            WinitPhysicalSize::new(size.width, size.height),
-                            (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
-                        ) {
-                            #[cfg(target_os = "windows")]
-                            super::winit_windows::begin_os_resize(&self.window, direction);
-                            #[cfg(not(target_os = "windows"))]
-                            let _ = self.window.drag_resize_window(direction);
-                        } else if let Some(hit) = self.session.tree().hit_test(pointer.point) {
-                            if hit.interaction
-                                == lgui_core::core::InteractionRole::WindowDragRegion
-                            {
-                                #[cfg(target_os = "windows")]
-                                super::winit_windows::begin_os_move(&self.window);
-                                #[cfg(not(target_os = "windows"))]
-                                let _ = self.window.drag_window();
-                            }
-                        }
+                    let resize_zone = self
+                        .options
+                        .resizable
+                        .then(|| {
+                            resize_direction(
+                                physical,
+                                WinitPhysicalSize::new(size.width, size.height),
+                                (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
+                            )
+                        })
+                        .flatten();
+                    if let Some(direction) = resize_zone {
+                        self.drag_pending = None;
+                        #[cfg(target_os = "windows")]
+                        super::winit_windows::begin_os_resize(&self.window, direction);
+                        #[cfg(not(target_os = "windows"))]
+                        let _ = self.window.drag_resize_window(direction);
                     } else if self
                         .session
                         .tree()
@@ -148,11 +220,13 @@ impl WinitWindow {
                             hit.interaction == lgui_core::core::InteractionRole::WindowDragRegion
                         })
                     {
-                        #[cfg(target_os = "windows")]
-                        super::winit_windows::begin_os_move(&self.window);
-                        #[cfg(not(target_os = "windows"))]
-                        let _ = self.window.drag_window();
+                        self.begin_titlebar_press(pointer.point);
+                    } else {
+                        self.drag_pending = None;
                     }
+                }
+                if state == ElementState::Released && button == PointerButton::Left {
+                    self.left_pressed = false;
                 }
                 self.dispatch_input(match state {
                     ElementState::Pressed => InputEvent::PointerDown { pointer, button },
@@ -255,8 +329,8 @@ impl WinitWindow {
         // overflows 8px on every side; tolerate that so it isn't flagged as
         // off-screen. Use the measured size rather than `options.mode` because
         // the mode can lag behind the OS during a restore transition.
-        let fills_screen = size.width as i32 >= screen_w - 16
-            && size.height as i32 >= screen_h - 16;
+        let fills_screen =
+            size.width as i32 >= screen_w - 16 && size.height as i32 >= screen_h - 16;
         let tolerance = if fills_screen { 8 } else { 0 };
 
         let offscreen = pos.x < -tolerance
@@ -788,7 +862,6 @@ impl WinitWindow {
             lgui_core::backend::session_suspend_rendering(&mut self.session);
         }
     }
-
 }
 
 impl Drop for WinitWindow {

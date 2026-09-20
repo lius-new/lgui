@@ -21,6 +21,7 @@ pub enum WindowCommand {
         id: WindowId,
         mode: WindowMode,
     },
+    ToggleMaximize(WindowId),
     Input {
         id: WindowId,
         input: InputEvent,

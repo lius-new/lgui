@@ -270,8 +270,6 @@ impl WinitHost {
             .map_err(|error| WinitApplicationError(format!("create window: {error}")))?;
         position_window(&native, &options, owner_window.as_deref(), cursor_position);
         let window = Arc::new(native);
-        #[cfg(target_os = "windows")]
-        super::winit_windows::enable_titlebar_double_click(&window);
         #[cfg(feature = "accessibility")]
         let accessibility = super::winit_accessibility::AccessibilityState::new(
             event_loop,
@@ -336,6 +334,8 @@ impl WinitHost {
                 owner_suppressed,
                 occluded: false,
                 was_offscreen: false,
+                drag_pending: None,
+                left_pressed: false,
                 ime_allowed: false,
                 last_frame: Instant::now(),
                 next_frame: None,
@@ -415,7 +415,9 @@ impl WinitHost {
                         }
                         WindowMode::Fullscreen => {
                             window.window.set_maximized(false);
-                            window.window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                            window
+                                .window
+                                .set_fullscreen(Some(Fullscreen::Borderless(None)));
                         }
                     }
                     #[cfg(target_os = "windows")]
@@ -426,6 +428,11 @@ impl WinitHost {
                     );
                     window.full_redraw = true;
                     window.window.request_redraw();
+                }
+            }
+            WindowCommand::ToggleMaximize(id) => {
+                if let Some(window) = self.window_by_id_mut(&id) {
+                    window.toggle_maximize();
                 }
             }
             WindowCommand::Input { id, input } => {
