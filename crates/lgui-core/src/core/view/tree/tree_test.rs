@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{AnimProperty, AnimationBinding, RenderPhase, UiNodeKind, VisualStyle};
+use crate::core::{AnimProperty, AnimationBinding, CursorIcon, RenderPhase, UiNodeKind, VisualStyle};
 
 #[test]
 fn retained_clone_shares_unchanged_nodes_and_detaches_only_updated_nodes() {
@@ -143,4 +143,50 @@ fn interactive_titlebar_children_take_precedence_over_the_drag_region() {
         .expect("titlebar button should remain interactive");
     assert_eq!(button.id, button_id);
     assert_eq!(button.interaction, InteractionRole::Button);
+}
+
+#[test]
+fn cursor_resolution_inherits_from_ancestors_and_respects_overrides() {
+    let root_id = UiId::new("root");
+    let field_id = UiId::new("field");
+    let link_id = UiId::new("link");
+    let mut tree = HostTree::new();
+    tree.push(
+        UiNode::new(
+            root_id.clone(),
+            UiNodeKind::Group,
+            UiRect::new(0.0, 0.0, 100.0, 100.0),
+        )
+        .cursor(CursorIcon::Text),
+    );
+    tree.push(
+        UiNode::new(
+            field_id.clone(),
+            UiNodeKind::Group,
+            UiRect::new(10.0, 10.0, 90.0, 90.0),
+        )
+        .parent(root_id.clone()),
+    );
+    tree.push(
+        UiNode::new(
+            link_id.clone(),
+            UiNodeKind::Button,
+            UiRect::new(10.0, 10.0, 50.0, 50.0),
+        )
+        .parent(field_id.clone())
+        .cursor(CursorIcon::Pointer),
+    );
+
+    // Inside `field` but outside `link`: inherits the root's I-beam cursor.
+    assert_eq!(
+        tree.cursor_at(Point::new(60.0, 60.0)),
+        Some(CursorIcon::Text)
+    );
+    // Inside `link`: the descendant override wins.
+    assert_eq!(
+        tree.cursor_at(Point::new(30.0, 30.0)),
+        Some(CursorIcon::Pointer)
+    );
+    // Outside every node.
+    assert_eq!(tree.cursor_at(Point::new(150.0, 150.0)), None);
 }

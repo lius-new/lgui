@@ -42,6 +42,20 @@ impl HostTree {
         Some(hit)
     }
 
+    /// Resolves the cursor icon for the frontmost node under `point`, walking
+    /// up the ancestor chain to the nearest node that requests a non-default
+    /// cursor. Returns `None` when no node under the point requests one.
+    pub fn cursor_at(&self, point: Point) -> Option<CursorIcon> {
+        let mut current = self.frontmost_node_at(point, |_| true);
+        while let Some(node) = current {
+            if node.cursor != CursorIcon::Default {
+                return Some(node.cursor);
+            }
+            current = node.parent.as_ref().and_then(|id| self.node(id));
+        }
+        None
+    }
+
     pub fn focusable_hits(&self) -> Vec<HitResult> {
         self.nodes
             .iter()
@@ -323,6 +337,7 @@ impl HostTree {
             id: node.id.clone(),
             rect: node.hit_rect.translate(offset.0, offset.1),
             interaction: node.interaction,
+            cursor: node.cursor,
             policy: node.event_policy,
             action,
             action_target: node.action_target.clone(),

@@ -1,7 +1,7 @@
 use super::{
-    compile_scene, ActionId, ComponentId, ComponentTree, CompositingLayerSpec, EventPolicy,
-    InteractionRole, Point, RenderPhase, Scene, UiAction, UiActionHandler, UiEvent, UiEventHandler,
-    UiEventKind, UiEventPayload, UiHandlerEvent, UiId, UiNode, UiRect,
+    compile_scene, ActionId, ComponentId, ComponentTree, CompositingLayerSpec, CursorIcon,
+    EventPolicy, InteractionRole, Point, RenderPhase, Scene, UiAction, UiActionHandler, UiEvent,
+    UiEventHandler, UiEventKind, UiEventPayload, UiHandlerEvent, UiId, UiNode, UiRect,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -13,6 +13,7 @@ pub struct HitResult {
     pub id: UiId,
     pub rect: UiRect,
     pub interaction: InteractionRole,
+    pub cursor: CursorIcon,
     pub policy: EventPolicy,
     pub action: Option<UiAction>,
     pub action_target: Option<UiId>,
@@ -28,6 +29,7 @@ impl std::fmt::Debug for HitResult {
             .field("id", &self.id)
             .field("rect", &self.rect)
             .field("interaction", &self.interaction)
+            .field("cursor", &self.cursor)
             .field("policy", &self.policy)
             .field("action", &self.action)
             .field("action_target", &self.action_target)
@@ -43,6 +45,7 @@ impl PartialEq for HitResult {
         self.id == other.id
             && self.rect == other.rect
             && self.interaction == other.interaction
+            && self.cursor == other.cursor
             && self.policy == other.policy
             && self.action == other.action
             && self.action_target == other.action_target

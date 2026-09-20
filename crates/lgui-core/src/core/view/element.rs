@@ -2,7 +2,7 @@ use std::{borrow::Cow, future::Future, sync::Arc};
 
 use super::{
     async_handler, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec,
-    CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, ImageRequest,
+    CursorIcon, CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, ImageRequest,
     InteractionRole, LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec,
     StaticLayerSpec, TextStyle, UiAction, UiAsyncContext, UiEventContext, UiEventHandler,
     UiEventKind, UiEventPayload, UiId, UiImageSource, UiInputEventHandler, UiNode, UiNodeKind,
@@ -198,6 +198,11 @@ impl UiElement {
 
     pub fn interaction(mut self, interaction: InteractionRole) -> Self {
         self.node = self.node.interaction(interaction);
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorIcon) -> Self {
+        self.node = self.node.cursor(cursor);
         self
     }
 

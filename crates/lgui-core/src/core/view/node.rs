@@ -4,8 +4,8 @@ use crate::memory::ImageCachePolicy;
 
 use super::{
     ActionId, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec,
-    CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, PhysicalSize,
-    RenderPhase, ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction,
+    CursorIcon, CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle,
+    PhysicalSize, RenderPhase, ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction,
     UiActionBinding, UiActionHandler, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload,
     UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, VisualStyle,
 };
@@ -238,6 +238,7 @@ pub struct UiNode {
     pub paint_bounds: UiRect,
     pub ime_cursor_rect: Option<UiRect>,
     pub interaction: InteractionRole,
+    pub cursor: CursorIcon,
     pub semantics: Option<Semantics>,
     pub click_capture_handler: Option<UiEventHandler>,
     pub click_handler: Option<UiEventHandler>,
@@ -290,6 +291,7 @@ impl UiNode {
             paint_bounds: layout_rect,
             ime_cursor_rect: None,
             interaction: InteractionRole::None,
+            cursor: CursorIcon::Default,
             semantics: None,
             click_capture_handler: None,
             click_handler: None,
@@ -376,6 +378,7 @@ impl UiNode {
             && self.paint_bounds == other.paint_bounds
             && self.ime_cursor_rect == other.ime_cursor_rect
             && self.interaction == other.interaction
+            && self.cursor == other.cursor
             && self.semantics == other.semantics
             && self.event_policy == other.event_policy
             && self.auto_focus == other.auto_focus
@@ -433,6 +436,11 @@ impl UiNode {
         if interaction != InteractionRole::None {
             self.event_policy = EventPolicy::INTERACTIVE;
         }
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorIcon) -> Self {
+        self.cursor = cursor;
         self
     }
 

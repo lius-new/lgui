@@ -33,6 +33,34 @@ pub(super) fn resize_direction(
     }
 }
 
+pub(super) fn edge_resize_cursor(direction: ResizeDirection) -> WinitCursorIcon {
+    match direction {
+        ResizeDirection::North | ResizeDirection::South => WinitCursorIcon::NsResize,
+        ResizeDirection::East | ResizeDirection::West => WinitCursorIcon::EwResize,
+        ResizeDirection::NorthWest | ResizeDirection::SouthEast => WinitCursorIcon::NwseResize,
+        ResizeDirection::NorthEast | ResizeDirection::SouthWest => WinitCursorIcon::NeswResize,
+    }
+}
+
+pub(super) fn mapped_cursor(cursor: CursorIcon) -> WinitCursorIcon {
+    match cursor {
+        CursorIcon::Default => WinitCursorIcon::Default,
+        CursorIcon::Text => WinitCursorIcon::Text,
+        CursorIcon::Pointer => WinitCursorIcon::Pointer,
+        CursorIcon::Move => WinitCursorIcon::Move,
+        CursorIcon::NotAllowed => WinitCursorIcon::NotAllowed,
+        CursorIcon::Crosshair => WinitCursorIcon::Crosshair,
+        CursorIcon::Wait => WinitCursorIcon::Wait,
+        CursorIcon::ResizeHorizontal => WinitCursorIcon::EwResize,
+        CursorIcon::ResizeVertical => WinitCursorIcon::NsResize,
+        CursorIcon::ResizeDiagonalTopLeftBottomRight => WinitCursorIcon::NwseResize,
+        CursorIcon::ResizeDiagonalTopRightBottomLeft => WinitCursorIcon::NeswResize,
+        CursorIcon::ResizeColumn => WinitCursorIcon::ColResize,
+        CursorIcon::ResizeRow => WinitCursorIcon::RowResize,
+        CursorIcon::ScrollAll => WinitCursorIcon::AllScroll,
+    }
+}
+
 pub(super) fn touch_phase(phase: WinitTouchPhase) -> TouchPhase {
     match phase {
         WinitTouchPhase::Started => TouchPhase::Started,

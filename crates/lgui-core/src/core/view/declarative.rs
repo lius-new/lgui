@@ -2,10 +2,10 @@ use std::{any::type_name, borrow::Cow, cell::Cell, future::Future, panic::Locati
 
 use super::{
     async_handler, AnimProperty, AnimationBinding, BlurStyle, Color, ComponentId,
-    CompositingLayerAnimation, CompositingLayerSpec, EventPolicy, InteractionRole, KeyboardEvent,
-    LayoutSpec, OverlayStyle, PathStyle, PointerData, RenderCx, RenderPhase, Semantics, Size,
-    TextStyle, UiAsyncContext, UiElement, UiEventContext, UiEventHandler, UiEventKind,
-    UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect,
+    CompositingLayerAnimation, CompositingLayerSpec, CursorIcon, EventPolicy, InteractionRole,
+    KeyboardEvent, LayoutSpec, OverlayStyle, PathStyle, PointerData, RenderCx, RenderPhase,
+    Semantics, Size, TextStyle, UiAsyncContext, UiElement, UiEventContext, UiEventHandler,
+    UiEventKind, UiEventPayload, UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect,
     UiRenderContext, UiScope, VisualStyle, WheelDelta,
 };
 

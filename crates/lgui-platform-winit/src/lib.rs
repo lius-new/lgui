@@ -24,8 +24,8 @@ use winit::{
         PhysicalKey as WinitPhysicalKey,
     },
     window::{
-        Fullscreen, ImePurpose, ResizeDirection, Window, WindowAttributes,
-        WindowId as WinitWindowId, WindowLevel,
+        CursorIcon as WinitCursorIcon, Fullscreen, ImePurpose, ResizeDirection, Window,
+        WindowAttributes, WindowId as WinitWindowId, WindowLevel,
     },
 };
 
@@ -34,10 +34,10 @@ use lgui_core::{
         AppView, ApplicationBackend, ApplicationContext, ApplicationHandle, ApplicationTask,
     },
     core::{
-        dispatch_runtime_output, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState,
-        KeyboardEvent, LogicalKey, PhysicalKey, PhysicalPoint, PhysicalRect, PhysicalSize, Point,
-        PointerButton, PointerData, PointerId, PointerKind, TouchPhase, UiRect, UiScale,
-        WheelDelta,
+        dispatch_runtime_output, CursorIcon, ImeEvent, InputEvent, KeyLocation, KeyModifiers,
+        KeyState, KeyboardEvent, LogicalKey, PhysicalKey, PhysicalPoint, PhysicalRect,
+        PhysicalSize, Point, PointerButton, PointerData, PointerId, PointerKind, TouchPhase,
+        UiRect, UiScale, WheelDelta,
     },
     platform::dpi::{ScaleContext, WorkArea, BASE_DPI},
     session::UiSession,

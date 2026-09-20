@@ -1,7 +1,7 @@
 use super::{
     async_handler, compile_scene, ActionId, AnimProperty, AnimationBinding, AnimationRegistry,
     BlurStyle, Color, ComponentId, ComponentStateStore, ComponentTree,
-    CompositingLayerAnimation, CompositingLayerSpec, ContextRegistry, CustomPaintStyle,
+    CompositingLayerAnimation, CompositingLayerSpec, ContextRegistry, CursorIcon, CustomPaintStyle,
     EffectRegistry, HookStateStore, IconStyle, ImageFit, KeyboardEvent, LayoutSpec, OverlayStyle,
     PathStyle, PhysicalSize, Point, PointerData, RenderCx, RenderPhase, Scene, ScrollRasterSpec,
     Semantics, ShadowStyle, Size, StaticLayerSpec, TextStyle, UiAction, UiActionBinding,

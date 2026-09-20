@@ -12,6 +12,7 @@ pub(super) struct WinitWindow {
     pub(super) session: UiSession,
     pub(super) scale: UiScale,
     pub(super) cursor: Option<Point>,
+    pub(super) active_cursor: Option<WinitCursorIcon>,
     pub(super) modifiers: ModifiersState,
     pub(super) visible: bool,
     pub(super) owner_suppressed: bool,
@@ -94,6 +95,7 @@ impl WinitWindow {
                     position.y.round() as i32,
                 ));
                 self.cursor = Some(point);
+                self.sync_cursor(point);
                 self.dispatch_input(InputEvent::PointerMove(PointerData::mouse(point)));
             }
             WindowEvent::CursorEntered { .. } => {
@@ -238,6 +240,39 @@ impl WinitWindow {
         if output.animation_changed {
             self.schedule_next_frame();
         }
+    }
+
+    /// Updates the native cursor icon for the current pointer position.
+    ///
+    /// For frameless, resizable windows the OS no longer provides edge-resize
+    /// cursors, so we resolve the resize direction first, then fall back to the
+    /// cursor requested by the frontmost node under the pointer.
+    pub(super) fn sync_cursor(&mut self, point: Point) {
+        let icon = self.resolve_cursor(point);
+        if self.active_cursor != Some(icon) {
+            self.window.set_cursor(icon);
+            self.active_cursor = Some(icon);
+        }
+    }
+
+    fn resolve_cursor(&self, point: Point) -> WinitCursorIcon {
+        if !self.options.native_titlebar && self.options.resizable {
+            let size = self.window.inner_size();
+            let physical = self.scale.physical_point(point);
+            if let Some(direction) = resize_direction(
+                physical,
+                WinitPhysicalSize::new(size.width, size.height),
+                (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
+            ) {
+                return edge_resize_cursor(direction);
+            }
+        }
+        mapped_cursor(
+            self.session
+                .tree()
+                .cursor_at(point)
+                .unwrap_or(CursorIcon::Default),
+        )
     }
 
     pub(super) fn apply_pending_updates(&mut self) {

@@ -326,6 +326,7 @@ impl WinitHost {
                 session,
                 scale,
                 cursor: None,
+                active_cursor: None,
                 modifiers: ModifiersState::empty(),
                 visible,
                 owner_suppressed,

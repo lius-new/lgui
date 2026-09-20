@@ -25,6 +25,7 @@ pub struct Element {
     pub(super) key: ElementKey,
     render: Box<dyn FnOnce(ElementRenderCx<'_, '_, '_>) -> UiElement>,
     interaction: Option<InteractionRole>,
+    cursor: Option<CursorIcon>,
     semantics: Option<Semantics>,
     pub(super) click_capture_handler: Option<UiEventHandler>,
     pub(super) click_handler: Option<UiEventHandler>,
@@ -108,6 +109,7 @@ impl Element {
             key,
             render: Box::new(render),
             interaction: None,
+            cursor: None,
             semantics: None,
             click_capture_handler: None,
             click_handler: None,
@@ -152,6 +154,11 @@ impl Element {
 
     pub fn interaction(mut self, interaction: InteractionRole) -> Self {
         self.interaction = Some(interaction);
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorIcon) -> Self {
+        self.cursor = Some(cursor);
         self
     }
 
@@ -239,6 +246,9 @@ impl Element {
         });
         if let Some(interaction) = self.interaction {
             element = element.interaction(interaction);
+        }
+        if let Some(cursor) = self.cursor {
+            element = element.cursor(cursor);
         }
         if let Some(semantics) = self.semantics {
             element = element.semantics(semantics);

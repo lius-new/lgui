@@ -20,6 +20,30 @@ pub enum PointerButton {
     Other(u16),
 }
 
+/// Backend-neutral mouse cursor icon.
+///
+/// Nodes can request a specific cursor (e.g. a text I-beam for editable
+/// regions). The platform backend resolves the cursor for the frontmost node
+/// under the pointer and maps it to a native cursor icon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CursorIcon {
+    #[default]
+    Default,
+    Text,
+    Pointer,
+    Move,
+    NotAllowed,
+    Crosshair,
+    Wait,
+    ResizeHorizontal,
+    ResizeVertical,
+    ResizeDiagonalTopLeftBottomRight,
+    ResizeDiagonalTopRightBottomLeft,
+    ResizeColumn,
+    ResizeRow,
+    ScrollAll,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PointerId(pub u64);
 
