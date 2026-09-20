@@ -33,6 +33,7 @@ pub enum WindowPosition {
 pub enum WindowMode {
     #[default]
     Windowed,
+    Maximized,
     Fullscreen,
 }
 

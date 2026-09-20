@@ -227,6 +227,8 @@ impl WinitHost {
         }
         if options.mode == WindowMode::Fullscreen {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+        } else if options.mode == WindowMode::Maximized {
+            attributes = attributes.with_maximized(true);
         }
         if let WindowPosition::Absolute { x, y } = options.position {
             attributes = attributes.with_position(PhysicalPosition::new(x, y));
@@ -399,10 +401,20 @@ impl WinitHost {
             WindowCommand::SetMode { id, mode } => {
                 if let Some(window) = self.window_by_id_mut(&id) {
                     window.options.mode = mode;
-                    window.window.set_fullscreen(match mode {
-                        WindowMode::Windowed => None,
-                        WindowMode::Fullscreen => Some(Fullscreen::Borderless(None)),
-                    });
+                    match mode {
+                        WindowMode::Windowed => {
+                            window.window.set_maximized(false);
+                            window.window.set_fullscreen(None);
+                        }
+                        WindowMode::Maximized => {
+                            window.window.set_fullscreen(None);
+                            window.window.set_maximized(true);
+                        }
+                        WindowMode::Fullscreen => {
+                            window.window.set_maximized(false);
+                            window.window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                        }
+                    }
                     #[cfg(target_os = "windows")]
                     super::winit_windows::set_corner_radius(
                         &window.window,
