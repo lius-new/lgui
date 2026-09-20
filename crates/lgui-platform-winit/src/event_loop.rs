@@ -270,6 +270,8 @@ impl WinitHost {
             .map_err(|error| WinitApplicationError(format!("create window: {error}")))?;
         position_window(&native, &options, owner_window.as_deref(), cursor_position);
         let window = Arc::new(native);
+        #[cfg(target_os = "windows")]
+        super::winit_windows::enable_titlebar_double_click(&window);
         #[cfg(feature = "accessibility")]
         let accessibility = super::winit_accessibility::AccessibilityState::new(
             event_loop,
