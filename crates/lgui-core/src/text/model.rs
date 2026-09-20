@@ -53,6 +53,10 @@ pub enum TextVerticalAlign {
     Top,
     Center,
     Bottom,
+    /// Centers the cap-height (uppercase letter / digit) visual box in the bounds.
+    CapCenter,
+    /// Centers the x-height (lowercase letter) visual box in the bounds.
+    XCenter,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

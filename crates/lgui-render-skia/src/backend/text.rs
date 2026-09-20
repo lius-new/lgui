@@ -223,6 +223,52 @@ pub(super) fn resolved_text_direction(
         .unwrap_or(lgui_core::text::TextDirection::LeftToRight)
 }
 
+#[derive(Clone, Copy)]
+enum VisualBaseline {
+    CapHeight,
+    XHeight,
+}
+
+pub(super) fn vertical_align_offset(
+    paragraph: &Paragraph,
+    bounds: UiRect,
+    align: lgui_core::text::TextVerticalAlign,
+) -> f32 {
+    let line_centered = ((bounds.height() - paragraph.height()) * 0.5).max(0.0);
+    match align {
+        lgui_core::text::TextVerticalAlign::Top => 0.0,
+        lgui_core::text::TextVerticalAlign::Bottom => {
+            (bounds.height() - paragraph.height()).max(0.0)
+        }
+        lgui_core::text::TextVerticalAlign::Center => line_centered,
+        lgui_core::text::TextVerticalAlign::CapCenter => {
+            visual_center_offset(paragraph, bounds, VisualBaseline::CapHeight)
+                .unwrap_or(line_centered)
+        }
+        lgui_core::text::TextVerticalAlign::XCenter => {
+            visual_center_offset(paragraph, bounds, VisualBaseline::XHeight)
+                .unwrap_or(line_centered)
+        }
+    }
+}
+
+fn visual_center_offset(
+    paragraph: &Paragraph,
+    bounds: UiRect,
+    baseline: VisualBaseline,
+) -> Option<f32> {
+    let line = paragraph.get_line_metrics().into_iter().next()?;
+    let (_, style_metrics) = line.get_style_metrics(0..usize::MAX).into_iter().next()?;
+    let height = match baseline {
+        VisualBaseline::CapHeight => style_metrics.font_metrics.cap_height,
+        VisualBaseline::XHeight => style_metrics.font_metrics.x_height,
+    };
+    if !height.is_finite() || height <= 0.0 {
+        return None;
+    }
+    Some((bounds.height() * 0.5 - line.baseline as f32 + height * 0.5).max(0.0))
+}
+
 pub(super) fn portable_text_layout(
     paragraph: &Paragraph,
     request: &lgui_core::text::TextLayoutRequest<'_>,
@@ -230,16 +276,8 @@ pub(super) fn portable_text_layout(
     let utf16_boundaries = char_utf16_boundaries(request.text);
     let byte_boundaries = char_byte_boundaries(request.text);
     let content_height = paragraph.height();
-    let offset_y = request.bounds.top
-        + match request.vertical_align {
-            lgui_core::text::TextVerticalAlign::Top => 0.0,
-            lgui_core::text::TextVerticalAlign::Center => {
-                ((request.bounds.height() - content_height) * 0.5).max(0.0)
-            }
-            lgui_core::text::TextVerticalAlign::Bottom => {
-                (request.bounds.height() - content_height).max(0.0)
-            }
-        };
+    let offset_y =
+        request.bounds.top + vertical_align_offset(paragraph, request.bounds, request.vertical_align);
     let offset_x = request.bounds.left;
     let lines = paragraph
         .get_line_metrics()

@@ -716,3 +716,51 @@ fn layer_opacity_and_content_signature_invalidate_retained_images() {
     assert_ne!(blue, red);
     assert!(surface.cache_stats().misses >= 2);
 }
+
+#[test]
+fn visual_center_aligns_ink_closer_to_bounds_center() {
+    let rect = UiRect::new(0.0, 0.0, 200.0, 40.0);
+    let ink_center = |vertical_align: lgui_core::text::TextVerticalAlign| -> f32 {
+        let mut scene = Scene::new();
+        scene.push(ScenePrimitive::Text {
+            id: test_id("text"),
+            rect,
+            text: "xxx".into(),
+            style: TextStyle::new(Color::WHITE, 20.0, 400).vertical_align(vertical_align),
+            phase: RenderPhase::Content,
+        });
+        let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
+        let frame = FrameInfo::new(
+            PhysicalRect::new(0, 0, 200, 40),
+            &[],
+            UiScale::ONE,
+            FrameReason::SceneChange,
+            true,
+        );
+        surface.draw(&scene, &frame).unwrap();
+        let (width, height) = surface.size();
+        let (width, height) = (width as usize, height as usize);
+        let mut top = height;
+        let mut bottom = 0usize;
+        for y in 0..height {
+            for x in 0..width {
+                if pixel(&surface, x, y)[3] > 0 {
+                    top = top.min(y);
+                    bottom = bottom.max(y);
+                }
+            }
+        }
+        (top + bottom) as f32 * 0.5
+    };
+    let line_center = ink_center(lgui_core::text::TextVerticalAlign::Center);
+    let x_center = ink_center(lgui_core::text::TextVerticalAlign::XCenter);
+    let cap_center = ink_center(lgui_core::text::TextVerticalAlign::CapCenter);
+    assert!(
+        x_center < line_center && (x_center - 20.0).abs() < 1.5,
+        "XCenter ink center {x_center} should sit at bounds center 20, above line-centered {line_center}"
+    );
+    assert!(
+        cap_center < line_center && cap_center > x_center,
+        "CapCenter {cap_center} should sit between XCenter {x_center} and line-centered {line_center}"
+    );
+}

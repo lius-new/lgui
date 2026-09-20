@@ -92,7 +92,7 @@ impl SkiaCache {
         if let Some(entry) = self.paragraphs.get_mut(&key) {
             self.text_hits = self.text_hits.saturating_add(1);
             entry.used = self.generation;
-            paint_cached_paragraph(canvas, rect, &entry.paragraph);
+            paint_cached_paragraph(canvas, rect, &entry.paragraph, style.vertical_align);
             return;
         }
         self.text_misses = self.text_misses.saturating_add(1);
@@ -103,7 +103,7 @@ impl SkiaCache {
             Some(sk_color(style.color, style.alpha)),
         );
         paragraph.layout(rect.width().max(1.0));
-        paint_cached_paragraph(canvas, rect, &paragraph);
+        paint_cached_paragraph(canvas, rect, &paragraph, style.vertical_align);
         let bytes = paragraph_cache_entry_bytes(text, &paragraph);
         self.resident_bytes = self.resident_bytes.saturating_add(bytes);
         self.paragraphs.insert(
@@ -288,11 +288,17 @@ pub(super) fn scene_text_layout_request<'a>(
         lgui_core::text::TextLayoutRequest::single_line(text, rect, style.height, style.weight);
     request.tracking = style.tracking;
     request.align = style.align;
+    request.vertical_align = style.vertical_align;
     request
 }
 
-pub(super) fn paint_cached_paragraph(canvas: &Canvas, rect: UiRect, paragraph: &Paragraph) {
-    let y = rect.top + ((rect.height() - paragraph.height()) * 0.5).max(0.0);
+pub(super) fn paint_cached_paragraph(
+    canvas: &Canvas,
+    rect: UiRect,
+    paragraph: &Paragraph,
+    vertical_align: lgui_core::text::TextVerticalAlign,
+) {
+    let y = rect.top + vertical_align_offset(paragraph, rect, vertical_align);
     canvas.save();
     canvas.clip_rect(sk_rect(rect), None, true);
     paragraph.paint(canvas, (rect.left, y));

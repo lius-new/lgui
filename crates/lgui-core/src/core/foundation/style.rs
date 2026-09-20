@@ -9,6 +9,7 @@ impl Color {
 use std::hash::{Hash, Hasher};
 
 use super::geometry::normalized_f32_bits;
+use crate::text::TextVerticalAlign;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ImageFit {
@@ -58,6 +59,7 @@ pub struct TextStyle {
     pub weight: i32,
     pub tracking: f32,
     pub align: TextAlign,
+    pub vertical_align: TextVerticalAlign,
     pub alpha: u8,
 }
 
@@ -69,12 +71,18 @@ impl TextStyle {
             weight,
             tracking: 0.0,
             align: TextAlign::Left,
+            vertical_align: TextVerticalAlign::CapCenter,
             alpha: 0xFF,
         }
     }
 
     pub const fn centered(mut self) -> Self {
         self.align = TextAlign::Center;
+        self
+    }
+
+    pub const fn vertical_align(mut self, vertical_align: TextVerticalAlign) -> Self {
+        self.vertical_align = vertical_align;
         self
     }
 
@@ -98,6 +106,7 @@ impl Hash for TextStyle {
         self.weight.hash(state);
         normalized_f32_bits(self.tracking).hash(state);
         self.align.hash(state);
+        self.vertical_align.hash(state);
         self.alpha.hash(state);
     }
 }
