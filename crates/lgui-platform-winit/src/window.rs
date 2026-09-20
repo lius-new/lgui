@@ -233,8 +233,36 @@ impl WinitWindow {
     /// is clipped to the window's visible region, so the off-screen strip is
     /// never painted. Once the window moves fully back on-screen we force a
     /// full redraw to fill in the missing strip.
+    ///
+    /// The overflow can be on any edge: a restore animation can park the
+    /// window against the RIGHT edge too (e.g. dragging down from maximized
+    /// near the right side of the screen), so we test the whole outer rect,
+    /// not just the origin.
     fn handle_window_moved(&mut self, pos: PhysicalPosition<i32>) {
-        let offscreen = pos.x < 0 || pos.y < 0;
+        let size = self.window.outer_size();
+        let right = pos.x + size.width as i32;
+        let bottom = pos.y + size.height as i32;
+        let (screen_w, screen_h) = self
+            .window
+            .current_monitor()
+            .map(|m| {
+                let s = m.size();
+                (s.width as i32, s.height as i32)
+            })
+            .unwrap_or((i32::MAX, i32::MAX));
+
+        // A window that fills the screen (maximized/fullscreen) legitimately
+        // overflows 8px on every side; tolerate that so it isn't flagged as
+        // off-screen. Use the measured size rather than `options.mode` because
+        // the mode can lag behind the OS during a restore transition.
+        let fills_screen = size.width as i32 >= screen_w - 16
+            && size.height as i32 >= screen_h - 16;
+        let tolerance = if fills_screen { 8 } else { 0 };
+
+        let offscreen = pos.x < -tolerance
+            || pos.y < -tolerance
+            || right > screen_w + tolerance
+            || bottom > screen_h + tolerance;
         if offscreen {
             self.was_offscreen = true;
         } else if self.was_offscreen {
@@ -245,16 +273,38 @@ impl WinitWindow {
         }
     }
 
-    /// Detects when the OS has pulled the window out of fullscreen on its own
-    /// (dragging an edge to shrink it, or dragging the titlebar to move it,
-    /// which Windows turns into a restore). winit 0.30 does not track this, so
-    /// lgui's `options.mode` would otherwise stay `Fullscreen`: corners stay
-    /// square and the system caption leaks back in. Re-apply a windowed state
-    /// so the window matches what the OS is actually showing.
+    /// Detects when the OS changed the window's mode on its own (dragging an
+    /// edge to shrink a maximized/fullscreen window, or dragging the titlebar
+    /// downward, which Windows turns into a restore). winit 0.30 does not
+    /// report these, so lgui's `options.mode` would otherwise stay stale and
+    /// the corners stay square. Re-apply a windowed state so the window
+    /// matches what the OS is actually showing.
     fn sync_mode_after_resize(&mut self) {
-        if self.options.mode != WindowMode::Fullscreen {
+        match self.options.mode {
+            WindowMode::Fullscreen => self.sync_fullscreen_restore(),
+            WindowMode::Maximized => self.sync_maximized_restore(),
+            WindowMode::Windowed => {}
+        }
+    }
+
+    /// A maximized window restored by dragging its titlebar downward keeps the
+    /// `Maximized` mode (and its square corner preference) until we sync it
+    /// here. `is_maximized` is already up to date when `Resized` fires: winit
+    /// updates its `MAXIMIZED` flag before dispatching the event.
+    fn sync_maximized_restore(&mut self) {
+        if self.window.is_maximized() {
             return;
         }
+        self.options.mode = WindowMode::Windowed;
+        #[cfg(target_os = "windows")]
+        super::winit_windows::set_corner_radius(
+            &self.window,
+            self.options.corner_radius,
+            WindowMode::Windowed,
+        );
+    }
+
+    fn sync_fullscreen_restore(&mut self) {
         let Some(monitor) = self.window.current_monitor() else {
             return;
         };
