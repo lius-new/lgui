@@ -17,6 +17,7 @@ pub(super) struct WinitWindow {
     pub(super) visible: bool,
     pub(super) owner_suppressed: bool,
     pub(super) occluded: bool,
+    pub(super) was_offscreen: bool,
     pub(super) ime_allowed: bool,
     pub(super) last_frame: Instant,
     pub(super) next_frame: Option<Instant>,
@@ -65,6 +66,7 @@ impl WinitWindow {
                 self.window.request_redraw();
                 self.sync_mode_after_resize();
             }
+            WindowEvent::Moved(pos) => self.handle_window_moved(pos),
             WindowEvent::ScaleFactorChanged { .. } => {
                 self.update_scale();
                 self.dispatch_input(InputEvent::Platform(
@@ -216,6 +218,25 @@ impl WinitWindow {
                 lgui_core::core::PlatformEvent::FileHoverCancelled,
             )),
             _ => {}
+        }
+    }
+
+    /// Handle `WindowEvent::Moved` for borderless windows.
+    ///
+    /// A borderless maximized window overflows the screen by 8px on Windows
+    /// (its origin becomes -8,-8). While it sits there, softbuffer's `BitBlt`
+    /// is clipped to the window's visible region, so the off-screen strip is
+    /// never painted. Once the window moves fully back on-screen we force a
+    /// full redraw to fill in the missing strip.
+    fn handle_window_moved(&mut self, pos: PhysicalPosition<i32>) {
+        let offscreen = pos.x < 0 || pos.y < 0;
+        if offscreen {
+            self.was_offscreen = true;
+        } else if self.was_offscreen {
+            self.was_offscreen = false;
+            self.full_redraw = true;
+            self.session.invalidate_all();
+            self.window.request_redraw();
         }
     }
 

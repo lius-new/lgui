@@ -335,6 +335,7 @@ impl WinitHost {
                 visible,
                 owner_suppressed,
                 occluded: false,
+                was_offscreen: false,
                 ime_allowed: false,
                 last_frame: Instant::now(),
                 next_frame: None,

@@ -244,6 +244,8 @@ impl WinitSkiaRenderer {
                         error.to_string(),
                     )
                 })?;
+                #[cfg(target_os = "windows")]
+                super::winit_windows::flush_gdi();
                 Ok(WinitFrameTimings {
                     acquire_ms,
                     draw_ms,

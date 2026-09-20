@@ -71,6 +71,20 @@ pub(crate) fn with_owner(
     Ok(attributes.with_owner_window(handle.hwnd.get()))
 }
 
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    fn GdiFlush() -> i32;
+}
+
+/// Flush any pending GDI output. softbuffer's `present` blits the pixel
+/// buffer with `BitBlt`; without a flush, DWM can show stale content right
+/// after a resize/restore transition.
+pub(crate) fn flush_gdi() {
+    unsafe {
+        GdiFlush();
+    }
+}
+
 #[cfg(test)]
 #[path = "windows_test.rs"]
 mod tests;
