@@ -63,6 +63,7 @@ impl WinitWindow {
                 self.full_redraw = true;
                 self.session.invalidate_all();
                 self.window.request_redraw();
+                self.sync_mode_after_resize();
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 self.update_scale();
@@ -216,6 +217,40 @@ impl WinitWindow {
             )),
             _ => {}
         }
+    }
+
+    /// Detects when the OS has pulled the window out of fullscreen on its own
+    /// (dragging an edge to shrink it, or dragging the titlebar to move it,
+    /// which Windows turns into a restore). winit 0.30 does not track this, so
+    /// lgui's `options.mode` would otherwise stay `Fullscreen`: corners stay
+    /// square and the system caption leaks back in. Re-apply a windowed state
+    /// so the window matches what the OS is actually showing.
+    fn sync_mode_after_resize(&mut self) {
+        if self.options.mode != WindowMode::Fullscreen {
+            return;
+        }
+        let Some(monitor) = self.window.current_monitor() else {
+            return;
+        };
+        let monitor_size = monitor.size();
+        let inner = self.window.inner_size();
+        if inner.width >= monitor_size.width && inner.height >= monitor_size.height {
+            return;
+        }
+        // The OS restored the window; keep the user's current size/position.
+        let outer = self.window.outer_position().ok();
+        self.options.mode = WindowMode::Windowed;
+        self.window.set_fullscreen(None);
+        #[cfg(target_os = "windows")]
+        super::winit_windows::set_corner_radius(
+            &self.window,
+            self.options.corner_radius,
+            WindowMode::Windowed,
+        );
+        if let Some(position) = outer {
+            let _ = self.window.set_outer_position(position);
+        }
+        let _ = self.window.request_inner_size(inner);
     }
 
     pub(super) fn dispatch_input(&mut self, input: InputEvent) {
