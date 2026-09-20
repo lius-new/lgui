@@ -126,17 +126,19 @@ impl WinitWindow {
                             WinitPhysicalSize::new(size.width, size.height),
                             (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
                         ) {
+                            #[cfg(target_os = "windows")]
+                            super::winit_windows::begin_os_resize(&self.window, direction);
+                            #[cfg(not(target_os = "windows"))]
                             let _ = self.window.drag_resize_window(direction);
-                        } else if self
-                            .session
-                            .tree()
-                            .hit_test(pointer.point)
-                            .is_some_and(|hit| {
-                                hit.interaction
-                                    == lgui_core::core::InteractionRole::WindowDragRegion
-                            })
-                        {
-                            let _ = self.window.drag_window();
+                        } else if let Some(hit) = self.session.tree().hit_test(pointer.point) {
+                            if hit.interaction
+                                == lgui_core::core::InteractionRole::WindowDragRegion
+                            {
+                                #[cfg(target_os = "windows")]
+                                super::winit_windows::begin_os_move(&self.window);
+                                #[cfg(not(target_os = "windows"))]
+                                let _ = self.window.drag_window();
+                            }
                         }
                     } else if self
                         .session
@@ -146,6 +148,9 @@ impl WinitWindow {
                             hit.interaction == lgui_core::core::InteractionRole::WindowDragRegion
                         })
                     {
+                        #[cfg(target_os = "windows")]
+                        super::winit_windows::begin_os_move(&self.window);
+                        #[cfg(not(target_os = "windows"))]
                         let _ = self.window.drag_window();
                     }
                 }

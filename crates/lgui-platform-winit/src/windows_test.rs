@@ -23,3 +23,15 @@ fn fullscreen_windows_disable_dwm_rounding() {
         CornerPreference::DoNotRound
     );
 }
+
+#[test]
+fn resize_directions_map_to_the_matching_hit_test_codes() {
+    assert_eq!(hit_test_for_resize(ResizeDirection::North), HTTOP);
+    assert_eq!(hit_test_for_resize(ResizeDirection::South), HTBOTTOM);
+    assert_eq!(hit_test_for_resize(ResizeDirection::East), HTRIGHT);
+    assert_eq!(hit_test_for_resize(ResizeDirection::West), HTLEFT);
+    assert_eq!(hit_test_for_resize(ResizeDirection::NorthEast), HTTOPRIGHT);
+    assert_eq!(hit_test_for_resize(ResizeDirection::NorthWest), HTTOPLEFT);
+    assert_eq!(hit_test_for_resize(ResizeDirection::SouthEast), HTBOTTOMRIGHT);
+    assert_eq!(hit_test_for_resize(ResizeDirection::SouthWest), HTBOTTOMLEFT);
+}
