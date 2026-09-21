@@ -34,7 +34,7 @@ impl UiEventDispatcher {
     pub fn dispatch(&mut self, tree: &HostTree, event: InputEvent) -> Vec<UiEvent> {
         match event {
             InputEvent::PointerMove(pointer) => self.pointer_move(tree, pointer),
-            InputEvent::PointerDown { pointer, .. } => self.pointer_down(tree, pointer),
+            InputEvent::PointerDown { pointer, button } => self.pointer_down(tree, pointer, button),
             InputEvent::PointerUp { pointer, .. } => self.pointer_up(tree, pointer),
             InputEvent::PointerEnter(pointer) => self.pointer_move(tree, pointer),
             InputEvent::Wheel { point, delta } => self.wheel(tree, point, delta),
@@ -46,7 +46,7 @@ impl UiEventDispatcher {
             InputEvent::Keyboard(event) => self.keyboard(event),
             InputEvent::PointerLeave(pointer) => self.pointer_leave(pointer),
             InputEvent::Touch { pointer, phase } => match phase {
-                TouchPhase::Started => self.pointer_down(tree, pointer),
+                TouchPhase::Started => self.pointer_down(tree, pointer, PointerButton::Left),
                 TouchPhase::Moved => self.pointer_move(tree, pointer),
                 TouchPhase::Ended => self.pointer_up(tree, pointer),
                 TouchPhase::Cancelled => self.pointer_leave(pointer),
@@ -113,7 +113,7 @@ impl UiEventDispatcher {
         events
     }
 
-    fn pointer_down(&mut self, tree: &HostTree, pointer: PointerData) -> Vec<UiEvent> {
+    fn pointer_down(&mut self, tree: &HostTree, pointer: PointerData, button: PointerButton) -> Vec<UiEvent> {
         let hit = tree.hit_test(pointer.point).filter(|hit| hit.policy.press);
         let current = hit.as_ref().map(|hit| hit.id.clone());
         let mut events = Vec::new();
@@ -139,7 +139,7 @@ impl UiEventDispatcher {
                     });
                 }
             }
-            events.push(UiEvent::PointerPressed { hit, pointer });
+            events.push(UiEvent::PointerPressed { hit, pointer, button });
         } else if let Some(previous) = self.state.focused.take() {
             events.push(UiEvent::FocusChanged {
                 previous: Some(previous),

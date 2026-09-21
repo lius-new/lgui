@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::PointerButton;
 
 pub trait IntoClickHandler<Arguments> {
     fn into_click_handler(self) -> UiEventHandler;
@@ -103,8 +104,19 @@ impl Element {
         F: Fn(&mut UiEventContext, PointerData) + Send + Sync + 'static,
     {
         self.on_event(UiEventKind::PointerDown, move |cx, payload| {
-            if let UiEventPayload::PointerDown { pointer } = payload {
+            if let UiEventPayload::PointerDown { pointer, .. } = payload {
                 handler(cx, *pointer);
+            }
+        })
+    }
+
+    pub fn on_pointer_down_with_button<F>(self, handler: F) -> Self
+    where
+        F: Fn(&mut UiEventContext, PointerData, PointerButton) + Send + Sync + 'static,
+    {
+        self.on_event(UiEventKind::PointerDown, move |cx, payload| {
+            if let UiEventPayload::PointerDown { pointer, button } = payload {
+                handler(cx, *pointer, *button);
             }
         })
     }

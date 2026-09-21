@@ -1,8 +1,8 @@
 use std::{future::Future, ops::Range, sync::Arc};
 
 use super::{
-    ActionId, KeyboardEvent, PointerData, UiAction, UiAsyncContext, UiEventContext, UiId,
-    WheelDelta,
+    ActionId, KeyboardEvent, PointerButton, PointerData, UiAction, UiAsyncContext,
+    UiEventContext, UiId, WheelDelta,
 };
 
 pub type UiEventHandler = Arc<dyn Fn(&mut UiEventContext) + Send + Sync>;
@@ -56,6 +56,7 @@ pub enum UiEventPayload {
     Click,
     PointerDown {
         pointer: PointerData,
+        button: PointerButton,
     },
     PointerMove {
         pointer: PointerData,

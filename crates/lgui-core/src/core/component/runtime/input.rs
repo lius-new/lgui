@@ -135,7 +135,7 @@ impl UiRuntime {
                     }
                 }
                 UiEvent::Keyboard { .. } => {}
-                UiEvent::PointerPressed { hit, pointer } => {
+                UiEvent::PointerPressed { hit, pointer, .. } => {
                     let point = pointer.point;
                     let payload = format!("{},{}", point.x - hit.rect.left, point.y - hit.rect.top);
                     let target = hit.action_target.as_ref().unwrap_or(&hit.id);

@@ -246,6 +246,7 @@ pub enum UiEvent {
     PointerPressed {
         hit: HitResult,
         pointer: PointerData,
+        button: PointerButton,
     },
     PointerMoved {
         hit: HitResult,
