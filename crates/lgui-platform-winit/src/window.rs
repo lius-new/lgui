@@ -7,6 +7,12 @@ const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// OS window move instead of waiting for a possible double click.
 const DRAG_START_THRESHOLD: f32 = 4.0;
 
+/// Invisible edge-resize strip for frameless windows, in logical pixels.
+/// 1px hugs the window boundary so the strip never overlaps the app's own
+/// edge content (e.g. a scrollbar); the OS adds its own outer resize margin
+/// where available.
+const RESIZE_BORDER_PX: f32 = 1.0;
+
 /// A left press on the window drag region that hasn't resolved into a move,
 /// a double click, or a plain click yet.
 pub(super) struct DragPending {
@@ -202,7 +208,7 @@ impl WinitWindow {
                             resize_direction(
                                 physical,
                                 WinitPhysicalSize::new(size.width, size.height),
-                                (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
+                                (RESIZE_BORDER_PX * self.scale.factor()).ceil().max(1.0) as i32,
                             )
                         })
                         .flatten();
@@ -455,7 +461,7 @@ impl WinitWindow {
             if let Some(direction) = resize_direction(
                 physical,
                 WinitPhysicalSize::new(size.width, size.height),
-                (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
+                (RESIZE_BORDER_PX * self.scale.factor()).ceil().max(1.0) as i32,
             ) {
                 return edge_resize_cursor(direction);
             }
