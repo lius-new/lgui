@@ -44,12 +44,12 @@ impl UiEventDispatcher {
             InputEvent::Ime(ImeEvent::Commit(text)) => self.text_input(text),
             InputEvent::Ime(ImeEvent::Disabled) => self.ime_end(),
             InputEvent::Keyboard(event) => self.keyboard(event),
-            InputEvent::PointerLeave(_) => self.pointer_leave(),
+            InputEvent::PointerLeave(pointer) => self.pointer_leave(pointer),
             InputEvent::Touch { pointer, phase } => match phase {
                 TouchPhase::Started => self.pointer_down(tree, pointer),
                 TouchPhase::Moved => self.pointer_move(tree, pointer),
                 TouchPhase::Ended => self.pointer_up(tree, pointer),
-                TouchPhase::Cancelled => self.pointer_leave(),
+                TouchPhase::Cancelled => self.pointer_leave(pointer),
             },
             InputEvent::Platform(_) => Vec::new(),
             InputEvent::Semantic(input) => self.semantic(tree, input),
@@ -367,12 +367,23 @@ impl UiEventDispatcher {
         vec![UiEvent::FocusChanged { previous, current }]
     }
 
-    fn pointer_leave(&mut self) -> Vec<UiEvent> {
+    fn pointer_leave(&mut self, pointer: PointerData) -> Vec<UiEvent> {
         let previous = self.state.hovered.clone();
         self.state.hovered = None;
+        let mut events = vec![UiEvent::PointerLeft { previous }];
+        let previous_pressed = self.state.pressed.clone();
+        let pressed_hit = self.pressed_hit.take();
         self.state.pressed = None;
-        self.pressed_hit = None;
-        vec![UiEvent::PointerLeft { previous }]
+        if previous_pressed.is_some() {
+            events.push(UiEvent::PressedChanged {
+                previous: previous_pressed,
+                current: None,
+            });
+        }
+        if let Some(hit) = pressed_hit {
+            events.push(UiEvent::PointerReleased { hit, pointer });
+        }
+        events
     }
 }
 
