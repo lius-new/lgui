@@ -56,6 +56,21 @@ impl HostTree {
         None
     }
 
+    /// Resolves the cursor icon for a specific node, walking up the ancestor
+    /// chain to the nearest node that requests a non-default cursor. Used while
+    /// a pointer button is held so the icon stays pinned to the pressed node
+    /// (e.g. a resize handle) even when the pointer leaves its hit strip.
+    pub fn cursor_at_id(&self, id: &UiId) -> Option<CursorIcon> {
+        let mut current = self.node(id);
+        while let Some(node) = current {
+            if node.cursor != CursorIcon::Default {
+                return Some(node.cursor);
+            }
+            current = node.parent.as_ref().and_then(|pid| self.node(pid));
+        }
+        None
+    }
+
     pub fn focusable_hits(&self) -> Vec<HitResult> {
         self.nodes
             .iter()

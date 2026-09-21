@@ -225,13 +225,21 @@ impl WinitWindow {
                         self.drag_pending = None;
                     }
                 }
-                if state == ElementState::Released && button == PointerButton::Left {
+                let released = state == ElementState::Released && button == PointerButton::Left;
+                if released {
                     self.left_pressed = false;
                 }
                 self.dispatch_input(match state {
                     ElementState::Pressed => InputEvent::PointerDown { pointer, button },
                     ElementState::Released => InputEvent::PointerUp { pointer, button },
                 });
+                if released {
+                    // Drop the drag-pinned cursor (e.g. resize) immediately on
+                    // release instead of waiting for the next CursorMoved.
+                    if let Some(point) = self.cursor {
+                        self.sync_cursor(point);
+                    }
+                }
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
                 let point = self.cursor.unwrap_or_default();
@@ -450,6 +458,14 @@ impl WinitWindow {
                 (6.0 * self.scale.factor()).ceil().max(1.0) as i32,
             ) {
                 return edge_resize_cursor(direction);
+            }
+        }
+        // While a pointer button is held, pin the cursor to the pressed node
+        // (e.g. the drawer resize handle) so fast mouse movement outside the
+        // hit strip doesn't flicker the icon between resize and default.
+        if let Some(pressed) = self.session.runtime().interaction_state().pressed.as_ref() {
+            if let Some(cursor) = self.session.tree().cursor_at_id(pressed) {
+                return mapped_cursor(cursor);
             }
         }
         mapped_cursor(
