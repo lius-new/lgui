@@ -281,7 +281,11 @@ impl WinitWindow {
                 is_synthetic: false,
                 ..
             } => {
+                let text = text_input_for_key(&event);
                 self.dispatch_input(InputEvent::Keyboard(keyboard_event(event, self.modifiers)));
+                if let Some(text) = text {
+                    self.dispatch_input(InputEvent::TextInput(text));
+                }
             }
             WindowEvent::Ime(event) => self.dispatch_input(InputEvent::Ime(match event {
                 Ime::Enabled => ImeEvent::Enabled,

@@ -121,3 +121,42 @@ pub(super) fn keyboard_event(
         is_composing: false,
     }
 }
+
+pub(super) fn text_input_for_key(event: &winit::event::KeyEvent) -> Option<String> {
+    printable_key_text(event.state, event.text.as_deref())
+}
+
+fn printable_key_text(state: ElementState, text: Option<&str>) -> Option<String> {
+    let text = text?;
+    (state == ElementState::Pressed
+        && !text.is_empty()
+        && text.chars().all(|character| !character.is_control()))
+    .then(|| text.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn printable_text_is_dispatched_only_on_key_press() {
+        assert_eq!(
+            printable_key_text(ElementState::Pressed, Some("Ab 1")),
+            Some("Ab 1".to_owned())
+        );
+        assert_eq!(printable_key_text(ElementState::Released, Some("a")), None);
+    }
+
+    #[test]
+    fn control_key_text_stays_on_the_keyboard_event_path() {
+        assert_eq!(printable_key_text(ElementState::Pressed, Some("\r")), None);
+        assert_eq!(printable_key_text(ElementState::Pressed, Some("\t")), None);
+        assert_eq!(
+            printable_key_text(ElementState::Pressed, Some("\u{3}")),
+            None
+        );
+        assert_eq!(printable_key_text(ElementState::Pressed, Some("a\r")), None);
+        assert_eq!(printable_key_text(ElementState::Pressed, Some("")), None);
+        assert_eq!(printable_key_text(ElementState::Pressed, None), None);
+    }
+}
