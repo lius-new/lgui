@@ -71,8 +71,17 @@ pub(super) fn prepare_auxiliary_window(
 impl WinitWindow {
     pub(super) fn screen_cursor_position(&self) -> Option<PhysicalPosition<i32>> {
         let cursor = self.cursor?;
-        let origin = self.window.outer_position().ok()?;
         let point = self.scale.physical_point(cursor);
+        #[cfg(target_os = "windows")]
+        {
+            return super::winit_windows::client_point_to_screen(
+                &self.window,
+                PhysicalPosition::new(point.x, point.y),
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        let origin = self.window.outer_position().ok()?;
+        #[cfg(not(target_os = "windows"))]
         Some(PhysicalPosition::new(
             origin.x + point.x,
             origin.y + point.y,
@@ -414,6 +423,13 @@ impl WinitWindow {
         if let Some(position) = outer {
             let _ = self.window.set_outer_position(position);
         }
+        #[cfg(target_os = "windows")]
+        if !self.options.native_titlebar && self.options.resizable {
+            super::winit_windows::request_frameless_inner_size(&self.window, inner);
+        } else {
+            let _ = self.window.request_inner_size(inner);
+        }
+        #[cfg(not(target_os = "windows"))]
         let _ = self.window.request_inner_size(inner);
     }
 

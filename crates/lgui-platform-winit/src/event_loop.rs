@@ -225,9 +225,14 @@ impl WinitHost {
                 maximum.height.max(1) as u32,
             ));
         }
-        if options.mode == WindowMode::Fullscreen {
+        #[cfg(target_os = "windows")]
+        let outer_resize_frame = !options.native_titlebar && options.resizable;
+        #[cfg(not(target_os = "windows"))]
+        let outer_resize_frame = false;
+        let defer_initial_mode = outer_resize_frame && options.mode != WindowMode::Windowed;
+        if options.mode == WindowMode::Fullscreen && !defer_initial_mode {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
-        } else if options.mode == WindowMode::Maximized {
+        } else if options.mode == WindowMode::Maximized && !defer_initial_mode {
             attributes = attributes.with_maximized(true);
         }
         if let WindowPosition::Absolute { x, y } = options.position {
@@ -239,6 +244,7 @@ impl WinitHost {
                 attributes,
                 options.corner_radius,
                 options.mode,
+                outer_resize_frame,
             );
         }
 
@@ -268,7 +274,24 @@ impl WinitHost {
         let native = event_loop
             .create_window(attributes)
             .map_err(|error| WinitApplicationError(format!("create window: {error}")))?;
+        #[cfg(target_os = "windows")]
+        if outer_resize_frame {
+            super::winit_windows::install_outer_resize_frame(
+                &native,
+                options.minimum_size.is_some(),
+                options.maximum_size.is_some(),
+            );
+        }
         position_window(&native, &options, owner_window.as_deref(), cursor_position);
+        if defer_initial_mode {
+            match options.mode {
+                WindowMode::Fullscreen => {
+                    native.set_fullscreen(Some(Fullscreen::Borderless(None)))
+                }
+                WindowMode::Maximized => native.set_maximized(true),
+                WindowMode::Windowed => {}
+            }
+        }
         let window = Arc::new(native);
         #[cfg(feature = "accessibility")]
         let accessibility = super::winit_accessibility::AccessibilityState::new(
