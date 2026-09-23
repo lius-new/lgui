@@ -1,4 +1,5 @@
 use super::*;
+use lgui_core::core::UiEventFlags;
 
 pub(super) fn pointer_button(button: MouseButton) -> PointerButton {
     match button {
@@ -126,6 +127,13 @@ pub(super) fn text_input_for_key(event: &winit::event::KeyEvent) -> Option<Strin
     printable_key_text(event.state, event.text.as_deref())
 }
 
+pub(super) fn text_input_after_key_dispatch(
+    text: Option<String>,
+    flags: UiEventFlags,
+) -> Option<String> {
+    (!flags.default_prevented).then_some(text).flatten()
+}
+
 fn printable_key_text(state: ElementState, text: Option<&str>) -> Option<String> {
     let text = text?;
     (state == ElementState::Pressed
@@ -158,5 +166,32 @@ mod tests {
         assert_eq!(printable_key_text(ElementState::Pressed, Some("a\r")), None);
         assert_eq!(printable_key_text(ElementState::Pressed, Some("")), None);
         assert_eq!(printable_key_text(ElementState::Pressed, None), None);
+    }
+
+    #[test]
+    fn key_handler_controls_whether_related_text_is_dispatched() {
+        let text = Some("s".to_owned());
+        assert_eq!(
+            text_input_after_key_dispatch(text.clone(), UiEventFlags::default()),
+            text
+        );
+
+        let consumed = UiEventFlags {
+            consumed: true,
+            ..UiEventFlags::default()
+        };
+        assert_eq!(
+            text_input_after_key_dispatch(Some("s".to_owned()), consumed),
+            Some("s".to_owned())
+        );
+
+        let prevented = UiEventFlags {
+            default_prevented: true,
+            ..UiEventFlags::default()
+        };
+        assert_eq!(
+            text_input_after_key_dispatch(Some("s".to_owned()), prevented),
+            None
+        );
     }
 }

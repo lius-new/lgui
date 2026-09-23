@@ -1,4 +1,5 @@
 use super::*;
+use lgui_core::core::UiEventFlags;
 
 /// Two presses within this window on the title bar count as a double click.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
@@ -282,8 +283,11 @@ impl WinitWindow {
                 ..
             } => {
                 let text = text_input_for_key(&event);
-                self.dispatch_input(InputEvent::Keyboard(keyboard_event(event, self.modifiers)));
-                if let Some(text) = text {
+                let flags = self.dispatch_input_with_flags(InputEvent::Keyboard(keyboard_event(
+                    event,
+                    self.modifiers,
+                )));
+                if let Some(text) = text_input_after_key_dispatch(text, flags) {
                     self.dispatch_input(InputEvent::TextInput(text));
                 }
             }
@@ -438,16 +442,32 @@ impl WinitWindow {
     }
 
     pub(super) fn dispatch_input(&mut self, input: InputEvent) {
+        let _ = self.dispatch_input_with_flags(input);
+    }
+
+    /// Dispatches one normalized input and returns the flags produced by its handlers.
+    ///
+    /// Native event adapters use these flags to decide whether a related native
+    /// default should continue. For example, a prevented key event must not emit
+    /// its associated text input.
+    fn dispatch_input_with_flags(&mut self, input: InputEvent) -> UiEventFlags {
         let output = self.session.handle_input(input);
-        let mut context_frame = false;
+        let mut event_flags = UiEventFlags::default();
         let output = dispatch_runtime_output(
             output,
             &self.context,
             &self.id,
             |action| self.session.handle_default_action(action),
-            |context| context_frame |= context.flags().needs_frame,
+            |context| {
+                let flags = context.flags();
+                event_flags.consumed |= flags.consumed;
+                event_flags.changed |= flags.changed;
+                event_flags.route_changed |= flags.route_changed;
+                event_flags.needs_frame |= flags.needs_frame;
+                event_flags.default_prevented |= flags.default_prevented;
+            },
         );
-        if context_frame {
+        if event_flags.needs_frame {
             self.session.invalidate_all();
             self.full_redraw = true;
         }
@@ -459,6 +479,7 @@ impl WinitWindow {
         if output.animation_changed {
             self.schedule_next_frame();
         }
+        event_flags
     }
 
     /// Updates the native cursor icon for the current pointer position.
