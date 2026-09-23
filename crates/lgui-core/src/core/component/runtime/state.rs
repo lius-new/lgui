@@ -14,6 +14,7 @@ pub struct RuntimeOutput {
 pub struct PendingUpdateOutput {
     pub dirty_ids: Vec<UiId>,
     pub focus_changed: bool,
+    pub focus_events: Vec<UiEvent>,
     pub frame_requested: bool,
 }
 
@@ -114,10 +115,12 @@ impl UiRuntime {
         let dirty = self
             .hook_updates
             .apply(&self.hook_states, &self.component_tree);
-        let focus_changed = self
+        let focus_events = self
             .hook_updates
             .take_focus_request()
-            .is_some_and(|target| self.focus_node(tree, &target));
+            .map(|target| self.focus_node_events(tree, &target))
+            .unwrap_or_default();
+        let focus_changed = !focus_events.is_empty();
         if focus_changed {
             // The caller schedules focus damage from PendingUpdateOutput. Do not leak the same
             // dirty event into the next unrelated native input pass.
@@ -127,6 +130,7 @@ impl UiRuntime {
         PendingUpdateOutput {
             dirty_ids: dirty,
             focus_changed,
+            focus_events,
             frame_requested,
         }
     }

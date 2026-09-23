@@ -1,5 +1,5 @@
 use super::*;
-use lgui_core::core::UiEventFlags;
+use lgui_core::core::{UiEventFlags, dispatch_event_handlers};
 
 /// Two presses within this window on the title bar count as a double click.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
@@ -525,8 +525,18 @@ impl WinitWindow {
 
     pub(super) fn apply_pending_updates(&mut self) {
         let updates = self.session.apply_pending_updates();
+        let focus_handlers = updates
+            .focus_events
+            .iter()
+            .flat_map(|event| self.session.tree().handler_events(event))
+            .collect::<Vec<_>>();
+        let mut context_frame = false;
+        for event in &focus_handlers {
+            let context = dispatch_event_handlers(event, &self.context, &self.id);
+            context_frame |= context.flags().needs_frame;
+        }
         let has_dirty_ids = !updates.dirty_ids.is_empty();
-        if updates.focus_changed {
+        if updates.focus_changed || context_frame {
             self.session.invalidate_all();
             self.full_redraw = true;
         } else if !updates.dirty_ids.is_empty() {
@@ -536,6 +546,9 @@ impl WinitWindow {
                 self.session.invalidate_all();
                 self.full_redraw = true;
             }
+        }
+        if updates.focus_changed {
+            self.sync_ime();
         }
         if updates.frame_requested {
             self.schedule_next_frame();
