@@ -57,6 +57,7 @@ pub struct TextStyle {
     pub color: Color,
     pub height: f32,
     pub weight: i32,
+    pub font_families: &'static [&'static str],
     pub tracking: f32,
     pub align: TextAlign,
     pub vertical_align: TextVerticalAlign,
@@ -69,6 +70,7 @@ impl TextStyle {
             color,
             height,
             weight,
+            font_families: &[],
             tracking: 0.0,
             align: TextAlign::Left,
             vertical_align: TextVerticalAlign::CapCenter,
@@ -78,6 +80,11 @@ impl TextStyle {
 
     pub const fn centered(mut self) -> Self {
         self.align = TextAlign::Center;
+        self
+    }
+
+    pub const fn font_families(mut self, font_families: &'static [&'static str]) -> Self {
+        self.font_families = font_families;
         self
     }
 
@@ -104,6 +111,7 @@ impl Hash for TextStyle {
         self.color.hash(state);
         normalized_f32_bits(self.height).hash(state);
         self.weight.hash(state);
+        self.font_families.hash(state);
         normalized_f32_bits(self.tracking).hash(state);
         self.align.hash(state);
         self.vertical_align.hash(state);

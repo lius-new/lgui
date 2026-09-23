@@ -82,12 +82,17 @@ impl SkiaCache {
         text: &str,
         style: TextStyle,
     ) {
+        let families = if style.font_families.is_empty() {
+            lgui_core::backend::font_families()
+        } else {
+            style.font_families
+        };
         let key = ParagraphCacheKey {
             text: text.to_owned(),
             width: rect.width().to_bits(),
             height: rect.height().to_bits(),
             style,
-            families: lgui_core::backend::font_families().to_vec(),
+            families: families.to_vec(),
         };
         if let Some(entry) = self.paragraphs.get_mut(&key) {
             self.text_hits = self.text_hits.saturating_add(1);
@@ -289,6 +294,7 @@ pub(super) fn scene_text_layout_request<'a>(
     request.tracking = style.tracking;
     request.align = style.align;
     request.vertical_align = style.vertical_align;
+    request.font_families = style.font_families;
     request
 }
 

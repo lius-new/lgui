@@ -655,6 +655,19 @@ fn paragraph_layout_exposes_bidi_carets_selection_and_hit_testing() {
 }
 
 #[test]
+fn scene_text_layout_uses_the_style_font_families() {
+    static MONO: &[&str] = &["Cascadia Mono", "Consolas"];
+    let style = TextStyle::new(Color::WHITE, 12.0, 400).font_families(MONO);
+    let request = cache::scene_text_layout_request(
+        "let value = 1;",
+        UiRect::new(0.0, 0.0, 200.0, 24.0),
+        style,
+    );
+
+    assert_eq!(request.font_families, MONO);
+}
+
+#[test]
 fn paragraph_clusters_keep_combining_sequences_together() {
     let request = lgui_core::text::TextLayoutRequest::single_line(
         "a\u{0301}b",
