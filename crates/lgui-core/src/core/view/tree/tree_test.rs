@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::{AnimProperty, AnimationBinding, CursorIcon, RenderPhase, UiNodeKind, VisualStyle};
+use crate::core::{
+    AnimProperty, AnimationBinding, CursorIcon, PointerData, RenderPhase, UiNodeKind, VisualStyle,
+};
 
 #[test]
 fn retained_clone_shares_unchanged_nodes_and_detaches_only_updated_nodes() {
@@ -38,6 +40,44 @@ fn retained_clone_shares_unchanged_nodes_and_detaches_only_updated_nodes() {
         next.node(&first_id).unwrap().style
     );
     assert!(next.node(&second_id).is_some());
+}
+
+#[test]
+fn pointer_move_and_drag_route_to_distinct_handlers() {
+    let id = UiId::new("drag-target");
+    let pointer = PointerData::mouse(Point::new(5.0, 5.0));
+    let mut tree = HostTree::new();
+    tree.push(
+        UiNode::new(
+            id,
+            UiNodeKind::Panel,
+            UiRect::new(0.0, 0.0, 10.0, 10.0),
+        )
+        .on_event(UiEventKind::PointerMove, |_context, _payload| {})
+        .on_event(UiEventKind::PointerDrag, |_context, _payload| {}),
+    );
+    let hit = tree.hit_test(pointer.point).expect("interactive target");
+
+    let moved = tree.handler_events(&UiEvent::PointerMoved {
+        hit: hit.clone(),
+        pointer,
+    });
+    let dragged = tree.handler_events(&UiEvent::PointerDragged { hit, pointer });
+
+    assert!(matches!(
+        moved.as_slice(),
+        [UiHandlerEvent {
+            payload: UiEventPayload::PointerMove { .. },
+            ..
+        }]
+    ));
+    assert!(matches!(
+        dragged.as_slice(),
+        [UiHandlerEvent {
+            payload: UiEventPayload::PointerDrag { .. },
+            ..
+        }]
+    ));
 }
 
 #[test]

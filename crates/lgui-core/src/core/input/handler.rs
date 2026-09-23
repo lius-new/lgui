@@ -38,6 +38,7 @@ pub enum UiEventKind {
     Click,
     PointerDown,
     PointerMove,
+    PointerDrag,
     PointerUp,
     Wheel,
     KeyDown,
@@ -59,6 +60,9 @@ pub enum UiEventPayload {
         button: PointerButton,
     },
     PointerMove {
+        pointer: PointerData,
+    },
+    PointerDrag {
         pointer: PointerData,
     },
     PointerUp {
@@ -92,6 +96,7 @@ impl UiEventPayload {
             Self::Click => UiEventKind::Click,
             Self::PointerDown { .. } => UiEventKind::PointerDown,
             Self::PointerMove { .. } => UiEventKind::PointerMove,
+            Self::PointerDrag { .. } => UiEventKind::PointerDrag,
             Self::PointerUp { .. } => UiEventKind::PointerUp,
             Self::Wheel { .. } => UiEventKind::Wheel,
             Self::Keyboard {

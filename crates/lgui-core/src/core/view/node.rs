@@ -491,7 +491,10 @@ impl UiNode {
         });
         match kind {
             UiEventKind::PointerMove => self.event_policy.hover = true,
-            UiEventKind::Click | UiEventKind::PointerDown | UiEventKind::PointerUp => {
+            UiEventKind::Click
+            | UiEventKind::PointerDown
+            | UiEventKind::PointerDrag
+            | UiEventKind::PointerUp => {
                 self.event_policy.press = true;
             }
             UiEventKind::KeyDown

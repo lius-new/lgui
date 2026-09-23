@@ -132,6 +132,17 @@ impl Element {
         })
     }
 
+    pub fn on_pointer_drag<F>(self, handler: F) -> Self
+    where
+        F: Fn(&mut UiEventContext, PointerData) + Send + Sync + 'static,
+    {
+        self.on_event(UiEventKind::PointerDrag, move |cx, payload| {
+            if let UiEventPayload::PointerDrag { pointer } = payload {
+                handler(cx, *pointer);
+            }
+        })
+    }
+
     pub fn on_pointer_up<F>(self, handler: F) -> Self
     where
         F: Fn(&mut UiEventContext, PointerData) + Send + Sync + 'static,

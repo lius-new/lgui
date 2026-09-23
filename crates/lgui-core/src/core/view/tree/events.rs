@@ -20,6 +20,7 @@ impl HostTree {
                         UiEventKind::Click
                             | UiEventKind::PointerDown
                             | UiEventKind::PointerMove
+                            | UiEventKind::PointerDrag
                             | UiEventKind::PointerUp
                     )
                 })
@@ -156,11 +157,15 @@ impl HostTree {
                 )
                 .into_iter()
                 .collect(),
-            UiEvent::PointerMoved { hit, pointer } | UiEvent::PointerDragged { hit, pointer } => {
+            UiEvent::PointerMoved { hit, pointer } => {
                 self.handler_event(&hit.id, UiEventPayload::PointerMove { pointer: *pointer })
                     .into_iter()
                     .collect()
             }
+            UiEvent::PointerDragged { hit, pointer } => self
+                .handler_event(&hit.id, UiEventPayload::PointerDrag { pointer: *pointer })
+                .into_iter()
+                .collect(),
             UiEvent::PointerReleased { hit, pointer } => self
                 .handler_event(&hit.id, UiEventPayload::PointerUp { pointer: *pointer })
                 .into_iter()
