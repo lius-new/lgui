@@ -313,19 +313,8 @@ impl SkiaPainter<'_> {
             return Ok(None);
         };
         let tinted = tint_svg(&svg, style.color, style.alpha);
-        let dom = skia_safe::svg::Dom::from_bytes(tinted.as_bytes(), FontMgr::default())
-            .map_err(|_| format!("Skia could not parse SVG icon {key}"))?;
-        let mut surface = layer_surface(width as f32, height as f32)?;
-        surface.canvas().clear(SkColor::TRANSPARENT);
-        let intrinsic = dom.root().intrinsic_size();
-        if intrinsic.width > 0.0 && intrinsic.height > 0.0 {
-            surface.canvas().scale((
-                width as f32 / intrinsic.width,
-                height as f32 / intrinsic.height,
-            ));
-        }
-        dom.render(surface.canvas());
-        Ok(Some(self.cache.insert(cache_key, surface.image_snapshot())))
+        let image = rasterize_svg_icon(&tinted, width, height, key)?;
+        Ok(Some(self.cache.insert(cache_key, image)))
     }
 
     fn draw_backdrop(
@@ -469,6 +458,57 @@ impl SkiaPainter<'_> {
         }
         canvas.restore();
         Ok(())
+    }
+}
+
+fn rasterize_svg_icon(svg: &str, width: i32, height: i32, key: &str) -> Result<Image, String> {
+    let mut dom = skia_safe::svg::Dom::from_bytes(svg.as_bytes(), FontMgr::default())
+        .map_err(|_| format!("Skia could not parse SVG icon {key}"))?;
+    let mut surface = layer_surface(width as f32, height as f32)?;
+    surface.canvas().clear(SkColor::TRANSPARENT);
+
+    let intrinsic = dom.root().intrinsic_size();
+    if intrinsic.width > 0.0 && intrinsic.height > 0.0 {
+        surface.canvas().scale((
+            width as f32 / intrinsic.width,
+            height as f32 / intrinsic.height,
+        ));
+    } else {
+        // SVGs commonly specify only a viewBox. Skia parses those documents,
+        // but without a container size their viewport remains empty and the
+        // render succeeds with fully transparent output.
+        dom.set_container_size((width as f32, height as f32));
+    }
+
+    dom.render(surface.canvas());
+    Ok(surface.image_snapshot())
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::*;
+
+    #[test]
+    fn rasterizes_svg_with_only_a_view_box() {
+        let image = rasterize_svg_icon(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="#ffca28" d="M2 2h12v12H2z"/></svg>"##,
+            16,
+            16,
+            "view-box-only",
+        )
+        .unwrap();
+        let info = ImageInfo::new((16, 16), ColorType::BGRA8888, AlphaType::Premul, None);
+        let row_bytes = 16 * 4;
+        let mut pixels = vec![0_u8; row_bytes * 16];
+
+        assert!(image.read_pixels(
+            &info,
+            &mut pixels,
+            row_bytes,
+            (0, 0),
+            skia_safe::image::CachingHint::Disallow,
+        ));
+        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] != 0));
     }
 }
 
