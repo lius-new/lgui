@@ -161,6 +161,8 @@ pub use lgui_platform_win32::{TrayIconHandle, Win32TrayIcon};
 #[cfg(all(target_os = "windows", feature = "notifications-win32"))]
 pub use lgui_platform_win32::{Win32NotificationApplicationExt, Win32NotificationService};
 #[cfg(feature = "backend-winit")]
-pub use lgui_platform_winit::{WinitApplication, WinitApplicationError};
+pub use lgui_platform_winit::{
+    WinitApplication, WinitApplicationError, WinitIconError, WinitWindowIcon, WinitWindowOptions,
+};
 #[cfg(feature = "renderer-skia")]
 pub use lgui_render_skia as render_skia;

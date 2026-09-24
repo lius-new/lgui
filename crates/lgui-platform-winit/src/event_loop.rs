@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(target_os = "windows")]
+use winit::platform::windows::WindowAttributesExtWindows;
+
 pub(crate) enum WinitUserEvent {
     Task(ApplicationTask),
     Window(WindowCommand),
@@ -237,6 +240,13 @@ impl WinitHost {
         }
         if let WindowPosition::Absolute { x, y } = options.position {
             attributes = attributes.with_position(PhysicalPosition::new(x, y));
+        }
+        if let Some(winit_options) = options.platform_options::<WinitWindowOptions>() {
+            attributes = attributes.with_window_icon(winit_options.window_icon.clone());
+            #[cfg(target_os = "windows")]
+            {
+                attributes = attributes.with_taskbar_icon(winit_options.taskbar_icon.clone());
+            }
         }
         #[cfg(target_os = "windows")]
         {

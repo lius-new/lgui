@@ -84,8 +84,10 @@ mod event_loop;
 mod input;
 mod renderer;
 mod window;
+mod window_options;
 
 pub use application::{WinitApplication, WinitApplicationError};
+pub use window_options::{WinitIconError, WinitWindowIcon, WinitWindowOptions};
 use event_loop::WinitHost;
 pub(crate) use event_loop::WinitUserEvent;
 use input::*;
