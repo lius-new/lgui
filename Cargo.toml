@@ -26,7 +26,6 @@ members = [
   "crates/lgui-store",
   "crates/lgui-widgets",
   "examples/backdrop",
-  "examples/leditor",
 ]
 resolver = "2"
 

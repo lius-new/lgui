@@ -106,6 +106,10 @@ Applications on macOS may enable `renderer-skia-metal`; Linux and Windows applic
 their platform-specific Vulkan feature. Explicit GPU choices return an error when the requested
 driver is unavailable; only `Auto` follows the bounded fallback chain.
 
+## Related projects
+
+- [Loom](https://github.com/lius-new/loom) — a text editor built with LGUI.
+
 ## License
 
 LGUI is licensed under either the [Apache License, Version 2.0](LICENSE-APACHE) or the
