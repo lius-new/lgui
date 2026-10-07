@@ -370,6 +370,7 @@ fn hash_text_style(style: &TextStyle, hasher: &mut DefaultHasher) {
     hash_color(&style.color, hasher);
     normalized_f32_bits(style.height).hash(hasher);
     style.weight.hash(hasher);
+    style.font_slant.hash(hasher);
     normalized_f32_bits(style.tracking).hash(hasher);
     style.align.hash(hasher);
     style.alpha.hash(hasher);

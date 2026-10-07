@@ -9,7 +9,7 @@ impl Color {
 use std::hash::{Hash, Hasher};
 
 use super::geometry::normalized_f32_bits;
-use crate::text::TextVerticalAlign;
+use crate::text::{TextFontSlant, TextVerticalAlign};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ImageFit {
@@ -57,6 +57,7 @@ pub struct TextStyle {
     pub color: Color,
     pub height: f32,
     pub weight: i32,
+    pub font_slant: TextFontSlant,
     pub font_families: &'static [&'static str],
     pub tracking: f32,
     pub align: TextAlign,
@@ -70,6 +71,7 @@ impl TextStyle {
             color,
             height,
             weight,
+            font_slant: TextFontSlant::Upright,
             font_families: &[],
             tracking: 0.0,
             align: TextAlign::Left,
@@ -85,6 +87,16 @@ impl TextStyle {
 
     pub const fn font_families(mut self, font_families: &'static [&'static str]) -> Self {
         self.font_families = font_families;
+        self
+    }
+
+    pub const fn font_slant(mut self, font_slant: TextFontSlant) -> Self {
+        self.font_slant = font_slant;
+        self
+    }
+
+    pub const fn italic(mut self) -> Self {
+        self.font_slant = TextFontSlant::Italic;
         self
     }
 
@@ -111,6 +123,7 @@ impl Hash for TextStyle {
         self.color.hash(state);
         normalized_f32_bits(self.height).hash(state);
         self.weight.hash(state);
+        self.font_slant.hash(state);
         self.font_families.hash(state);
         normalized_f32_bits(self.tracking).hash(state);
         self.align.hash(state);

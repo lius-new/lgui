@@ -5,6 +5,21 @@ fn id(value: &str) -> UiId {
     UiId::owned(value.to_string())
 }
 
+#[test]
+fn text_slant_changes_the_render_signature() {
+    let command = |style| ScenePrimitive::Text {
+        id: id("text"),
+        rect: UiRect::new(0.0, 0.0, 120.0, 24.0),
+        text: Cow::Borrowed("preview.rs"),
+        style,
+        phase: RenderPhase::Content,
+    };
+    let upright = command(TextStyle::new(Color::WHITE, 14.0, 400));
+    let italic = command(TextStyle::new(Color::WHITE, 14.0, 400).italic());
+
+    assert_ne!(upright.signature(), italic.signature());
+}
+
 fn compositing_layer_tree(layer_rect: UiRect, child_rect: UiRect) -> HostTree {
     compositing_layer_tree_with_spec(layer_rect, child_rect, CompositingLayerSpec::new())
 }
