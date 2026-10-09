@@ -204,7 +204,10 @@ fn inferred_semantics(node: &UiNode) -> Semantics {
         (UiNodeKind::Root, _) => SemanticRole::Window,
         (UiNodeKind::Text, _) => SemanticRole::Text,
         (UiNodeKind::Image | UiNodeKind::Icon, _) => SemanticRole::Image,
-        (UiNodeKind::Button, _) | (_, InteractionRole::Button) => SemanticRole::Button,
+        (UiNodeKind::Button, _)
+        | (_, InteractionRole::Button | InteractionRole::WindowMaximizeButton) => {
+            SemanticRole::Button
+        }
         (UiNodeKind::Table, _) => SemanticRole::Table,
         (UiNodeKind::TableRow, _) | (_, InteractionRole::Row) => SemanticRole::Row,
         (_, InteractionRole::Navigation) => SemanticRole::Navigation,

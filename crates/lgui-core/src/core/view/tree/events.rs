@@ -28,6 +28,16 @@ impl HostTree {
         Some(self.hit_for_node(node, node.click_action.clone()))
     }
 
+    /// Window-space hit rect of the element marked as the maximize button.
+    pub fn window_maximize_button_rect(&self) -> Option<UiRect> {
+        let node = self
+            .nodes
+            .iter()
+            .find(|node| node.interaction == InteractionRole::WindowMaximizeButton)?;
+        let offset = self.ancestor_content_offset(node);
+        Some(node.hit_rect.translate(offset.0, offset.1))
+    }
+
     pub fn wheel_hit_test(&self, point: Point) -> Option<HitResult> {
         let node = self.frontmost_node_at(point, |node| {
             node.wheel_action.is_some()

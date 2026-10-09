@@ -186,6 +186,41 @@ fn interactive_titlebar_children_take_precedence_over_the_drag_region() {
 }
 
 #[test]
+fn maximize_button_rect_is_reported_for_native_hit_testing() {
+    let mut tree = HostTree::new();
+    assert_eq!(tree.window_maximize_button_rect(), None);
+
+    let drag_id = UiId::new("titlebar");
+    tree.push(
+        UiNode::new(
+            drag_id.clone(),
+            UiNodeKind::Group,
+            UiRect::new(0.0, 0.0, 400.0, 32.0),
+        )
+        .interaction(InteractionRole::WindowDragRegion)
+        .event_policy(crate::core::EventPolicy::NONE),
+    );
+    tree.push(
+        UiNode::new(
+            UiId::new("maximize"),
+            UiNodeKind::Button,
+            UiRect::new(328.0, 0.0, 364.0, 32.0),
+        )
+        .parent(drag_id)
+        .interaction(InteractionRole::WindowMaximizeButton),
+    );
+
+    assert_eq!(
+        tree.window_maximize_button_rect(),
+        Some(UiRect::new(328.0, 0.0, 364.0, 32.0))
+    );
+    let hit = tree
+        .hit_test(Point::new(340.0, 16.0))
+        .expect("maximize button should stay interactive");
+    assert_eq!(hit.interaction, InteractionRole::WindowMaximizeButton);
+}
+
+#[test]
 fn cursor_resolution_inherits_from_ancestors_and_respects_overrides() {
     let root_id = UiId::new("root");
     let field_id = UiId::new("field");

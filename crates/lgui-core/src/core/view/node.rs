@@ -45,6 +45,9 @@ pub enum InteractionRole {
     Row,
     DragHandle,
     WindowDragRegion,
+    /// The window's maximize/restore button. Platforms with native affordances
+    /// on that button (Windows 11 Snap Layouts) report it to the OS.
+    WindowMaximizeButton,
     Custom(&'static str),
 }
 

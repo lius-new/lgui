@@ -1,4 +1,4 @@
-use std::{ffi::c_void, sync::OnceLock};
+use std::{cell::Cell, ffi::c_void, sync::OnceLock};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{
@@ -65,9 +65,20 @@ struct OsVersionInfo {
 struct ResizeFrameData {
     has_minimum_size: bool,
     has_maximum_size: bool,
+    /// Client-space physical rect of the app-drawn maximize button. The
+    /// subclass proc runs on the window's thread, so `Cell` suffices.
+    maximize_button: Cell<Option<Rect>>,
+    maximize_pressed: Cell<bool>,
 }
 
+const WM_LBUTTONUP: u32 = 0x0202;
 const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+const WM_NCLBUTTONUP: u32 = 0x00A2;
+const WM_NCLBUTTONDBLCLK: u32 = 0x00A3;
+const WM_SYSCOMMAND: u32 = 0x0112;
+const SC_MAXIMIZE: usize = 0xF030;
+const SC_RESTORE: usize = 0xF120;
+const HTMAXBUTTON: usize = 9;
 const WM_NCCALCSIZE: u32 = 0x0083;
 const WM_NCHITTEST: u32 = 0x0084;
 const WM_NCDESTROY: u32 = 0x0082;
@@ -108,6 +119,7 @@ unsafe extern "system" {
     fn IsZoomed(hwnd: isize) -> i32;
     fn ReleaseCapture() -> i32;
     fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
+    fn ScreenToClient(hwnd: isize, point: *mut NativePoint) -> i32;
     fn SetWindowPos(
         hwnd: isize,
         insert_after: isize,
@@ -123,6 +135,22 @@ unsafe extern "system" {
 unsafe extern "system" {
     fn DefSubclassProc(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
     fn SetWindowSubclass(hwnd: isize, proc: SubclassProc, id: usize, reference_data: usize) -> i32;
+}
+
+// `GetWindowSubclass` is only exported by name from comctl32 v6, which an
+// application without a common-controls manifest never loads. Window
+// properties reach the subclass data from outside the subclass proc instead.
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetPropW(hwnd: isize, name: *const u16, data: isize) -> i32;
+    fn GetPropW(hwnd: isize, name: *const u16) -> isize;
+    fn RemovePropW(hwnd: isize, name: *const u16) -> isize;
+}
+
+fn resize_frame_prop() -> *const u16 {
+    static NAME: OnceLock<Vec<u16>> = OnceLock::new();
+    NAME.get_or_init(|| "lgui.resize_frame\0".encode_utf16().collect())
+        .as_ptr()
 }
 
 #[link(name = "ntdll")]
@@ -152,6 +180,8 @@ pub(crate) fn install_outer_resize_frame(
     let data = Box::new(ResizeFrameData {
         has_minimum_size,
         has_maximum_size,
+        maximize_button: Cell::new(None),
+        maximize_pressed: Cell::new(false),
     });
     let data = Box::into_raw(data);
     if unsafe {
@@ -166,6 +196,7 @@ pub(crate) fn install_outer_resize_frame(
         unsafe { drop(Box::from_raw(data)) };
         return;
     }
+    unsafe { SetPropW(hwnd, resize_frame_prop(), data as isize) };
 
     let insets = resize_frame_insets(hwnd);
     let width = client
@@ -248,16 +279,51 @@ unsafe extern "system" fn resize_frame_subclass(
             params.rects[0].bottom -= insets.bottom;
             0
         }
-        WM_NCHITTEST if resize_frame_is_active(hwnd) => {
+        WM_NCHITTEST => {
+            let x = lparam as u16 as i16 as i32;
+            let y = (lparam >> 16) as u16 as i16 as i32;
             let mut rect = Rect::default();
-            if unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
-                let x = lparam as u16 as i16 as i32;
-                let y = (lparam >> 16) as u16 as i16 as i32;
+            if resize_frame_is_active(hwnd) && unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
                 let insets = resize_frame_insets(hwnd);
                 if let Some(hit) = resize_hit_test(rect, x, y, insets.right, insets.bottom) {
                     return hit as isize;
                 }
             }
+            if let Some(button) = data.maximize_button.get() {
+                let mut point = NativePoint { x, y };
+                if unsafe { ScreenToClient(hwnd, &mut point) } != 0
+                    && point.x >= button.left
+                    && point.x < button.right
+                    && point.y >= button.top
+                    && point.y < button.bottom
+                {
+                    // Reporting the native maximize button is what makes
+                    // Windows 11 show Snap Layouts on hover.
+                    return HTMAXBUTTON as isize;
+                }
+            }
+            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+        }
+        // DefWindowProc would run its own caption-button loop and paint a
+        // classic button over the app's; handle the click here instead.
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wparam == HTMAXBUTTON => {
+            data.maximize_pressed.set(true);
+            0
+        }
+        WM_NCLBUTTONUP if wparam == HTMAXBUTTON => {
+            if data.maximize_pressed.replace(false) {
+                let command = if unsafe { IsZoomed(hwnd) } != 0 {
+                    SC_RESTORE
+                } else {
+                    SC_MAXIMIZE
+                };
+                unsafe { PostMessageW(hwnd, WM_SYSCOMMAND, command, 0) };
+            }
+            0
+        }
+        WM_NCLBUTTONUP | WM_LBUTTONUP => {
+            // Released away from the button: the press is abandoned.
+            data.maximize_pressed.set(false);
             unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
         }
         WM_GETMINMAXINFO => {
@@ -280,11 +346,34 @@ unsafe extern "system" fn resize_frame_subclass(
         }
         WM_NCDESTROY => {
             let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            unsafe { RemovePropW(hwnd, resize_frame_prop()) };
             unsafe { drop(Box::from_raw(reference_data as *mut ResizeFrameData)) };
             result
         }
         _ => unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) },
     }
+}
+
+/// Publish the app-drawn maximize button, in client-space physical pixels, to
+/// the native hit test. A no-op unless the outer resize frame is installed.
+pub(crate) fn set_maximize_button(
+    window: &Window,
+    button: Option<lgui_core::core::PhysicalRect>,
+) {
+    let Some(hwnd) = window_hwnd(window) else {
+        return;
+    };
+    let reference_data = unsafe { GetPropW(hwnd, resize_frame_prop()) };
+    if reference_data == 0 {
+        return;
+    }
+    let data = unsafe { &*(reference_data as *const ResizeFrameData) };
+    data.maximize_button.set(button.map(|rect| Rect {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    }));
 }
 
 fn window_hwnd(window: &Window) -> Option<isize> {

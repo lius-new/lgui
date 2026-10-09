@@ -388,8 +388,24 @@ impl WinitWindow {
         match self.options.mode {
             WindowMode::Fullscreen => self.sync_fullscreen_restore(),
             WindowMode::Maximized => self.sync_maximized_restore(),
-            WindowMode::Windowed => {}
+            WindowMode::Windowed => self.sync_os_maximize(),
         }
+    }
+
+    /// The OS maximized the window itself (the native maximize button or
+    /// Snap Layouts, Win+Up, dragging to the top edge). Adopt the mode so the
+    /// next toggle restores instead of re-maximizing.
+    fn sync_os_maximize(&mut self) {
+        if !self.window.is_maximized() {
+            return;
+        }
+        self.options.mode = WindowMode::Maximized;
+        #[cfg(target_os = "windows")]
+        super::winit_windows::set_corner_radius(
+            &self.window,
+            self.options.corner_radius,
+            WindowMode::Maximized,
+        );
     }
 
     /// A maximized window restored by dragging its titlebar downward keeps the
@@ -655,6 +671,14 @@ impl WinitWindow {
         #[cfg(feature = "diagnostics")]
         let frame_started = Instant::now();
         let commit = self.session.render_view(&self.view, viewport, self.scale);
+        #[cfg(target_os = "windows")]
+        super::winit_windows::set_maximize_button(
+            &self.window,
+            self.session
+                .tree()
+                .window_maximize_button_rect()
+                .map(|rect| self.scale.physical_rect(rect)),
+        );
         #[cfg(feature = "diagnostics")]
         let frame_build_ms = frame_started.elapsed().as_secs_f32() * 1_000.0;
         #[cfg(feature = "accessibility")]

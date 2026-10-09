@@ -223,6 +223,18 @@ impl UiElement {
         self
     }
 
+    /// Marks this element as the window's maximize/restore button.
+    ///
+    /// On Windows 11 the platform reports it as the native maximize button, so
+    /// hovering shows Snap Layouts and the OS handles the click. Elsewhere it
+    /// stays an ordinary button: keep an `on_click` that toggles maximize.
+    pub fn window_maximize_button(mut self) -> Self {
+        self.node = self
+            .node
+            .interaction(InteractionRole::WindowMaximizeButton);
+        self
+    }
+
     pub fn on_click<F>(mut self, handler: F) -> Self
     where
         F: Fn(&mut UiEventContext) + Send + Sync + 'static,

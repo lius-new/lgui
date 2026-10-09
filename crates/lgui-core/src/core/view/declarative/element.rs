@@ -176,6 +176,16 @@ impl Element {
         self
     }
 
+    /// Marks this element as the window's maximize/restore button.
+    ///
+    /// On Windows 11 the platform reports it as the native maximize button, so
+    /// hovering shows Snap Layouts and the OS handles the click. Elsewhere it
+    /// stays an ordinary button: keep an `on_click` that toggles maximize.
+    pub fn window_maximize_button(mut self) -> Self {
+        self.interaction = Some(InteractionRole::WindowMaximizeButton);
+        self
+    }
+
     pub fn phase(mut self, phase: RenderPhase) -> Self {
         self.phase = Some(phase);
         self

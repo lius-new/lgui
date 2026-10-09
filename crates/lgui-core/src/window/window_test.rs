@@ -75,6 +75,7 @@ fn window_manager_marshals_the_complete_command_model() {
             WindowCommand::SetMode { id, mode } => {
                 format!("mode:{}:{mode:?}", id.as_str())
             }
+            WindowCommand::ToggleMaximize(id) => format!("toggle-maximize:{}", id.as_str()),
             WindowCommand::Input { id, .. } => format!("input:{}", id.as_str()),
             WindowCommand::Exit => "exit".into(),
         };
@@ -90,6 +91,7 @@ fn window_manager_marshals_the_complete_command_model() {
     });
     manager.set_scale_preference(ScalePreference::Multiplier(0.9));
     manager.set_mode("friends", WindowMode::Fullscreen);
+    manager.toggle_maximize("friends");
     manager.request_close("friends");
     manager.close("friends");
     manager.exit();
@@ -102,6 +104,7 @@ fn window_manager_marshals_the_complete_command_model() {
             "toggle:friends",
             "scale:0.9",
             "mode:friends:Fullscreen",
+            "toggle-maximize:friends",
             "request-close:friends",
             "close:friends",
             "exit",
