@@ -135,7 +135,11 @@ impl WinitWindow {
 
     pub(super) fn handle_event(&mut self, event: WindowEvent) {
         match event {
-            WindowEvent::RedrawRequested => self.render(),
+            WindowEvent::RedrawRequested => {
+                #[cfg(target_os = "windows")]
+                self.replay_caption_input();
+                self.render();
+            }
             WindowEvent::Resized(_) => {
                 self.full_redraw = true;
                 self.session.invalidate_all();
@@ -389,6 +393,52 @@ impl WinitWindow {
             WindowMode::Fullscreen => self.sync_fullscreen_restore(),
             WindowMode::Maximized => self.sync_maximized_restore(),
             WindowMode::Windowed => self.sync_os_maximize(),
+        }
+    }
+
+    /// Replays pointer activity on the native maximize button (see
+    /// `Element::window_maximize_button`) at the button's center, so it gets
+    /// the same hover, press and click handling as any other element.
+    #[cfg(target_os = "windows")]
+    fn replay_caption_input(&mut self) {
+        use super::winit_windows::CaptionPointer;
+
+        let input = super::winit_windows::take_caption_input(&self.window);
+        if input.is_empty() {
+            return;
+        }
+        let Some(rect) = self.session.tree().window_maximize_button_rect() else {
+            return;
+        };
+        let pointer = PointerData::mouse(Point::new(
+            (rect.left + rect.right) / 2.0,
+            (rect.top + rect.bottom) / 2.0,
+        ));
+        // A cursor inside the client means the pointer already moved on from
+        // the button and client input owns hover; replaying a stale move or
+        // leave would clobber it. Presses still complete as a click.
+        let in_client = self.cursor.is_some();
+        for event in input {
+            match event {
+                CaptionPointer::Move if !in_client => {
+                    self.dispatch_input(InputEvent::PointerMove(pointer))
+                }
+                CaptionPointer::Leave if !in_client => {
+                    self.dispatch_input(InputEvent::PointerLeave(pointer))
+                }
+                CaptionPointer::Move | CaptionPointer::Leave => {}
+                CaptionPointer::Down => self.dispatch_input(InputEvent::PointerDown {
+                    pointer,
+                    button: PointerButton::Left,
+                }),
+                CaptionPointer::Up => self.dispatch_input(InputEvent::PointerUp {
+                    pointer,
+                    button: PointerButton::Left,
+                }),
+            }
+        }
+        if let Some(point) = self.cursor {
+            self.dispatch_input(InputEvent::PointerMove(PointerData::mouse(point)));
         }
     }
 

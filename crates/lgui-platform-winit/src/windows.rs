@@ -1,4 +1,8 @@
-use std::{cell::Cell, ffi::c_void, sync::OnceLock};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::c_void,
+    sync::OnceLock,
+};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{
@@ -68,16 +72,40 @@ struct ResizeFrameData {
     /// Client-space physical rect of the app-drawn maximize button. The
     /// subclass proc runs on the window's thread, so `Cell` suffices.
     maximize_button: Cell<Option<Rect>>,
+    maximize_hovered: Cell<bool>,
     maximize_pressed: Cell<bool>,
+    /// Non-client pointer input on the maximize button, queued for the next
+    /// frame. Windows owns that button's hit area, so the client never sees
+    /// these as mouse messages.
+    caption_input: RefCell<Vec<CaptionPointer>>,
+}
+
+/// Pointer activity on the native maximize button, replayed into the UI as
+/// ordinary pointer input so the app's button gets hover, press and click.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CaptionPointer {
+    Move,
+    Down,
+    Up,
+    Leave,
+}
+
+#[repr(C)]
+struct TrackMouseEventInfo {
+    size: u32,
+    flags: u32,
+    hwnd: isize,
+    hover_time: u32,
 }
 
 const WM_LBUTTONUP: u32 = 0x0202;
+const WM_NCMOUSEMOVE: u32 = 0x00A0;
+const WM_NCMOUSELEAVE: u32 = 0x02A2;
 const WM_NCLBUTTONDOWN: u32 = 0x00A1;
 const WM_NCLBUTTONUP: u32 = 0x00A2;
 const WM_NCLBUTTONDBLCLK: u32 = 0x00A3;
-const WM_SYSCOMMAND: u32 = 0x0112;
-const SC_MAXIMIZE: usize = 0xF030;
-const SC_RESTORE: usize = 0xF120;
+const TME_LEAVE: u32 = 0x0002;
+const TME_NONCLIENT: u32 = 0x0010;
 const HTMAXBUTTON: usize = 9;
 const WM_NCCALCSIZE: u32 = 0x0083;
 const WM_NCHITTEST: u32 = 0x0084;
@@ -116,6 +144,7 @@ unsafe extern "system" {
     fn GetSystemMetricsForDpi(index: i32, dpi: u32) -> i32;
     fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+    fn InvalidateRect(hwnd: isize, rect: *const Rect, erase: i32) -> i32;
     fn IsZoomed(hwnd: isize) -> i32;
     fn ReleaseCapture() -> i32;
     fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
@@ -129,6 +158,7 @@ unsafe extern "system" {
         height: i32,
         flags: u32,
     ) -> i32;
+    fn TrackMouseEvent(info: *mut TrackMouseEventInfo) -> i32;
 }
 
 #[link(name = "comctl32")]
@@ -181,7 +211,9 @@ pub(crate) fn install_outer_resize_frame(
         has_minimum_size,
         has_maximum_size,
         maximize_button: Cell::new(None),
+        maximize_hovered: Cell::new(false),
         maximize_pressed: Cell::new(false),
+        caption_input: RefCell::new(Vec::new()),
     });
     let data = Box::into_raw(data);
     if unsafe {
@@ -304,26 +336,47 @@ unsafe extern "system" fn resize_frame_subclass(
             }
             unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
         }
+        WM_NCMOUSEMOVE => {
+            if wparam == HTMAXBUTTON {
+                if !data.maximize_hovered.replace(true) {
+                    // Ask for WM_NCMOUSELEAVE once the cursor leaves.
+                    let mut track = TrackMouseEventInfo {
+                        size: std::mem::size_of::<TrackMouseEventInfo>() as u32,
+                        flags: TME_LEAVE | TME_NONCLIENT,
+                        hwnd,
+                        hover_time: 0,
+                    };
+                    unsafe { TrackMouseEvent(&mut track) };
+                    queue_caption_input(hwnd, data, CaptionPointer::Move);
+                }
+            } else {
+                leave_maximize_button(hwnd, data);
+            }
+            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+        }
+        WM_NCMOUSELEAVE => {
+            leave_maximize_button(hwnd, data);
+            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+        }
         // DefWindowProc would run its own caption-button loop and paint a
-        // classic button over the app's; handle the click here instead.
+        // classic button over the app's. Replay the press into the UI instead,
+        // where the app's click handler toggles maximize.
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wparam == HTMAXBUTTON => {
             data.maximize_pressed.set(true);
+            queue_caption_input(hwnd, data, CaptionPointer::Down);
             0
         }
         WM_NCLBUTTONUP if wparam == HTMAXBUTTON => {
             if data.maximize_pressed.replace(false) {
-                let command = if unsafe { IsZoomed(hwnd) } != 0 {
-                    SC_RESTORE
-                } else {
-                    SC_MAXIMIZE
-                };
-                unsafe { PostMessageW(hwnd, WM_SYSCOMMAND, command, 0) };
+                queue_caption_input(hwnd, data, CaptionPointer::Up);
             }
             0
         }
         WM_NCLBUTTONUP | WM_LBUTTONUP => {
             // Released away from the button: the press is abandoned.
-            data.maximize_pressed.set(false);
+            if data.maximize_pressed.replace(false) {
+                queue_caption_input(hwnd, data, CaptionPointer::Leave);
+            }
             unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
         }
         WM_GETMINMAXINFO => {
@@ -354,20 +407,43 @@ unsafe extern "system" fn resize_frame_subclass(
     }
 }
 
+fn leave_maximize_button(hwnd: isize, data: &ResizeFrameData) {
+    if data.maximize_hovered.replace(false) {
+        queue_caption_input(hwnd, data, CaptionPointer::Leave);
+    }
+}
+
+/// Queue input for the next frame and wake the window: WM_PAINT reaches winit
+/// as `RedrawRequested`, where lgui replays the queue before rendering.
+fn queue_caption_input(hwnd: isize, data: &ResizeFrameData, input: CaptionPointer) {
+    data.caption_input.borrow_mut().push(input);
+    unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+}
+
+/// Drain the maximize button input queued by the subclass since last frame.
+pub(crate) fn take_caption_input(window: &Window) -> Vec<CaptionPointer> {
+    resize_frame_data(window)
+        .map(|data| std::mem::take(&mut *data.caption_input.borrow_mut()))
+        .unwrap_or_default()
+}
+
+fn resize_frame_data(window: &Window) -> Option<&ResizeFrameData> {
+    let hwnd = window_hwnd(window)?;
+    let reference_data = unsafe { GetPropW(hwnd, resize_frame_prop()) };
+    // The property lives until WM_NCDESTROY, when the window (and thus the
+    // borrowed `Window`) is gone.
+    (reference_data != 0).then(|| unsafe { &*(reference_data as *const ResizeFrameData) })
+}
+
 /// Publish the app-drawn maximize button, in client-space physical pixels, to
 /// the native hit test. A no-op unless the outer resize frame is installed.
 pub(crate) fn set_maximize_button(
     window: &Window,
     button: Option<lgui_core::core::PhysicalRect>,
 ) {
-    let Some(hwnd) = window_hwnd(window) else {
+    let Some(data) = resize_frame_data(window) else {
         return;
     };
-    let reference_data = unsafe { GetPropW(hwnd, resize_frame_prop()) };
-    if reference_data == 0 {
-        return;
-    }
-    let data = unsafe { &*(reference_data as *const ResizeFrameData) };
     data.maximize_button.set(button.map(|rect| Rect {
         left: rect.left,
         top: rect.top,

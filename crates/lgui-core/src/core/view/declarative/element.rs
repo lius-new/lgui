@@ -179,8 +179,10 @@ impl Element {
     /// Marks this element as the window's maximize/restore button.
     ///
     /// On Windows 11 the platform reports it as the native maximize button, so
-    /// hovering shows Snap Layouts and the OS handles the click. Elsewhere it
-    /// stays an ordinary button: keep an `on_click` that toggles maximize.
+    /// hovering shows Snap Layouts. The OS then owns that hit area; its hover,
+    /// press and click are replayed as ordinary pointer input, so the element
+    /// keeps its hover styling and `on_click` (which should toggle maximize)
+    /// on every platform.
     pub fn window_maximize_button(mut self) -> Self {
         self.interaction = Some(InteractionRole::WindowMaximizeButton);
         self
