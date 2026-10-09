@@ -55,12 +55,7 @@ impl SkiaPainter<'_> {
             }
             ScenePrimitive::Icon {
                 rect, key, style, ..
-            } => {
-                if let Some(image) = self.icon(key, *rect, *style)? {
-                    let destination = sk_rect(*rect);
-                    canvas.draw_image_rect(image, None, &destination, &Paint::default());
-                }
-            }
+            } => self.draw_icon(canvas, key, *rect, *style)?,
             ScenePrimitive::Glow {
                 rect, color, alpha, ..
             } => draw_glow(canvas, *rect, *color, *alpha),
@@ -294,14 +289,49 @@ impl SkiaPainter<'_> {
         Ok(Some(self.cache.insert(key, image)))
     }
 
-    fn icon(
+    /// Icons are rasterized at their final device size and drawn 1:1 on the
+    /// device pixel grid. Fractional placement would resample the bitmap and
+    /// smear every 1px edge across two pixels.
+    fn draw_icon(
         &mut self,
+        canvas: &Canvas,
         key: &'static str,
         rect: UiRect,
         style: lgui_core::core::IconStyle,
+    ) -> Result<(), String> {
+        let matrix = canvas.local_to_device_as_3x3();
+        if !matrix.is_scale_translate() {
+            // Rotated or skewed: there is no pixel grid to snap to.
+            let width = rect.width().ceil().max(1.0) as i32;
+            let height = rect.height().ceil().max(1.0) as i32;
+            if let Some(image) = self.icon(key, width, height, style)? {
+                canvas.draw_image_rect(image, None, &sk_rect(rect), &Paint::default());
+            }
+            return Ok(());
+        }
+
+        let (device, _) = matrix.map_rect(sk_rect(rect));
+        let width = device.width().round().max(1.0) as i32;
+        let height = device.height().round().max(1.0) as i32;
+        let left = device.left.round();
+        let top = device.top.round();
+        let Some(image) = self.icon(key, width, height, style)? else {
+            return Ok(());
+        };
+        canvas.save();
+        canvas.reset_matrix();
+        canvas.draw_image(image, (left, top), None);
+        canvas.restore();
+        Ok(())
+    }
+
+    fn icon(
+        &mut self,
+        key: &'static str,
+        width: i32,
+        height: i32,
+        style: lgui_core::core::IconStyle,
     ) -> Result<Option<Image>, String> {
-        let width = rect.width().ceil().max(1.0) as i32;
-        let height = rect.height().ceil().max(1.0) as i32;
         let cache_key = format!(
             "icon:{key}:{width}x{height}:{}:{}",
             style.color.0, style.alpha

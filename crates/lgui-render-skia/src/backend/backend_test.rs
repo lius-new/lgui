@@ -569,6 +569,30 @@ fn dirty_draw_preserves_pixels_outside_damage_and_clears_removals() {
 }
 
 #[test]
+fn icons_snap_to_the_device_pixel_grid() {
+    fn render_icon(rect: UiRect) -> SkiaSoftwareSurface {
+        let mut scene = Scene::new();
+        scene.push(ScenePrimitive::Icon {
+            id: test_id("snapped-icon"),
+            rect,
+            key: "copy",
+            style: IconStyle::new(Color::WHITE),
+            phase: RenderPhase::Content,
+        });
+        let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
+        draw_scene(&mut surface, &scene, true, &[PhysicalRect::new(0, 0, 32, 32)]);
+        surface
+    }
+
+    // A fractional origin or size must not resample the bitmap: it lands
+    // on the nearest whole-pixel rect, identical to drawing there directly.
+    let aligned = render_icon(UiRect::new(4.0, 4.0, 20.0, 20.0));
+    let fractional = render_icon(UiRect::new(4.3, 3.6, 20.2, 19.7));
+    assert!(aligned.pixels().iter().any(|&channel| channel != 0));
+    assert_eq!(aligned.pixels(), fractional.pixels());
+}
+
+#[test]
 fn dpi_projection_and_nested_clip_use_physical_bounds() {
     let mut logical = Scene::new();
     logical.push(ScenePrimitive::Clip {
