@@ -69,14 +69,15 @@ pub fn layout(request: &TextLayoutRequest<'_>) -> Option<TextLayout> {
 }
 
 pub fn measure_width(text: &str, rect: UiRect, font_height: f32, font_weight: i32) -> Option<f32> {
-    let request = TextLayoutRequest::single_line(text, rect, font_height, font_weight);
-    layout(&request).map(|layout| layout.width).or_else(|| {
-        measure(&TextMeasureRequest {
-            text,
-            bounds: rect,
-            font_height,
-            font_weight,
-        })
-        .map(|metrics| metrics.width)
+    measure(&TextMeasureRequest {
+        text,
+        bounds: rect,
+        font_height,
+        font_weight,
+    })
+    .map(|metrics| metrics.width)
+    .or_else(|| {
+        let request = TextLayoutRequest::single_line(text, rect, font_height, font_weight);
+        layout(&request).map(|layout| layout.width)
     })
 }

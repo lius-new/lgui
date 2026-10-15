@@ -28,8 +28,13 @@ impl TextLayout {
         did_exceed_max_lines: bool,
         lines: Vec<TextLineMetrics>,
         clusters: Vec<TextCluster>,
-        carets: Vec<(usize, TextAffinity, UiRect)>,
+        mut carets: Vec<(usize, TextAffinity, UiRect)>,
     ) -> Self {
+        // Stable order preserves the provider's preferred rectangle when it
+        // supplies duplicate indices or affinities (notably at bidi edges).
+        if !carets.is_sorted_by_key(|caret| caret.0) {
+            carets.sort_by_key(|caret| caret.0);
+        }
         Self {
             width,
             height,
@@ -59,16 +64,17 @@ impl TextLayout {
         self.caret_rect_with_affinity(index, TextAffinity::Downstream)
             .or_else(|| {
                 self.carets
-                    .iter()
-                    .find(|caret| caret.index == index)
+                    .get(self.carets.partition_point(|caret| caret.index < index))
+                    .filter(|caret| caret.index == index)
                     .map(|c| c.rect)
             })
     }
 
     pub fn caret_rect_with_affinity(&self, index: usize, affinity: TextAffinity) -> Option<UiRect> {
-        self.carets
+        self.carets[self.carets.partition_point(|caret| caret.index < index)..]
             .iter()
-            .find(|caret| caret.index == index && caret.affinity == affinity)
+            .take_while(|caret| caret.index == index)
+            .find(|caret| caret.affinity == affinity)
             .map(|caret| caret.rect)
     }
 

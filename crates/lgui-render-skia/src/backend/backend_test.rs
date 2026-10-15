@@ -810,3 +810,66 @@ fn visual_center_aligns_ink_closer_to_bounds_center() {
         "CapCenter {cap_center} should sit between XCenter {x_center} and line-centered {line_center}"
     );
 }
+
+
+#[test]
+fn optimized_geometry_preserves_native_carets_and_measurement() {
+    use lgui_core::text::{TextAffinity, TextLayoutRequest, TextSystem};
+    for source in [
+        "",
+        "abc 123",
+        "a\u{301}中👩‍💻",
+        "abc אבג 123",
+        "\t\r\n",
+        "office ffi",
+    ] {
+        let request =
+            TextLayoutRequest::single_line(source, UiRect::new(4.0, 8.0, 1000.0, 40.0), 14.0, 400);
+        let layout = TextSystem::layout(&SkiaTextSystem, &request).unwrap();
+        let boundaries = char_utf16_boundaries(source);
+        SKIA_TEXT_FONTS.with(|fonts| {
+            let mut paragraph = build_skia_paragraph(&request, fonts.borrow().clone(), None);
+            paragraph.layout(request.bounds.width());
+            let y = request.bounds.top
+                + vertical_align_offset(&paragraph, request.bounds, request.vertical_align);
+            for index in 0..boundaries.len() {
+                for (affinity, range, leading) in [
+                    (
+                        TextAffinity::Upstream,
+                        index
+                            .checked_sub(1)
+                            .map(|prev| boundaries[prev]..boundaries[index]),
+                        false,
+                    ),
+                    (
+                        TextAffinity::Downstream,
+                        boundaries
+                            .get(index + 1)
+                            .map(|next| boundaries[index]..*next),
+                        true,
+                    ),
+                ] {
+                    if let Some(expected) = range.and_then(|range| {
+                        paragraph_caret_rect(&paragraph, range, leading, request.bounds.left, y)
+                    }) {
+                        assert_eq!(
+                            layout.caret_rect_with_affinity(index, affinity),
+                            Some(expected)
+                        );
+                    }
+                }
+            }
+        });
+        let measured = TextSystem::measure(
+            &SkiaTextSystem,
+            &lgui_core::text::TextMeasureRequest {
+                text: source,
+                bounds: request.bounds,
+                font_height: request.font_height,
+                font_weight: 400,
+            },
+        )
+        .unwrap();
+        assert_eq!(measured.width, layout.width);
+    }
+}

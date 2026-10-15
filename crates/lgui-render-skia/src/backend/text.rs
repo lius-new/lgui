@@ -17,10 +17,13 @@ impl lgui_core::text::TextSystem for SkiaTextSystem {
             request.font_height,
             request.font_weight,
         );
-        self.layout(&layout_request)
-            .map(|layout| lgui_core::text::TextMetrics {
-                width: layout.width,
+        SKIA_TEXT_FONTS.with(|fonts| {
+            let mut paragraph = build_skia_paragraph(&layout_request, fonts.borrow().clone(), None);
+            paragraph.layout(request.bounds.width().max(1.0));
+            Some(lgui_core::text::TextMetrics {
+                width: paragraph.longest_line(),
             })
+        })
     }
 
     fn layout(
@@ -276,8 +279,8 @@ pub(super) fn portable_text_layout(
     let utf16_boundaries = char_utf16_boundaries(request.text);
     let byte_boundaries = char_byte_boundaries(request.text);
     let content_height = paragraph.height();
-    let offset_y =
-        request.bounds.top + vertical_align_offset(paragraph, request.bounds, request.vertical_align);
+    let offset_y = request.bounds.top
+        + vertical_align_offset(paragraph, request.bounds, request.vertical_align);
     let offset_x = request.bounds.left;
     let lines = paragraph
         .get_line_metrics()
@@ -314,6 +317,7 @@ pub(super) fn portable_text_layout(
         }
     }
     let mut carets = Vec::with_capacity(utf16_boundaries.len() * 2);
+    let mut has_caret = vec![false; utf16_boundaries.len()];
     for char_index in 0..utf16_boundaries.len() {
         let utf16_index = utf16_boundaries[char_index];
         if char_index > 0 {
@@ -325,6 +329,7 @@ pub(super) fn portable_text_layout(
                 offset_y,
             ) {
                 carets.push((char_index, lgui_core::text::TextAffinity::Upstream, rect));
+                has_caret[char_index] = true;
             }
         }
         if char_index + 1 < utf16_boundaries.len() {
@@ -336,17 +341,25 @@ pub(super) fn portable_text_layout(
                 offset_y,
             ) {
                 carets.push((char_index, lgui_core::text::TextAffinity::Downstream, rect));
+                has_caret[char_index] = true;
+            }
+        }
+    }
+    // Preserve the first matching cluster at shared boundaries, as the old
+    // linear search did, without rescanning all geometry for every character.
+    let mut boundary_clusters = vec![None; utf16_boundaries.len()];
+    for (index, cluster) in clusters.iter().enumerate() {
+        for boundary in [cluster.range.start, cluster.range.end] {
+            if let Some(entry) = boundary_clusters.get_mut(boundary) {
+                entry.get_or_insert(index);
             }
         }
     }
     for char_index in 0..utf16_boundaries.len() {
-        if carets.iter().any(|(index, _, _)| *index == char_index) {
+        if has_caret[char_index] {
             continue;
         }
-        if let Some(cluster) = clusters
-            .iter()
-            .find(|cluster| cluster.range.start == char_index || cluster.range.end == char_index)
-        {
+        if let Some(cluster) = boundary_clusters[char_index].map(|index| &clusters[index]) {
             let at_start = cluster.range.start == char_index;
             let x = match (cluster.direction, at_start) {
                 (lgui_core::text::TextDirection::RightToLeft, true) => cluster.bounds.right,
@@ -364,8 +377,8 @@ pub(super) fn portable_text_layout(
                 UiRect::new(x, cluster.bounds.top, x, cluster.bounds.bottom),
             ));
         } else if let Some(line) = lines
-            .iter()
-            .find(|line| char_index >= line.range.start && char_index <= line.range.end)
+            .get(lines.partition_point(|line| line.range.end < char_index))
+            .filter(|line| char_index >= line.range.start)
         {
             let x = if char_index == line.range.end {
                 line.bounds.right
