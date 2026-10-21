@@ -4,6 +4,7 @@ mod divider;
 mod faded_divider;
 mod panel;
 mod select;
+mod selectable_text;
 mod slider;
 mod stack;
 mod switch;
@@ -19,6 +20,9 @@ pub use panel::{panel, Panel};
 pub use select::{
     select, IntoSelectChangeHandler, Select, SelectChangeHandler, SelectOption, SelectPlacement,
     SelectStyle, SelectSwatch, SELECT_OPTION_HEIGHT,
+};
+pub use selectable_text::{
+    selectable_text, SelectHandler, SelectableSegment, SelectableText,
 };
 pub use slider::{
     slider, IntoSliderChangeHandler, Slider, SliderChangeHandler, SliderStyle, SliderValueFormatter,
