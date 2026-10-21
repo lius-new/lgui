@@ -9,6 +9,6 @@ pub use geometry::{
 pub use id::{UiId, UiIdPath};
 pub use style::{
     BlurEdgeMode, BlurStyle, Color, CustomPaintStyle, IconStyle, ImageFit, OverlayStyle, PathStyle,
-    RadialGradientLayer, Stroke, TextAlign, TextStyle, UiPath, UiPathCommand,
+    RadialGradientLayer, Stroke, TextAlign, TextStyle, TextWrap, UiPath, UiPathCommand,
     VerticalGradientLayer, VisualStyle,
 };

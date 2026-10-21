@@ -9,7 +9,9 @@ mod event;
 mod event_context;
 mod handler;
 
-pub use action::{ActionId, UiAction, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION};
+pub use action::{
+    ActionId, UiAction, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION, WHEEL_ACTION,
+};
 pub use dispatch::{dispatch_event_handlers, dispatch_hit_handlers, dispatch_runtime_output};
 pub use event::{
     apply_events_to_animations, CursorIcon, ImeEvent, InputEvent, InteractionFlags, KeyLocation,

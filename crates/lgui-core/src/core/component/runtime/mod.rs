@@ -4,7 +4,7 @@ use super::{
     EffectRegistry, HookStateStore, HostTree, InputEvent, KeyState, LogicalKey, NamedKey,
     SemanticAction, UiAction, UiActionEvent, UiEvent, UiEventDispatcher, UiEventPayload,
     UiHandlerEvent, UiId, UiInteractionState, UiRect, UiTaskSpawner, UiUpdateQueue, UiWake,
-    POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
+    POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION, WHEEL_ACTION,
 };
 use std::sync::Arc;
 

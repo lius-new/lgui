@@ -99,6 +99,21 @@ pub struct TextLayoutRequest<'a> {
 }
 
 impl<'a> TextLayoutRequest<'a> {
+    /// The layout a text element drawn in `style` within `bounds` gets, so
+    /// measuring text for placement matches what is painted.
+    pub fn for_style(text: &'a str, bounds: UiRect, style: &crate::core::TextStyle) -> Self {
+        let mut request = Self::single_line(text, bounds, style.height, style.weight);
+        request.font_slant = style.font_slant;
+        request.tracking = style.tracking;
+        request.align = style.align;
+        request.vertical_align = style.vertical_align;
+        request.font_families = style.font_families;
+        if style.wrap == crate::core::TextWrap::Words {
+            request.max_lines = None;
+        }
+        request
+    }
+
     pub fn single_line(text: &'a str, bounds: UiRect, font_height: f32, font_weight: i32) -> Self {
         Self {
             text,

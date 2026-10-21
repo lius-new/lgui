@@ -17,11 +17,23 @@ impl UiRuntime {
         events.retain(|event| {
             match event {
                 UiEvent::Wheel { hit, delta } => {
+                    let target = hit.action_target.as_ref().unwrap_or(&hit.id);
+                    if self.component_states.contains(target) {
+                        let unit = match delta.unit {
+                            crate::core::WheelUnit::Lines => 'l',
+                            crate::core::WheelUnit::Pixels => 'p',
+                        };
+                        default_actions.push(UiDefaultAction {
+                            event_target: hit.id.clone(),
+                            action_target: target.clone(),
+                            action: UiAction::new(super::WHEEL_ACTION)
+                                .payload(format!("{},{},{unit}", delta.x, delta.y)),
+                        });
+                    }
                     let Some(action) = hit.action.as_ref() else {
                         return true;
                     };
                     let action = action.clone().payload(delta.y.to_string());
-                    let target = hit.action_target.as_ref().unwrap_or(&hit.id);
                     default_actions.push(UiDefaultAction {
                         event_target: hit.id.clone(),
                         action_target: target.clone(),

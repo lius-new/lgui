@@ -3,6 +3,9 @@ use std::borrow::Cow;
 pub const POINTER_DOWN_ACTION: &str = "__ui.pointer.down";
 pub const POINTER_DRAG_ACTION: &str = "__ui.pointer.drag";
 pub const POINTER_UP_ACTION: &str = "__ui.pointer.up";
+/// A wheel turn over a component, payload `x,y,unit` with `unit` `l` for lines
+/// or `p` for pixels. Sent beside the element's own wheel action, if any.
+pub const WHEEL_ACTION: &str = "__ui.wheel";
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ActionId(Cow<'static, str>);

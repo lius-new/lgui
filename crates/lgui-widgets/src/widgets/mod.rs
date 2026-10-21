@@ -3,8 +3,9 @@ mod checkbox;
 mod divider;
 mod faded_divider;
 mod panel;
+mod scroll_view;
 mod select;
-mod selectable_text;
+mod selection_region;
 mod slider;
 mod stack;
 mod switch;
@@ -17,13 +18,12 @@ pub use checkbox::{
 pub use divider::{divider, Divider, DividerDirection};
 pub use faded_divider::{faded_divider, FadedDivider};
 pub use panel::{panel, Panel};
+pub use scroll_view::{scroll_view, ScrollView};
 pub use select::{
     select, IntoSelectChangeHandler, Select, SelectChangeHandler, SelectOption, SelectPlacement,
     SelectStyle, SelectSwatch, SELECT_OPTION_HEIGHT,
 };
-pub use selectable_text::{
-    selectable_text, SelectHandler, SelectableSegment, SelectableText,
-};
+pub use selection_region::{selection_region, SelectHandler, SelectionRegion};
 pub use slider::{
     slider, IntoSliderChangeHandler, Slider, SliderChangeHandler, SliderStyle, SliderValueFormatter,
 };

@@ -3,7 +3,7 @@ use super::{
     DeclarativeView, DirtyTracker, HostTree, InputEvent, InteractionFlags, KeyState, LogicalKey,
     NamedKey, SemanticAction, UiAction, UiActionEvent, UiAsyncContext, UiElement, UiEvent,
     UiEventDispatcher, UiEventPayload, UiHandlerEvent, UiId, UiIdPath, UiInteractionState, UiRect,
-    UiScale, UiTaskSpawner, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
+    UiScale, UiTaskSpawner, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION, WHEEL_ACTION,
 };
 #[cfg(feature = "async")]
 use super::{noop_task_spawner, task};

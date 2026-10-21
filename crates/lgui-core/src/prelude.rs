@@ -9,7 +9,7 @@ pub use crate::core::{
     async_handler, async_handler_with, component, context_provider, group, Align, Axis, BlurEdgeMode,
     BlurStyle, Color, EdgeInsets, Element, ElementKey, ImageCachePolicy, ImageDecodePolicy,
     ImageRequest, RenderCx, RootComponent, ShadowStyle, Size, State, StateSetter, Stroke,
-    TextAlign, TextStyle, UiAsyncContext, UiEventContext, UiRect, VisualStyle,
+    TextAlign, TextStyle, TextWrap, UiAsyncContext, UiEventContext, UiRect, VisualStyle,
 };
 pub use crate::events::{
     emit, listen, listen_async, listen_async_with, listen_with, AsyncEventHandler, Event,

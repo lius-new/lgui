@@ -1,10 +1,15 @@
-//! Read-only text the pointer can select.
+//! Lets the pointer select the text inside it.
 //!
-//! The widget draws a list of positioned text segments in reading order, in
-//! one surface. Pressing and dragging selects across segments; the selection is
-//! highlighted and reported through [`SelectableText::on_select`] so the host can
-//! copy it. It does not take keyboard focus, so it can sit in a popup over an
-//! editor without stealing the editor's focus.
+//! The region wraps ordinary elements. Whatever text those elements draw, at
+//! any depth (wrapped text, text inside a scrolled or clipped container), can be
+//! pressed and dragged over: the selection is highlighted behind the text and
+//! reported through [`SelectionRegion::on_select`] so the host can copy it. It
+//! takes no keyboard focus, so it can sit in a popup over an editor without
+//! stealing the editor's focus, and it consumes its own pointer events.
+//!
+//! What can be selected is read from the children as they render, so a region
+//! needs no description of its content. Text that moves afterwards (a container
+//! scrolling by itself) is matched again at the region's next render.
 use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
@@ -13,11 +18,12 @@ use lgui_core::text::{self, TextLayout, TextLayoutRequest};
 
 use crate::core::{
     Color, ComponentActionOutcome, ComponentState, CursorIcon, Element, ElementKey,
-    ElementRenderCx, EventPolicy, InteractionRole, UiEventKind, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
-    RenderPhase, TextStyle, UiAction, UiElement, UiEventContext, UiId, UiRect, VisualStyle,
+    ElementRenderCx, EventPolicy, InteractionRole, IntoElementContent, RenderPhase, TextStyle,
+    UiAction, UiElement, UiEventContext, UiEventKind, UiId, UiNodeKind, UiRect, VisualStyle,
+    POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
 };
 
-const SELECTION_EVENT: &str = "selectable_text.select";
+const SELECTION_EVENT: &str = "selection_region.select";
 /// Gaps between segments on one line wider than this read as a space when copied.
 const WORD_GAP: f32 = 1.0;
 /// Default selection fill: the common translucent blue.
@@ -27,35 +33,16 @@ const SELECTION_ALPHA: u8 = 0x60;
 /// Called with the selected text, or `None` when the selection is cleared.
 pub type SelectHandler = Arc<dyn Fn(&mut UiEventContext, Option<String>) + Send + Sync>;
 
-/// One piece of text at a fixed place. `rect` is where the text is drawn, and
-/// should fit the text: it is also what the pointer is matched against.
-#[derive(Clone, Debug)]
-pub struct SelectableSegment {
-    pub rect: UiRect,
-    pub text: String,
-    pub style: TextStyle,
-}
-
-impl SelectableSegment {
-    pub fn new(rect: UiRect, text: impl Into<String>, style: TextStyle) -> Self {
-        Self {
-            rect,
-            text: text.into(),
-            style,
-        }
-    }
-}
-
-pub struct SelectableText {
+pub struct SelectionRegion {
     key: ElementKey,
     rect: UiRect,
-    segments: Vec<SelectableSegment>,
     selection_color: Color,
     on_select: Option<SelectHandler>,
     phase: RenderPhase,
+    children: Vec<Element>,
 }
 
-impl SelectableText {
+impl SelectionRegion {
     pub fn selection_color(mut self, color: Color) -> Self {
         self.selection_color = color;
         self
@@ -73,125 +60,199 @@ impl SelectableText {
         self.phase = phase;
         self
     }
+
+    pub fn child(mut self, child: impl Into<Element>) -> Self {
+        self.children.push(child.into());
+        self
+    }
+
+    pub fn children(mut self, children: impl IntoIterator<Item = impl Into<Element>>) -> Self {
+        self.children.extend(children.into_iter().map(Into::into));
+        self
+    }
 }
 
+/// A region at `rect` whose children's text can be selected. Children are placed
+/// in the same coordinates as the region.
 #[track_caller]
-pub fn selectable_text(rect: UiRect, segments: Vec<SelectableSegment>) -> SelectableText {
-    SelectableText {
+pub fn selection_region(rect: UiRect) -> SelectionRegion {
+    SelectionRegion {
         key: ElementKey::caller(),
         rect,
-        segments,
         selection_color: DEFAULT_SELECTION,
         on_select: None,
         phase: RenderPhase::Content,
+        children: Vec::new(),
     }
 }
 
-impl From<SelectableText> for Element {
-    fn from(value: SelectableText) -> Self {
-        Element::with_key(value.key, move |cx: ElementRenderCx<'_, '_, '_>| {
-            render(cx, value)
+impl From<SelectionRegion> for Element {
+    fn from(value: SelectionRegion) -> Self {
+        let SelectionRegion {
+            key,
+            rect,
+            selection_color,
+            on_select,
+            phase,
+            children,
+        } = value;
+        Element::with_key(key, move |cx: ElementRenderCx<'_, '_, '_>| {
+            let id = cx.id.clone();
+            let mut found = Vec::new();
+            for child in &cx.children {
+                harvest(child, (0.0, 0.0), None, rect, &mut found);
+            }
+            let highlights = cx
+                .context
+                .component_state_mut(&id, |state: &mut SelectionState| {
+                    state.configure(found);
+                    state.highlights(&system_layout)
+                });
+            let mut root = UiElement::panel(id.clone(), rect, VisualStyle::default())
+                .render_phase(phase)
+                .paint_bounds(rect)
+                .hit_rect(rect)
+                .interaction(InteractionRole::Custom("selection-region"))
+                .cursor(CursorIcon::Text)
+                // A press, drag or release here is the selection's: what sits behind
+                // (an editor that would move its caret) must not also act on it.
+                .on_event(UiEventKind::PointerDown, |cx, _| cx.stop_propagation())
+                .on_event(UiEventKind::PointerDrag, |cx, _| cx.stop_propagation())
+                .on_event(UiEventKind::PointerUp, |cx, _| cx.stop_propagation())
+                .event_policy(EventPolicy {
+                    hover: true,
+                    press: true,
+                    focus: false,
+                });
+            // Behind the text, so the text stays readable.
+            for (index, highlight) in highlights.into_iter().enumerate() {
+                root = root.child(
+                    UiElement::panel(
+                        UiId::owned(format!("{}.sel{index}", id.as_str())),
+                        UiRect::new(
+                            rect.left + highlight.left,
+                            rect.top + highlight.top,
+                            rect.left + highlight.right,
+                            rect.top + highlight.bottom,
+                        ),
+                        VisualStyle::filled(selection_color).alpha(SELECTION_ALPHA),
+                    )
+                    .render_phase(phase),
+                );
+            }
+            root = root.children(cx.children);
+            if let Some(on_select) = on_select.clone() {
+                root = root.on_action(SELECTION_EVENT, move |context, action| {
+                    on_select(
+                        context,
+                        action
+                            .payload_value()
+                            .filter(|text| !text.is_empty())
+                            .map(str::to_owned),
+                    );
+                });
+            }
+            root
         })
+        .children(children)
     }
 }
 
-fn render(cx: ElementRenderCx<'_, '_, '_>, widget: SelectableText) -> UiElement {
-    let id = cx.id.clone();
-    let rect = widget.rect;
-    let segments = relative(&widget.segments, rect);
-    let highlights = cx
-        .context
-        .component_state_mut(&id, |state: &mut SelectableState| {
-            state.configure(segments);
-            state.highlights(&system_layout)
+impl IntoElementContent for SelectionRegion {
+    fn append_to(self, children: &mut Vec<Element>) {
+        children.push(self.into());
+    }
+}
+
+/// One piece of text, where it shows. Rectangles are relative to the region.
+#[derive(Clone, Debug)]
+struct Segment {
+    rect: UiRect,
+    text: String,
+    style: TextStyle,
+    /// Where it is visible, when an ancestor clips it (scrolled content).
+    clip: Option<UiRect>,
+}
+
+impl Segment {
+    #[cfg(test)]
+    fn new(rect: UiRect, text: impl Into<String>, style: TextStyle) -> Self {
+        Self {
+            rect,
+            text: text.into(),
+            style,
+            clip: None,
+        }
+    }
+}
+
+/// Collects the text nodes under `element` in drawing order, with where they end
+/// up once the offsets and clips of the containers above them are applied.
+fn harvest(
+    element: &UiElement,
+    offset: (f32, f32),
+    clip: Option<UiRect>,
+    origin: UiRect,
+    out: &mut Vec<Segment>,
+) {
+    let node = element.node();
+    let shift = |rect: UiRect, by: (f32, f32)| {
+        UiRect::new(
+            rect.left + by.0 - origin.left,
+            rect.top + by.1 - origin.top,
+            rect.right + by.0 - origin.left,
+            rect.bottom + by.1 - origin.top,
+        )
+    };
+    if node.kind == UiNodeKind::Text
+        && let (Some(text), Some(style)) = (node.text.as_ref(), node.text_style)
+        && !text.is_empty()
+    {
+        out.push(Segment {
+            rect: shift(node.layout_rect, offset),
+            text: text.to_string(),
+            style,
+            clip,
         });
-    let mut root = UiElement::panel(id.clone(), rect, VisualStyle::default())
-        .render_phase(widget.phase)
-        .paint_bounds(rect)
-        .hit_rect(rect)
-        .interaction(InteractionRole::Custom("selectable-text"))
-        .cursor(CursorIcon::Text)
-        // A press, drag or release here is the selection's: what sits behind (an editor
-        // that would move its caret) must not also act on it.
-        .on_event(UiEventKind::PointerDown, |cx, _| cx.stop_propagation())
-        .on_event(UiEventKind::PointerDrag, |cx, _| cx.stop_propagation())
-        .on_event(UiEventKind::PointerUp, |cx, _| cx.stop_propagation())
-        .event_policy(EventPolicy {
-            hover: true,
-            press: true,
-            focus: false,
-        });
-    for (index, highlight) in highlights.into_iter().enumerate() {
-        root = root.child(
-            UiElement::panel(
-                UiId::owned(format!("{}.sel{index}", id.as_str())),
-                UiRect::new(
-                    rect.left + highlight.left,
-                    rect.top + highlight.top,
-                    rect.left + highlight.right,
-                    rect.top + highlight.bottom,
+    }
+    // A clip window is fixed where it is; what it holds moves by its offset.
+    let (inner_offset, inner_clip) = match node.clip_rect {
+        Some(window) => {
+            let window = shift(window, offset);
+            let visible = clip.map_or(window, |outer| intersect(outer, window));
+            (
+                (
+                    offset.0 + node.content_offset.0,
+                    offset.1 + node.content_offset.1,
                 ),
-                VisualStyle::filled(widget.selection_color).alpha(SELECTION_ALPHA),
+                Some(visible),
             )
-            .render_phase(widget.phase),
-        );
+        }
+        None => (offset, clip),
+    };
+    for child in element.children_ref() {
+        harvest(child, inner_offset, inner_clip, origin, out);
     }
-    for (index, segment) in widget.segments.into_iter().enumerate() {
-        root = root.child(
-            UiElement::text(
-                UiId::owned(format!("{}.text{index}", id.as_str())),
-                segment.rect,
-                segment.text,
-                segment.style,
-            )
-            .render_phase(widget.phase),
-        );
-    }
-    if let Some(on_select) = widget.on_select {
-        root = root.on_action(SELECTION_EVENT, move |context, action| {
-            on_select(
-                context,
-                action
-                    .payload_value()
-                    .filter(|text| !text.is_empty())
-                    .map(str::to_owned),
-            );
-        });
-    }
-    root
 }
 
-/// The segments with their rectangles measured from the widget's corner, so the
-/// state is independent of where the widget is scrolled or translated to.
-fn relative(segments: &[SelectableSegment], origin: UiRect) -> Vec<SelectableSegment> {
-    segments
-        .iter()
-        .map(|segment| SelectableSegment {
-            rect: UiRect::new(
-                segment.rect.left - origin.left,
-                segment.rect.top - origin.top,
-                segment.rect.right - origin.left,
-                segment.rect.bottom - origin.top,
-            ),
-            text: segment.text.clone(),
-            style: segment.style,
-        })
-        .collect()
+fn intersect(a: UiRect, b: UiRect) -> UiRect {
+    UiRect::new(
+        a.left.max(b.left),
+        a.top.max(b.top),
+        a.right.min(b.right),
+        a.bottom.min(b.bottom),
+    )
 }
 
 /// The same layout the renderer builds for a segment, with its rect at the
 /// origin: positions inside it are relative to the segment's corner.
-fn system_layout(segment: &SelectableSegment) -> Option<TextLayout> {
-    let style = segment.style;
+fn system_layout(segment: &Segment) -> Option<TextLayout> {
     let bounds = UiRect::new(0.0, 0.0, segment.rect.width(), segment.rect.height());
-    let mut request =
-        TextLayoutRequest::single_line(&segment.text, bounds, style.height, style.weight);
-    request.font_slant = style.font_slant;
-    request.tracking = style.tracking;
-    request.align = style.align;
-    request.vertical_align = style.vertical_align;
-    request.font_families = style.font_families;
-    text::layout(&request)
+    text::layout(&TextLayoutRequest::for_style(
+        &segment.text,
+        bounds,
+        &segment.style,
+    ))
 }
 
 /// A place in the text: a segment and a byte offset into it.
@@ -202,8 +263,8 @@ struct Position {
 }
 
 #[derive(Clone, Default)]
-struct SelectableState {
-    segments: Vec<SelectableSegment>,
+struct SelectionState {
+    segments: Vec<Segment>,
     anchor: Option<Position>,
     focus: Option<Position>,
     dragging: bool,
@@ -211,10 +272,10 @@ struct SelectableState {
     reported: bool,
 }
 
-type LayoutOf<'a> = &'a dyn Fn(&SelectableSegment) -> Option<TextLayout>;
+type LayoutOf<'a> = &'a dyn Fn(&Segment) -> Option<TextLayout>;
 
-impl SelectableState {
-    fn configure(&mut self, segments: Vec<SelectableSegment>) {
+impl SelectionState {
+    fn configure(&mut self, segments: Vec<Segment>) {
         let changed = self.segments.len() != segments.len()
             || self
                 .segments
@@ -241,7 +302,7 @@ impl SelectableState {
         let (index, segment) = self.segments.iter().enumerate().min_by(|(_, a), (_, b)| {
             // Segments may overlap a little (text rects carry a clipping margin):
             // among equals the nearer centre wins.
-            let near = |segment: &SelectableSegment| {
+            let near = |segment: &Segment| {
                 (
                     axis_distance(y, segment.rect.top, segment.rect.bottom),
                     axis_distance(x, segment.rect.left, segment.rect.right),
@@ -285,7 +346,7 @@ impl SelectableState {
     fn selected_text(&self) -> Option<String> {
         let (start, end) = self.span()?;
         let mut out = String::new();
-        let mut previous: Option<&SelectableSegment> = None;
+        let mut previous: Option<&Segment> = None;
         for index in start.segment..=end.segment {
             let Some(range) = self.range_in(index) else {
                 continue;
@@ -319,12 +380,17 @@ impl SelectableState {
                 continue;
             };
             for local in laid_out.selection_rects(range.clone()) {
-                rects.push(UiRect::new(
+                let rect = UiRect::new(
                     segment.rect.left + local.left,
                     segment.rect.top + local.top,
                     segment.rect.left + local.right,
                     segment.rect.top + local.bottom,
-                ));
+                );
+                // Only what an ancestor lets show is highlighted.
+                let rect = segment.clip.map_or(rect, |clip| intersect(rect, clip));
+                if rect.left < rect.right && rect.top < rect.bottom {
+                    rects.push(rect);
+                }
             }
             // The space between two selected words on a line is selected too.
             if range.end == segment.text.len()
@@ -408,7 +474,7 @@ fn axis_distance(value: f32, start: f32, end: f32) -> f32 {
     }
 }
 
-impl ComponentState for SelectableState {
+impl ComponentState for SelectionState {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -428,7 +494,7 @@ mod tests {
     use lgui_core::text::{TextAffinity, TextCluster, TextLineMetrics};
 
     /// Ten units per byte, one cluster per byte, left aligned.
-    fn fake(segment: &SelectableSegment) -> Option<TextLayout> {
+    fn fake(segment: &Segment) -> Option<TextLayout> {
         let height = segment.rect.height();
         let clusters: Vec<TextCluster> = (0..segment.text.len())
             .map(|i| TextCluster {
@@ -463,20 +529,20 @@ mod tests {
         ))
     }
 
-    fn state() -> SelectableState {
+    fn state() -> SelectionState {
         let style = TextStyle::new(Color(0), 14.0, 400);
-        let mut state = SelectableState::default();
+        let mut state = SelectionState::default();
         // "hello world" on line one (two words), "again" on line two.
         state.configure(vec![
-            SelectableSegment::new(UiRect::new(0.0, 0.0, 50.0, 20.0), "hello", style),
-            SelectableSegment::new(UiRect::new(60.0, 0.0, 110.0, 20.0), "world", style),
-            SelectableSegment::new(UiRect::new(0.0, 20.0, 50.0, 40.0), "again", style),
+            Segment::new(UiRect::new(0.0, 0.0, 50.0, 20.0), "hello", style),
+            Segment::new(UiRect::new(60.0, 0.0, 110.0, 20.0), "world", style),
+            Segment::new(UiRect::new(0.0, 20.0, 50.0, 40.0), "again", style),
         ]);
         state
     }
 
     fn press(
-        state: &mut SelectableState,
+        state: &mut SelectionState,
         id: &'static str,
         x: f32,
         y: f32,
@@ -548,7 +614,7 @@ mod tests {
         press(&mut state, POINTER_DOWN_ACTION, 2.0, 5.0);
         press(&mut state, POINTER_UP_ACTION, 82.0, 5.0);
         let style = TextStyle::new(Color(0), 14.0, 400);
-        state.configure(vec![SelectableSegment::new(
+        state.configure(vec![Segment::new(
             UiRect::new(0.0, 0.0, 50.0, 20.0),
             "other",
             style,

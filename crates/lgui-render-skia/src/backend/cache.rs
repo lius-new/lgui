@@ -289,14 +289,7 @@ pub(super) fn scene_text_layout_request<'a>(
     rect: UiRect,
     style: TextStyle,
 ) -> lgui_core::text::TextLayoutRequest<'a> {
-    let mut request =
-        lgui_core::text::TextLayoutRequest::single_line(text, rect, style.height, style.weight);
-    request.font_slant = style.font_slant;
-    request.tracking = style.tracking;
-    request.align = style.align;
-    request.vertical_align = style.vertical_align;
-    request.font_families = style.font_families;
-    request
+    lgui_core::text::TextLayoutRequest::for_style(text, rect, &style)
 }
 
 pub(super) fn paint_cached_paragraph(

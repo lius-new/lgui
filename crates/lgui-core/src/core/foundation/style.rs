@@ -52,6 +52,17 @@ pub enum TextAlign {
     Right,
 }
 
+/// Whether text breaks onto further lines when it reaches the edge of its rect.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextWrap {
+    /// One line; text past the edge is cut off.
+    #[default]
+    None,
+    /// Breaks between words (or characters, where a word does not fit) to stay
+    /// within the rect's width, on as many lines as that takes.
+    Words,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextStyle {
     pub color: Color,
@@ -62,6 +73,7 @@ pub struct TextStyle {
     pub tracking: f32,
     pub align: TextAlign,
     pub vertical_align: TextVerticalAlign,
+    pub wrap: TextWrap,
     pub alpha: u8,
 }
 
@@ -76,8 +88,16 @@ impl TextStyle {
             tracking: 0.0,
             align: TextAlign::Left,
             vertical_align: TextVerticalAlign::CapCenter,
+            wrap: TextWrap::None,
             alpha: 0xFF,
         }
+    }
+
+    /// Lets the text break onto further lines at the width of its rect. Place it
+    /// from the top (`TextVerticalAlign::Top`) when it can take several lines.
+    pub const fn wrap(mut self, wrap: TextWrap) -> Self {
+        self.wrap = wrap;
+        self
     }
 
     pub const fn centered(mut self) -> Self {
@@ -128,6 +148,7 @@ impl Hash for TextStyle {
         normalized_f32_bits(self.tracking).hash(state);
         self.align.hash(state);
         self.vertical_align.hash(state);
+        self.wrap.hash(state);
         self.alpha.hash(state);
     }
 }
