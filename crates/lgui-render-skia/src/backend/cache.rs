@@ -460,8 +460,13 @@ pub(super) fn paint_cached_paragraph(
     canvas.restore();
 }
 
+/// Estimated heap size of a shaped paragraph. A Skia paragraph keeps its shaped
+/// runs, glyph data and font references alive, which measured at roughly 8 KiB
+/// per short label in a running application (the previous 2 KiB base counted a
+/// quarter of that, so budgets and observers saw a cache far smaller than it
+/// was).
 pub(super) fn paragraph_cache_entry_bytes(text: &str, paragraph: &Paragraph) -> usize {
-    2048usize
+    8192usize
         .saturating_add(text.len())
         .saturating_add(paragraph.line_number().saturating_mul(256))
 }
