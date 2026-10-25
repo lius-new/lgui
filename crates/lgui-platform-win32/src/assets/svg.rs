@@ -43,6 +43,12 @@ pub fn install_svg_icon_registry(registry: SvgIconRegistry) -> bool {
     installed
 }
 
+/// Installs the icons the application registered with `Application::svg_icons`,
+/// so native surfaces such as tray menus resolve the same keys as the UI.
+pub fn install_application_svg_icons(context: &lgui_core::application::ApplicationContext) -> bool {
+    lgui_assets::backend::configured_svg_icons(context).is_some_and(install_svg_icon_registry)
+}
+
 pub fn install_svg_font_registry(registry: SvgFontRegistry) -> bool {
     let installed = SVG_FONT_REGISTRY.set(registry).is_ok();
     if installed {

@@ -64,6 +64,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitHost {
                 let visible_id = main_id.clone();
                 let action_context = self.context.clone();
                 let action_registration = Arc::clone(&registration);
+                lgui_platform_win32::install_application_svg_icons(&self.context);
                 match lgui_platform_win32::Win32TrayHost::spawn(
                     registration.options.clone(),
                     move |action| {

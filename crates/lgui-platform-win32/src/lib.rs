@@ -23,7 +23,7 @@ pub use services::{
 };
 #[cfg(all(feature = "svg", feature = "tray-win32"))]
 pub use svg::{
-    install_svg_font_registry, install_svg_icon_registry, rasterize_svg_icon_bgra, SvgBitmap,
+    install_application_svg_icons, install_svg_font_registry, install_svg_icon_registry, rasterize_svg_icon_bgra, SvgBitmap,
     SvgFontRegistry,
 };
 
