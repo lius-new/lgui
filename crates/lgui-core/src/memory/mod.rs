@@ -1,5 +1,6 @@
 //! Application-scoped memory policy, safety limits, and cache accounting.
 
+mod evict;
 mod governor;
 mod lru;
 mod options;
@@ -9,6 +10,9 @@ mod stats;
 #[cfg(feature = "persistent-cache")]
 mod persistent;
 
+pub use evict::{
+    CacheEvent, CacheHooks, CacheObserver, CacheView, EntryId, EntryInfo, ShrinkLevel,
+};
 pub use governor::{
     DomainInstanceId, MemoryGovernor, MemoryReservation, MemoryTaskReservation,
 };

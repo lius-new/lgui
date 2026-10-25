@@ -1,6 +1,10 @@
 use super::*;
+use lgui_core::memory::{
+    CacheEvent, CacheHooks, CacheUsage, CacheView, EntryId, EntryInfo, ShrinkLevel,
+};
 
 pub(super) struct CachedImage {
+    id: EntryId,
     image: Image,
     bytes: usize,
     used: u64,
@@ -18,6 +22,7 @@ pub(super) struct ParagraphCacheKey {
 }
 
 pub(super) struct CachedParagraph {
+    id: EntryId,
     paragraph: Paragraph,
     bytes: usize,
     used: u64,
@@ -25,9 +30,19 @@ pub(super) struct CachedParagraph {
     priority: lgui_core::memory::CachePriority,
 }
 
+/// Where an [`EntryId`] lives, so an entry can be evicted without a scan.
+pub(super) enum Slot {
+    Image(String),
+    Paragraph(ParagraphCacheKey),
+}
+
 pub struct SkiaCache {
     pub(super) entries: HashMap<String, CachedImage>,
     pub(super) paragraphs: HashMap<ParagraphCacheKey, CachedParagraph>,
+    pub(super) slots: HashMap<EntryId, Slot>,
+    next_entry_id: u64,
+    hooks: Option<CacheHooks>,
+    seen_requests: u64,
     pub(super) fonts: FontCollection,
     pub(super) resident_bytes: usize,
     pub(super) budget_bytes: usize,
@@ -62,6 +77,10 @@ impl SkiaCache {
         Self {
             entries: HashMap::new(),
             paragraphs: HashMap::new(),
+            slots: HashMap::new(),
+            next_entry_id: 1,
+            hooks: None,
+            seen_requests: 0,
             fonts: skia_font_collection(),
             resident_bytes: 0,
             budget_bytes,
@@ -111,9 +130,12 @@ impl SkiaCache {
         paint_cached_paragraph(canvas, rect, &paragraph, style.vertical_align);
         let bytes = paragraph_cache_entry_bytes(text, &paragraph);
         self.resident_bytes = self.resident_bytes.saturating_add(bytes);
+        let id = self.allocate_id();
+        self.slots.insert(id, Slot::Paragraph(key.clone()));
         self.paragraphs.insert(
             key,
             CachedParagraph {
+                id,
                 paragraph,
                 bytes,
                 used: self.generation,
@@ -122,6 +144,7 @@ impl SkiaCache {
             },
         );
         self.evict_to_budget();
+        self.notify(CacheEvent::Inserted(id));
     }
 
     pub(super) fn get(&mut self, key: &str) -> Option<Image> {
@@ -151,13 +174,14 @@ impl SkiaCache {
         priority: lgui_core::memory::CachePriority,
     ) -> Image {
         let bytes = image.width().max(0) as usize * image.height().max(0) as usize * 4;
-        if let Some(previous) = self.entries.remove(&key) {
-            self.resident_bytes = self.resident_bytes.saturating_sub(previous.bytes);
-        }
+        self.remove_image(&key);
         self.resident_bytes = self.resident_bytes.saturating_add(bytes);
+        let id = self.allocate_id();
+        self.slots.insert(id, Slot::Image(key.clone()));
         self.entries.insert(
             key,
             CachedImage {
+                id,
                 image: image.clone(),
                 bytes,
                 used: self.generation,
@@ -166,11 +190,57 @@ impl SkiaCache {
             },
         );
         self.evict_to_budget();
+        self.notify(CacheEvent::Inserted(id));
         image
     }
 
     pub fn begin_frame(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Connects this cache to the application's observer. Without hooks the
+    /// cache only applies its own budget.
+    pub fn set_hooks(&mut self, hooks: Option<CacheHooks>) {
+        self.seen_requests = hooks.as_ref().map_or(0, CacheHooks::requested);
+        self.hooks = hooks;
+    }
+
+    /// Called once a frame has been drawn.
+    pub fn end_frame(&mut self) {
+        self.notify(CacheEvent::FrameEnd);
+        if let Some(requested) = self.hooks.as_ref().map(CacheHooks::requested) {
+            if requested != self.seen_requests {
+                self.seen_requests = requested;
+                self.notify(CacheEvent::Requested);
+            }
+        }
+    }
+
+    fn allocate_id(&mut self) -> EntryId {
+        let id = EntryId(self.next_entry_id);
+        self.next_entry_id = self.next_entry_id.wrapping_add(1);
+        id
+    }
+
+    fn notify(&mut self, event: CacheEvent) {
+        let Some(observer) = self.hooks.as_ref().and_then(CacheHooks::observer) else {
+            return;
+        };
+        observer.on_event(event, self);
+    }
+
+    fn remove_image(&mut self, key: &str) -> Option<CachedImage> {
+        let entry = self.entries.remove(key)?;
+        self.slots.remove(&entry.id);
+        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+        Some(entry)
+    }
+
+    fn remove_paragraph(&mut self, key: &ParagraphCacheKey) -> Option<CachedParagraph> {
+        let entry = self.paragraphs.remove(key)?;
+        self.slots.remove(&entry.id);
+        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+        Some(entry)
     }
 
     pub fn set_budget(&mut self, budget_bytes: usize) {
@@ -199,14 +269,12 @@ impl SkiaCache {
                     .is_none_or(|(_, image_order)| paragraph_order <= image_order)
             }) {
                 if let Some((key, _)) = paragraph {
-                    if let Some(entry) = self.paragraphs.remove(&key) {
-                        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+                    if self.remove_paragraph(&key).is_some() {
                         self.text_evictions = self.text_evictions.saturating_add(1);
                     }
                 }
             } else if let Some((key, _)) = image {
-                if let Some(entry) = self.entries.remove(&key) {
-                    self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
+                if self.remove_image(&key).is_some() {
                     self.evictions = self.evictions.saturating_add(1);
                 }
             }
@@ -216,40 +284,10 @@ impl SkiaCache {
     pub fn trim(&mut self, pressure: MemoryPressure) {
         match pressure {
             MemoryPressure::Moderate => {
-                let current = self.generation;
-                let before = self.entries.len();
-                self.entries.retain(|_, entry| {
-                    let keep = current.wrapping_sub(entry.used) <= 2;
-                    if !keep {
-                        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
-                    }
-                    keep
-                });
-                self.evictions = self
-                    .evictions
-                    .saturating_add(before.saturating_sub(self.entries.len()) as u64);
-                let before = self.paragraphs.len();
-                self.paragraphs.retain(|_, entry| {
-                    let keep = current.wrapping_sub(entry.used) <= 2;
-                    if !keep {
-                        self.resident_bytes = self.resident_bytes.saturating_sub(entry.bytes);
-                    }
-                    keep
-                });
-                self.text_evictions = self
-                    .text_evictions
-                    .saturating_add(before.saturating_sub(self.paragraphs.len()) as u64);
-                self.fonts.clear_caches();
+                self.shrink(ShrinkLevel::Moderate);
             }
             MemoryPressure::Critical => {
-                self.evictions = self.evictions.saturating_add(self.entries.len() as u64);
-                self.text_evictions = self
-                    .text_evictions
-                    .saturating_add(self.paragraphs.len() as u64);
-                self.entries.clear();
-                self.paragraphs.clear();
-                self.fonts.clear_caches();
-                self.resident_bytes = 0;
+                self.shrink(ShrinkLevel::Critical);
             }
         }
     }
@@ -281,6 +319,123 @@ impl SkiaCache {
                 .max()
                 .unwrap_or(0),
         }
+    }
+}
+
+impl CacheView for SkiaCache {
+    fn name(&self) -> &'static str {
+        "skia-render"
+    }
+
+    fn usage(&self) -> CacheUsage {
+        CacheUsage {
+            cache_bytes: self.resident_bytes,
+            cpu_bytes: self.resident_bytes,
+            entries: self.entries.len() + self.paragraphs.len(),
+            hits: self.hits + self.text_hits,
+            misses: self.misses + self.text_misses,
+            evictions: self.evictions + self.text_evictions,
+            largest_entry_bytes: self
+                .entries
+                .values()
+                .map(|entry| entry.bytes)
+                .chain(self.paragraphs.values().map(|entry| entry.bytes))
+                .max()
+                .unwrap_or(0),
+            ..CacheUsage::default()
+        }
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    fn visit_entries(&self, visit: &mut dyn FnMut(&EntryInfo)) {
+        for entry in self.entries.values() {
+            visit(&EntryInfo {
+                id: entry.id,
+                bytes: entry.bytes,
+                last_used: entry.used,
+                retention: entry.retention,
+                priority: entry.priority,
+            });
+        }
+        for entry in self.paragraphs.values() {
+            visit(&EntryInfo {
+                id: entry.id,
+                bytes: entry.bytes,
+                last_used: entry.used,
+                retention: entry.retention,
+                priority: entry.priority,
+            });
+        }
+    }
+
+    fn evict(&mut self, ids: &[EntryId]) -> usize {
+        let before = self.resident_bytes;
+        for id in ids {
+            match self.slots.get(id) {
+                Some(Slot::Image(key)) => {
+                    let key = key.clone();
+                    if self.remove_image(&key).is_some() {
+                        self.evictions = self.evictions.saturating_add(1);
+                    }
+                }
+                Some(Slot::Paragraph(key)) => {
+                    let key = key.clone();
+                    if self.remove_paragraph(&key).is_some() {
+                        self.text_evictions = self.text_evictions.saturating_add(1);
+                    }
+                }
+                None => {}
+            }
+        }
+        before.saturating_sub(self.resident_bytes)
+    }
+
+    fn shrink(&mut self, level: ShrinkLevel) -> usize {
+        let before = self.resident_bytes;
+        match level {
+            ShrinkLevel::Moderate => {
+                let current = self.generation;
+                let stale = |used: u64| current.wrapping_sub(used) > 2;
+                let images: Vec<String> = self
+                    .entries
+                    .iter()
+                    .filter(|(_, entry)| stale(entry.used))
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                for key in images {
+                    if self.remove_image(&key).is_some() {
+                        self.evictions = self.evictions.saturating_add(1);
+                    }
+                }
+                let paragraphs: Vec<ParagraphCacheKey> = self
+                    .paragraphs
+                    .iter()
+                    .filter(|(_, entry)| stale(entry.used))
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                for key in paragraphs {
+                    if self.remove_paragraph(&key).is_some() {
+                        self.text_evictions = self.text_evictions.saturating_add(1);
+                    }
+                }
+            }
+            ShrinkLevel::Critical => {
+                self.evictions = self.evictions.saturating_add(self.entries.len() as u64);
+                self.text_evictions = self
+                    .text_evictions
+                    .saturating_add(self.paragraphs.len() as u64);
+                self.entries.clear();
+                self.paragraphs.clear();
+                self.slots.clear();
+                self.resident_bytes = 0;
+            }
+        }
+        // Font data is not enumerable, so it is released with every shrink.
+        self.fonts.clear_caches();
+        before.saturating_sub(self.resident_bytes)
     }
 }
 

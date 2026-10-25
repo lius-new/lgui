@@ -166,6 +166,10 @@ impl WinitMetalRenderer {
         }
     }
 
+    pub(crate) fn set_cache_hooks(&mut self, hooks: Option<lgui_core::memory::CacheHooks>) {
+        self.cache.set_hooks(hooks);
+    }
+
     #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
     pub(crate) fn cache_stats(&self) -> SkiaCacheStats {
         with_gpu_cache_usage(self.cache.stats(), &self.skia_context)

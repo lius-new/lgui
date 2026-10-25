@@ -3,7 +3,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use super::MemoryOptions;
+use super::{CacheHooks, MemoryOptions};
 
 #[cfg(feature = "persistent-cache")]
 use super::PersistentCacheStore;
@@ -34,6 +34,7 @@ struct MemoryGovernorInner {
     next_instance: AtomicU64,
     transient_reserved: Arc<AtomicUsize>,
     large_tasks_in_flight: Arc<AtomicUsize>,
+    cache_hooks: CacheHooks,
     #[cfg(feature = "persistent-cache")]
     persistent: Option<Arc<dyn PersistentCacheStore>>,
 }
@@ -60,6 +61,7 @@ impl MemoryGovernor {
                 next_instance: AtomicU64::new(1),
                 transient_reserved: Arc::new(AtomicUsize::new(0)),
                 large_tasks_in_flight: Arc::new(AtomicUsize::new(0)),
+                cache_hooks: CacheHooks::default(),
                 #[cfg(feature = "persistent-cache")]
                 persistent,
             }),
@@ -79,6 +81,12 @@ impl MemoryGovernor {
         if let Some(store) = self.persistent_cache() {
             let _ = store.trim_to(options.budget.persistent_bytes);
         }
+    }
+
+    /// Connection through which the application observes and evicts from the
+    /// framework's caches.
+    pub fn cache_hooks(&self) -> CacheHooks {
+        self.inner.cache_hooks.clone()
     }
 
     /// Allocates a unique owner id for image-cache reachability tracking.

@@ -317,13 +317,14 @@ impl WinitHost {
             .cache_bytes
             .checked_div(self.windows.len().saturating_add(1))
             .unwrap_or(0);
-        let renderer = create_renderer(
+        let mut renderer = create_renderer(
             self.preference,
             &self.soft_context,
             Arc::clone(&window),
             options.transparent,
             renderer_budget,
         )?;
+        renderer.set_cache_hooks(self.context.memory().cache_hooks());
         let mut session = UiSession::new();
         if let Some(executor) = lgui_core::backend::task_spawner(&self.context) {
             session.set_task_spawner(executor);

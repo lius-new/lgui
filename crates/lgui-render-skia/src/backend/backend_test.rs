@@ -379,6 +379,106 @@ fn cache_is_byte_bounded() {
     assert_eq!(cache.entries.len(), 1);
 }
 
+/// Records events and evicts every entry unused for more than `keep_frames`.
+struct RecordingObserver {
+    events: std::sync::Mutex<Vec<lgui_core::memory::CacheEvent>>,
+    keep_frames: u64,
+}
+
+impl lgui_core::memory::CacheObserver for RecordingObserver {
+    fn on_event(
+        &self,
+        event: lgui_core::memory::CacheEvent,
+        cache: &mut dyn lgui_core::memory::CacheView,
+    ) {
+        self.events.lock().unwrap().push(event);
+        let generation = cache.generation();
+        let mut stale = Vec::new();
+        cache.visit_entries(&mut |entry| {
+            if generation.wrapping_sub(entry.last_used) > self.keep_frames {
+                stale.push(entry.id);
+            }
+        });
+        cache.evict(&stale);
+    }
+}
+
+#[test]
+fn observer_sees_inserts_and_evicts_through_the_view() {
+    use lgui_core::memory::{CacheEvent, CacheHooks, CacheView};
+    let image = || layer_surface(4.0, 4.0).unwrap().image_snapshot();
+    let hooks = CacheHooks::default();
+    let observer = Arc::new(RecordingObserver {
+        events: Default::default(),
+        keep_frames: 1,
+    });
+    hooks.set_observer(Some(observer.clone()));
+    let mut cache = SkiaCache::new(usize::MAX);
+    cache.set_hooks(Some(hooks.clone()));
+
+    cache.begin_frame();
+    cache.insert("old".to_owned(), image());
+    cache.begin_frame();
+    cache.begin_frame();
+    cache.insert("new".to_owned(), image());
+
+    // The insert of "new" ran the observer, which dropped "old" (idle 2 frames).
+    assert!(!cache.entries.contains_key("old"));
+    assert!(cache.entries.contains_key("new"));
+    assert_eq!(cache.slots.len(), 1);
+    assert_eq!(cache.usage().entries, 1);
+    let events = observer.events.lock().unwrap();
+    assert!(matches!(events[0], CacheEvent::Inserted(_)));
+    assert!(matches!(events[1], CacheEvent::Inserted(_)));
+}
+
+#[test]
+fn requested_pass_runs_at_the_next_frame_end_once() {
+    use lgui_core::memory::{CacheEvent, CacheHooks};
+    let hooks = CacheHooks::default();
+    let observer = Arc::new(RecordingObserver {
+        events: Default::default(),
+        keep_frames: u64::MAX,
+    });
+    hooks.set_observer(Some(observer.clone()));
+    let mut cache = SkiaCache::new(usize::MAX);
+    cache.set_hooks(Some(hooks.clone()));
+
+    cache.end_frame();
+    hooks.request_pass();
+    cache.end_frame();
+    cache.end_frame();
+
+    let events = observer.events.lock().unwrap();
+    let requested = events
+        .iter()
+        .filter(|event| **event == CacheEvent::Requested)
+        .count();
+    assert_eq!(requested, 1);
+}
+
+#[test]
+fn shrink_moderate_keeps_recent_entries_and_drops_the_rest() {
+    use lgui_core::memory::{CacheView, ShrinkLevel};
+    let image = || layer_surface(4.0, 4.0).unwrap().image_snapshot();
+    let mut cache = SkiaCache::new(usize::MAX);
+    cache.begin_frame();
+    cache.insert("stale".to_owned(), image());
+    for _ in 0..4 {
+        cache.begin_frame();
+    }
+    cache.insert("recent".to_owned(), image());
+
+    let released = cache.shrink(ShrinkLevel::Moderate);
+
+    assert_eq!(released, 4 * 4 * 4);
+    assert!(cache.entries.contains_key("recent"));
+    assert!(!cache.entries.contains_key("stale"));
+    assert_eq!(cache.slots.len(), 1);
+    cache.shrink(ShrinkLevel::Critical);
+    assert!(cache.entries.is_empty() && cache.slots.is_empty());
+}
+
 #[test]
 fn raster_policy_evicts_shorter_retention_then_lower_priority() {
     let image = || layer_surface(4.0, 4.0).unwrap().image_snapshot();

@@ -948,6 +948,7 @@ impl WinitWindow {
                     renderer.set_fallback_reason("gpu-runtime-failed");
                 }
                 let fallback_reason = renderer.fallback_reason();
+                renderer.set_cache_hooks(self.context.memory().cache_hooks());
                 self.renderer = renderer;
                 if let Some(reason) = fallback_reason {
                     self.recovery = RendererRecoveryState::Fallback {

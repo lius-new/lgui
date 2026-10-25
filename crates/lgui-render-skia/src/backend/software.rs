@@ -58,6 +58,11 @@ impl SkiaSoftwareSurface {
         self.cache.set_budget(budget_bytes);
     }
 
+    /// Connects the render cache to the application's observer.
+    pub fn set_cache_hooks(&mut self, hooks: Option<lgui_core::memory::CacheHooks>) {
+        self.cache.set_hooks(hooks);
+    }
+
     pub fn cache_stats(&self) -> SkiaCacheStats {
         self.cache.stats()
     }
@@ -83,5 +88,6 @@ pub fn paint_scene_damage(
         painter.draw_commands(canvas, scene.commands(), Some(ui_rect_from_physical(clip)))?;
         canvas.restore();
     }
+    painter.cache.end_frame();
     Ok(())
 }
