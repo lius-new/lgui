@@ -7,8 +7,8 @@ use std::{
 
 use lgui_assets::backend::render_resources;
 use lgui_core::core::{
-    BlurEdgeMode, BlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform, PathStyle,
-    PhysicalRect, RasterCachePolicy, Scene, ScenePrimitive, StaticLayerBackground,
+    BlurEdgeMode, BlurStyle, Color, CompositingLayerBackground, ImageFit, LayerTransform,
+    PathStyle, PhysicalRect, RasterCachePolicy, Scene, ScenePrimitive, StaticLayerBackground,
     StaticLayerSource, Stroke, TextAlign, TextStyle, UiImageSource, UiPath, UiPathCommand, UiRect,
     VisualStyle,
 };
@@ -19,9 +19,9 @@ use skia_safe::textlayout::{
     TypefaceFontProvider,
 };
 use skia_safe::{
-    surfaces, AlphaType, BlendMode, Canvas, Color as SkColor, Color4f, ColorType, Data, FontMgr,
-    FontStyle, Image, ImageInfo, Paint, PaintStyle, Path, PathBuilder, RRect, Rect,
-    SamplingOptions, Surface, TileMode,
+    AlphaType, BlendMode, Canvas, Color as SkColor, Color4f, ColorType, Data, FontMgr, FontStyle,
+    Image, ImageInfo, Paint, PaintStyle, Path, PathBuilder, RRect, Rect, SamplingOptions, Surface,
+    TileMode, surfaces,
 };
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
@@ -29,18 +29,22 @@ use unicode_segmentation::UnicodeSegmentation;
 mod cache;
 mod painter;
 mod primitives;
+mod rasterization;
 mod software;
 mod support;
 mod text;
 
 pub use cache::{SkiaCache, SkiaCacheStats};
+pub use rasterization::TextRasterization;
 #[cfg(any(
     feature = "renderer-skia-gl",
     feature = "renderer-skia-vulkan",
     feature = "renderer-skia-metal"
 ))]
 pub use software::paint_scene_damage;
-pub use software::SkiaSoftwareSurface;
+pub use software::{
+    SkiaSoftwareSurface, set_opaque_software_windows, set_software_text_background,
+};
 pub use support::probe_skia_support;
 #[cfg(any(
     feature = "renderer-skia-gl",
@@ -57,3 +61,7 @@ use text::*;
 #[path = "backend/backend_test.rs"]
 #[cfg(test)]
 mod tests;
+
+#[path = "backend/rasterization_test.rs"]
+#[cfg(test)]
+mod rasterization_tests;

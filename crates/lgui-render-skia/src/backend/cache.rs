@@ -19,6 +19,7 @@ pub(super) struct ParagraphCacheKey {
     height: u32,
     style: TextStyle,
     families: Vec<&'static str>,
+    rasterization: TextRasterization,
 }
 
 pub(super) struct CachedParagraph {
@@ -101,6 +102,7 @@ impl SkiaCache {
         text: &str,
         style: TextStyle,
     ) {
+        let rasterization = TextRasterization::for_canvas(canvas, style.alpha);
         let families = if style.font_families.is_empty() {
             lgui_core::backend::font_families()
         } else {
@@ -112,6 +114,7 @@ impl SkiaCache {
             height: rect.height().to_bits(),
             style,
             families: families.to_vec(),
+            rasterization,
         };
         if let Some(entry) = self.paragraphs.get_mut(&key) {
             self.text_hits = self.text_hits.saturating_add(1);
@@ -121,10 +124,11 @@ impl SkiaCache {
         }
         self.text_misses = self.text_misses.saturating_add(1);
         let request = scene_text_layout_request(text, rect, style);
-        let mut paragraph = build_skia_paragraph(
+        let mut paragraph = build_skia_paragraph_with_rasterization(
             &request,
             self.fonts.clone(),
             Some(sk_color(style.color, style.alpha)),
+            rasterization,
         );
         paragraph.layout(rect.width().max(1.0));
         paint_cached_paragraph(canvas, rect, &paragraph, style.vertical_align);

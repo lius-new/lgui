@@ -33,6 +33,7 @@ lgui-render-api = { version = "0.2.2", path = "../lgui-render-api", features = [
 
 [target.'cfg(windows)'.dependencies]
 skia-safe = { version = "=0.99.0", default-features = false, features = ["d3d", "vulkan"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 skia-safe = { version = "=0.99.0", default-features = false, features = ["all-linux", "vulkan"] }

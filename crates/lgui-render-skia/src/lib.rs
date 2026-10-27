@@ -10,6 +10,9 @@ pub use backend::probe_skia_support;
     feature = "renderer-skia-metal"
 ))]
 pub use backend::{
-    cpu_cache_budget, gpu_cache_budget, paint_scene_damage, with_gpu_cache_usage, SkiaCache,
+    SkiaCache, cpu_cache_budget, gpu_cache_budget, paint_scene_damage, with_gpu_cache_usage,
 };
-pub use backend::{skia_text_system_handle, SkiaCacheStats, SkiaSoftwareSurface};
+pub use backend::{
+    SkiaCacheStats, SkiaSoftwareSurface, TextRasterization, set_opaque_software_windows,
+    set_software_text_background, skia_text_system_handle,
+};
