@@ -192,6 +192,7 @@ impl WinitSkiaRenderer {
                 surface, renderer, ..
             } => {
                 let draw_started = Instant::now();
+                renderer.set_text_rendering(_frame.text_rendering());
                 renderer.draw(_scene, _frame).map_err(|error| {
                     WinitRenderError::new(
                         lgui_render_api::RenderErrorStage::Draw,
@@ -225,7 +226,13 @@ impl WinitSkiaRenderer {
                     *destination =
                         ((source[2] as u32) << 16) | ((source[1] as u32) << 8) | source[0] as u32;
                 }
-                let damage = _damage
+                let full_damage = [_frame.viewport()];
+                let effective_damage = if renderer.painted_full_frame() {
+                    &full_damage[..]
+                } else {
+                    _damage
+                };
+                let damage = effective_damage
                     .iter()
                     .filter_map(|rect| {
                         Some(softbuffer::Rect {
@@ -526,7 +533,11 @@ pub(super) fn create_renderer(
         .map_err(|error| WinitApplicationError(format!("create software surface: {error}")))?;
     Ok(WinitSkiaRenderer::Software {
         surface,
-        renderer: SkiaSoftwareSurface::new(cache_budget),
+        renderer: if transparent {
+            SkiaSoftwareSurface::new(cache_budget)
+        } else {
+            SkiaSoftwareSurface::new_opaque(cache_budget)
+        },
         fallback_reason: fallback_reason.or_else(|| {
             (preference == GraphicsPreference::Auto).then_some("gpu-driver-unavailable")
         }),

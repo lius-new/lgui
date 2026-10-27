@@ -75,6 +75,7 @@ fn window_manager_marshals_the_complete_command_model() {
             WindowCommand::SetMode { id, mode } => {
                 format!("mode:{}:{mode:?}", id.as_str())
             }
+            WindowCommand::SetTextRendering { id, .. } => format!("text-rendering:{}", id.as_str()),
             WindowCommand::ToggleMaximize(id) => format!("toggle-maximize:{}", id.as_str()),
             WindowCommand::Input { id, .. } => format!("input:{}", id.as_str()),
             WindowCommand::Exit => "exit".into(),
@@ -109,5 +110,30 @@ fn window_manager_marshals_the_complete_command_model() {
             "close:friends",
             "exit",
         ]
+    );
+}
+
+#[test]
+fn text_rendering_commands_target_one_window_and_keep_independent_values() {
+    let manager = WindowManager::new();
+    let commands = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&commands);
+    manager.install(move |command| {
+        if let WindowCommand::SetTextRendering { id, options } = command {
+            recorded.lock().unwrap().push((id, options));
+        }
+    });
+    let custom = crate::text::TextRenderingOptions::default()
+        .with_lcd_gamma(1.25)
+        .unwrap();
+    let first = WindowOptions::new("first").text_rendering(custom);
+    let second = WindowOptions::new("second");
+    WindowHandle::new(first.id.clone(), manager.clone()).set_text_rendering(first.text_rendering);
+    WindowHandle::new(second.id.clone(), manager).set_text_rendering(second.text_rendering);
+    let commands = commands.lock().unwrap();
+    assert_eq!(commands[0], (first.id, custom));
+    assert_eq!(
+        commands[1],
+        (second.id, crate::text::TextRenderingOptions::default())
     );
 }

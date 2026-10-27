@@ -86,6 +86,17 @@ impl WindowManager {
         })
     }
 
+    pub fn set_text_rendering(
+        &self,
+        id: impl Into<WindowId>,
+        options: crate::text::TextRenderingOptions,
+    ) -> bool {
+        self.send(WindowCommand::SetTextRendering {
+            id: id.into(),
+            options,
+        })
+    }
+
     pub fn toggle_maximize(&self, id: impl Into<WindowId>) -> bool {
         self.send(WindowCommand::ToggleMaximize(id.into()))
     }
@@ -155,6 +166,10 @@ impl WindowHandle {
 
     pub fn set_mode(&self, mode: WindowMode) -> bool {
         self.windows.set_mode(self.id.clone(), mode)
+    }
+
+    pub fn set_text_rendering(&self, options: crate::text::TextRenderingOptions) -> bool {
+        self.windows.set_text_rendering(self.id.clone(), options)
     }
 
     pub fn toggle_maximize(&self) -> bool {

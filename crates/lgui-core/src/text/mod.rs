@@ -3,6 +3,7 @@
 mod fonts;
 mod layout;
 mod model;
+mod rendering;
 mod service;
 
 pub use fonts::FontAsset;
@@ -12,12 +13,13 @@ pub use model::{
     TextLayoutRequest, TextLineMetrics, TextMeasureRequest, TextMetrics, TextSpan,
     TextVerticalAlign,
 };
-pub use service::{layout, measure, measure_width, TextSystem, TextSystemHandle};
+pub use rendering::{TextRenderingError, TextRenderingOptions};
+pub use service::{TextSystem, TextSystemHandle, layout, measure, measure_width};
 
-pub(crate) use fonts::{font_assets, font_families, FontAssets};
-pub(crate) use fonts::{install_font_assets, FontAssetsGuard};
-pub(crate) use fonts::{install_font_families, FontFamilies, FontFamiliesGuard};
-pub(crate) use service::{install_text_system, TextSystemGuard};
+pub(crate) use fonts::{FontAssets, font_assets, font_families};
+pub(crate) use fonts::{FontAssetsGuard, install_font_assets};
+pub(crate) use fonts::{FontFamilies, FontFamiliesGuard, install_font_families};
+pub(crate) use service::{TextSystemGuard, install_text_system};
 
 #[path = "text_test.rs"]
 #[cfg(test)]

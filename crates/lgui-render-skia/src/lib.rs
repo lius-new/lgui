@@ -13,6 +13,5 @@ pub use backend::{
     SkiaCache, cpu_cache_budget, gpu_cache_budget, paint_scene_damage, with_gpu_cache_usage,
 };
 pub use backend::{
-    SkiaCacheStats, SkiaSoftwareSurface, TextRasterization, set_opaque_software_windows,
-    set_software_text_background, skia_text_system_handle,
+    SkiaCacheStats, SkiaSoftwareSurface, TextRasterization, skia_text_system_handle,
 };

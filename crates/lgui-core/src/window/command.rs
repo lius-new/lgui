@@ -17,6 +17,10 @@ pub enum WindowCommand {
     RequestClose(WindowId),
     Minimize(WindowId),
     SetScalePreference(ScalePreference),
+    SetTextRendering {
+        id: WindowId,
+        options: crate::text::TextRenderingOptions,
+    },
     SetMode {
         id: WindowId,
         mode: WindowMode,

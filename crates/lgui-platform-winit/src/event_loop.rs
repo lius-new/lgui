@@ -296,9 +296,7 @@ impl WinitHost {
         position_window(&native, &options, owner_window.as_deref(), cursor_position);
         if defer_initial_mode {
             match options.mode {
-                WindowMode::Fullscreen => {
-                    native.set_fullscreen(Some(Fullscreen::Borderless(None)))
-                }
+                WindowMode::Fullscreen => native.set_fullscreen(Some(Fullscreen::Borderless(None))),
                 WindowMode::Maximized => native.set_maximized(true),
                 WindowMode::Windowed => {}
             }
@@ -434,6 +432,15 @@ impl WinitHost {
                 for window in self.windows.values_mut() {
                     window.options.scale_preference = preference;
                     window.update_scale();
+                }
+            }
+            WindowCommand::SetTextRendering { id, options } => {
+                if let Some(window) = self.window_by_id_mut(&id)
+                    && window.options.text_rendering != options
+                {
+                    window.options.text_rendering = options;
+                    window.full_redraw = true;
+                    window.window.request_redraw();
                 }
             }
             WindowCommand::SetMode { id, mode } => {

@@ -14,6 +14,14 @@ Components access `cx.application()`, `cx.windows()`, and event-context `cx.wind
 Auxiliary windows are declared with `WindowOptions`; `.owner(id)` declares an explicit owner.
 Business code never receives native handles.
 
+`WindowOptions::text_rendering(options)` supplies per-window
+`lgui::text::TextRenderingOptions`. Applications may explicitly override LCD
+coverage gamma/contrast; defaults retain backend values. Update one window with
+`WindowManager::set_text_rendering(id, options)` or
+`WindowHandle::set_text_rendering(options)`, which requests a full repaint when
+values change. These parameters currently apply to software LCD rendering.
+Theme selection and the choice of coverage values remain application policy.
+
 ## Memory And Resource Lifetime
 
 `lgui` has no default memory profile or framework-owned byte budgets. Every application must construct

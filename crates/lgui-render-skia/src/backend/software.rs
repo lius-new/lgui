@@ -1,27 +1,14 @@
 use super::*;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-
-static OPAQUE_WINDOWS: AtomicBool = AtomicBool::new(false);
-static TEXT_BACKGROUND: AtomicU32 = AtomicU32::new(0xffffff);
-
-/// Opt in before creating native windows whose presenter discards alpha.
-/// Standalone/offscreen renderer consumers retain their transparent semantics.
-pub fn set_opaque_software_windows(opaque: bool) {
-    OPAQUE_WINDOWS.store(opaque, Ordering::Relaxed);
-}
-
-/// Supply the active UI background before drawing native software windows.
-/// Transparent/offscreen consumers retain Skia's original coverage curve.
-pub fn set_software_text_background(background: Color) {
-    TEXT_BACKGROUND.store(background.0, Ordering::Relaxed);
-}
+use lgui_core::text::TextRenderingOptions;
 
 pub struct SkiaSoftwareSurface {
     pixels: Vec<u8>,
     size: (i32, i32),
     cache: SkiaCache,
     opaque: bool,
-    last_text_props: Option<(skia_safe::PixelGeometry, u32)>,
+    text_rendering: TextRenderingOptions,
+    last_text_props: Option<(skia_safe::PixelGeometry, u32, u32)>,
+    painted_full_frame: bool,
 }
 
 impl SkiaSoftwareSurface {
@@ -30,9 +17,29 @@ impl SkiaSoftwareSurface {
             pixels: Vec::new(),
             size: (0, 0),
             cache: SkiaCache::new(cache_budget),
-            opaque: OPAQUE_WINDOWS.load(Ordering::Relaxed),
+            opaque: false,
+            text_rendering: TextRenderingOptions::default(),
             last_text_props: None,
+            painted_full_frame: false,
         }
+    }
+
+    /// Native presenters that discard alpha use an opaque target. Offscreen
+    /// consumers can keep using `new` for premultiplied transparent pixels.
+    pub fn new_opaque(cache_budget: usize) -> Self {
+        Self {
+            opaque: true,
+            ..Self::new(cache_budget)
+        }
+    }
+
+    pub fn set_text_rendering(&mut self, options: TextRenderingOptions) {
+        self.text_rendering = options;
+    }
+
+    /// Presentation must include the full viewport when retained coverage changes.
+    pub fn painted_full_frame(&self) -> bool {
+        self.painted_full_frame
     }
 
     fn ensure_surface(&mut self, width: i32, height: i32) {
@@ -46,15 +53,6 @@ impl SkiaSoftwareSurface {
     }
 
     pub fn draw(&mut self, scene: &Scene, frame: &FrameInfo<'_>) -> Result<(), String> {
-        self.draw_on_background(scene, frame, Color(TEXT_BACKGROUND.load(Ordering::Relaxed)))
-    }
-
-    fn draw_on_background(
-        &mut self,
-        scene: &Scene,
-        frame: &FrameInfo<'_>,
-        background: Color,
-    ) -> Result<(), String> {
         let viewport = frame.viewport();
         self.ensure_surface(viewport.width(), viewport.height());
         // softbuffer presents RGB and discards alpha. Describe that actual opaque
@@ -66,11 +64,15 @@ impl SkiaSoftwareSurface {
         };
         let info = ImageInfo::new(self.size, ColorType::BGRA8888, alpha, None);
         let props = if self.opaque {
-            TextRasterization::system().surface_props_for_background(background)
+            TextRasterization::system().surface_props_with_options(self.text_rendering)
         } else {
             TextRasterization::Grayscale.surface_props()
         };
-        let text_props = (props.pixel_geometry(), props.text_gamma().to_bits());
+        let text_props = (
+            props.pixel_geometry(),
+            props.text_gamma().to_bits(),
+            props.text_contrast().to_bits(),
+        );
         // A gamma/pixel-order change affects every retained glyph, even when
         // the caller only invalidated a small part of the window.
         let refresh = FrameInfo::new(
@@ -89,6 +91,7 @@ impl SkiaSoftwareSurface {
         .ok_or_else(|| "Skia could not wrap the retained software surface".to_owned())?;
         paint_scene_damage(surface.canvas(), &mut self.cache, scene, &refresh)?;
         self.last_text_props = Some(text_props);
+        self.painted_full_frame = refresh.is_full_redraw();
         Ok(())
     }
 
@@ -181,18 +184,30 @@ mod startup_tests {
         let damage = [scale.physical_rect(UiRect::new(0.0, 0.0, 8.0, 48.0))];
         let partial = FrameInfo::new(viewport, &damage, scale, FrameReason::SceneChange, false);
         let full = FrameInfo::new(viewport, &[], scale, FrameReason::SceneChange, true);
-        let mut retained = SkiaSoftwareSurface::new(1024 * 1024);
-        retained.opaque = true;
-        for background in [Color::WHITE, Color::BLACK, Color::WHITE] {
+        let mut retained = SkiaSoftwareSurface::new_opaque(1024 * 1024);
+        let mut independent = SkiaSoftwareSurface::new_opaque(1024 * 1024);
+        independent.draw(&scene, &full).unwrap();
+        let default_pixels = independent.pixels().to_vec();
+        let custom = TextRenderingOptions::default()
+            .with_lcd_gamma(1.25)
+            .unwrap()
+            .with_lcd_contrast(0.25)
+            .unwrap();
+        for options in [
+            TextRenderingOptions::default(),
+            custom,
+            TextRenderingOptions::default(),
+        ] {
             // Keep the scene fixed to isolate a coverage-profile change. All
             // text is outside the supplied damage; compare to a fresh full draw.
-            retained
-                .draw_on_background(&scene, &partial, background)
-                .unwrap();
-            let mut fresh = SkiaSoftwareSurface::new(1024 * 1024);
-            fresh.opaque = true;
-            fresh.draw_on_background(&scene, &full, background).unwrap();
+            retained.set_text_rendering(options);
+            retained.draw(&scene, &partial).unwrap();
+            let mut fresh = SkiaSoftwareSurface::new_opaque(1024 * 1024);
+            fresh.set_text_rendering(options);
+            fresh.draw(&scene, &full).unwrap();
             assert_eq!(retained.pixels(), fresh.pixels());
+            independent.draw(&scene, &full).unwrap();
+            assert_eq!(independent.pixels(), default_pixels);
         }
         assert_eq!(retained.cache_stats().text_entries, 1);
         assert_eq!(retained.cache_stats().text_hits, 2);
@@ -200,10 +215,7 @@ mod startup_tests {
 
     #[test]
     fn opaque_window_first_frame_and_cached_repaint_survive_at_fractional_dpi() {
-        let mut renderer = SkiaSoftwareSurface::new(8 * 1024 * 1024);
-        // Exercise the startup target without changing the process-global option
-        // used by unrelated transparent renderer tests running in parallel.
-        renderer.opaque = true;
+        let mut renderer = SkiaSoftwareSurface::new_opaque(8 * 1024 * 1024);
         let mut logical = Scene::new();
         for (row, sample) in ["Native API started", "代码编辑器", "00 0689"]
             .iter()

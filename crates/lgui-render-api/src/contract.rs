@@ -25,6 +25,7 @@ pub struct FrameInfo<'a> {
     scale: UiScale,
     reason: FrameReason,
     full_redraw: bool,
+    text_rendering: lgui_core::text::TextRenderingOptions,
 }
 
 impl<'a> FrameInfo<'a> {
@@ -41,11 +42,21 @@ impl<'a> FrameInfo<'a> {
             scale,
             reason,
             full_redraw,
+            text_rendering: lgui_core::text::TextRenderingOptions::default(),
         }
     }
 
     pub fn viewport(&self) -> PhysicalRect {
         self.viewport
+    }
+
+    pub fn with_text_rendering(mut self, options: lgui_core::text::TextRenderingOptions) -> Self {
+        self.text_rendering = options;
+        self
+    }
+
+    pub fn text_rendering(&self) -> lgui_core::text::TextRenderingOptions {
+        self.text_rendering
     }
 
     pub fn damage(&self) -> &'a [PhysicalRect] {

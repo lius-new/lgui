@@ -59,22 +59,19 @@ impl TextRasterization {
         )
     }
 
-    /// Keep geometry and font metrics intact while reducing the bright fringe
-    /// of LCD glyphs on dark software windows. This is coverage gamma, not a
-    /// change to the window's color space or to the text's foreground color.
-    pub fn surface_props_for_background(self, background: lgui_core::core::Color) -> SurfaceProps {
+    /// Apply explicit LCD coverage overrides. Parameter selection belongs to
+    /// the caller; grayscale fallback targets retain backend defaults.
+    pub fn surface_props_with_options(
+        self,
+        options: lgui_core::text::TextRenderingOptions,
+    ) -> SurfaceProps {
         let defaults = self.surface_props();
-        let rgb = background.0;
-        let brightness = 2126 * ((rgb >> 16) & 255) + 7152 * ((rgb >> 8) & 255) + 722 * (rgb & 255);
-        if cfg!(target_os = "windows") && self != Self::Grayscale && brightness < 128 * 10000 {
-            // The 1.4 coverage curve was compared at fractional physical font
-            // sizes with RGB/BGR targets. Do not apply it to light themes:
-            // lowering gamma there makes dark glyphs look heavier instead.
+        if self != Self::Grayscale {
             SurfaceProps::new_with_text_properties(
                 SurfacePropsFlags::empty(),
                 defaults.pixel_geometry(),
-                defaults.text_contrast(),
-                1.4,
+                options.lcd_contrast().unwrap_or(defaults.text_contrast()),
+                options.lcd_gamma().unwrap_or(defaults.text_gamma()),
             )
         } else {
             defaults

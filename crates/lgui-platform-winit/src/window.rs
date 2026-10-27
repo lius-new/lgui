@@ -774,7 +774,8 @@ impl WinitWindow {
                 FrameReason::SceneChange
             },
             self.full_redraw || commit.damage.dirty.is_full(),
-        );
+        )
+        .with_text_rendering(self.options.text_rendering);
         #[cfg(feature = "images")]
         let resources = self
             .context

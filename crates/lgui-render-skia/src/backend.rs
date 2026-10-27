@@ -36,15 +36,13 @@ mod text;
 
 pub use cache::{SkiaCache, SkiaCacheStats};
 pub use rasterization::TextRasterization;
+pub use software::SkiaSoftwareSurface;
 #[cfg(any(
     feature = "renderer-skia-gl",
     feature = "renderer-skia-vulkan",
     feature = "renderer-skia-metal"
 ))]
 pub use software::paint_scene_damage;
-pub use software::{
-    SkiaSoftwareSurface, set_opaque_software_windows, set_software_text_background,
-};
 pub use support::probe_skia_support;
 #[cfg(any(
     feature = "renderer-skia-gl",

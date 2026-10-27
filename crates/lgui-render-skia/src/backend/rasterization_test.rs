@@ -29,7 +29,10 @@ fn pixels(surface: &mut Surface) -> Vec<u8> {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn dark_lcd_coverage_reduces_ink_without_changing_layout_or_light_themes() {
+fn explicit_lcd_coverage_preserves_layout_and_applies_to_both_polarities() {
+    let options = lgui_core::text::TextRenderingOptions::default()
+        .with_lcd_gamma(1.25)
+        .unwrap();
     for mode in [
         TextRasterization::Grayscale,
         TextRasterization::LcdRgb,
@@ -50,7 +53,7 @@ fn dark_lcd_coverage_reduces_ink_without_changing_layout_or_light_themes() {
                         let mut cache = SkiaCache::new(1024 * 1024);
                         let mut before = target(mode, true);
                         let mut after =
-                            target_with_props(&mode.surface_props_for_background(background), true);
+                            target_with_props(&mode.surface_props_with_options(options), true);
                         for surface in [&mut before, &mut after] {
                             surface.canvas().clear(sk_color(background, 255));
                             cache.draw_text(surface.canvas(), rect, text, style);
@@ -61,7 +64,7 @@ fn dark_lcd_coverage_reduces_ink_without_changing_layout_or_light_themes() {
                         // Its native glyph strike still responds to canvas gamma.
                         assert_eq!(cache.stats().text_entries, 1);
                         assert_eq!(cache.stats().text_hits, 1);
-                        if !dark || mode == TextRasterization::Grayscale {
+                        if mode == TextRasterization::Grayscale {
                             assert_eq!(before, after, "{mode:?}, {text}, {factor}");
                         } else {
                             let energy = |data: &[u8]| -> u64 {
@@ -70,10 +73,13 @@ fn dark_lcd_coverage_reduces_ink_without_changing_layout_or_light_themes() {
                                     .map(|v| u64::from(*v))
                                     .sum()
                             };
-                            assert!(
-                                energy(&after) < energy(&before),
-                                "{mode:?}, {text}, {factor}"
-                            );
+                            assert_ne!(before, after, "{mode:?}, {text}, {factor}");
+                            if dark {
+                                assert!(
+                                    energy(&after) < energy(&before),
+                                    "{mode:?}, {text}, {factor}"
+                                );
+                            }
                             assert!(after.chunks_exact(4).any(|p| {
                                 p[..3].iter().max().unwrap() - p[..3].iter().min().unwrap() > 12
                             }));

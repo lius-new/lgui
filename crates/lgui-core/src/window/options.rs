@@ -84,6 +84,7 @@ pub struct WindowOptions {
     pub drag_exclusion: Option<WindowDragExclusion>,
     pub scale_reference_size: Option<Size>,
     pub scale_preference: ScalePreference,
+    pub text_rendering: crate::text::TextRenderingOptions,
     pub mode: WindowMode,
     pub close_policy: ClosePolicy,
     pub close_handler: Option<WindowCloseHandler>,
@@ -197,6 +198,13 @@ impl WindowOptions {
         self
     }
 
+    /// Sets explicit LCD coverage parameters for this window. Defaults follow
+    /// the backend; the framework does not select parameters from a theme.
+    pub fn text_rendering(mut self, options: crate::text::TextRenderingOptions) -> Self {
+        self.text_rendering = options;
+        self
+    }
+
     pub fn close_policy(mut self, policy: ClosePolicy) -> Self {
         self.close_policy = policy;
         if policy != ClosePolicy::Notify {
@@ -254,6 +262,7 @@ impl Default for WindowOptions {
             drag_exclusion: None,
             scale_reference_size: None,
             scale_preference: ScalePreference::Auto,
+            text_rendering: crate::text::TextRenderingOptions::default(),
             mode: WindowMode::Windowed,
             close_policy: ClosePolicy::Exit,
             close_handler: None,
