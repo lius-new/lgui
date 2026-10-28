@@ -369,6 +369,8 @@ impl WinitHost {
                 was_offscreen: false,
                 drag_pending: None,
                 left_pressed: false,
+                buttons_down: 0,
+                leave_deferred: false,
                 ime_allowed: false,
                 last_frame: Instant::now(),
                 next_frame: None,

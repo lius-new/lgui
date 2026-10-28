@@ -41,6 +41,12 @@ pub(super) struct WinitWindow {
     pub(super) was_offscreen: bool,
     pub(super) drag_pending: Option<DragPending>,
     pub(super) left_pressed: bool,
+    /// Mouse buttons currently held. While any is down the OS keeps routing
+    /// pointer events to this window even outside it, so a drag must survive
+    /// the cursor leaving the client area.
+    pub(super) buttons_down: u32,
+    /// A `CursorLeft` arrived mid-press; the leave is dispatched on release.
+    pub(super) leave_deferred: bool,
     pub(super) ime_allowed: bool,
     pub(super) last_frame: Instant,
     pub(super) next_frame: Option<Instant>,
@@ -154,6 +160,15 @@ impl WinitWindow {
                 ));
             }
             WindowEvent::Focused(focused) => {
+                if !focused {
+                    // A release may never arrive once focus is gone.
+                    self.buttons_down = 0;
+                    self.left_pressed = false;
+                    if std::mem::take(&mut self.leave_deferred) {
+                        let point = self.cursor.take().unwrap_or_default();
+                        self.dispatch_input(InputEvent::PointerLeave(PointerData::mouse(point)));
+                    }
+                }
                 self.context.emit(lgui_core::window::WindowFocusChanged {
                     window_id: self.id.clone(),
                     focused,
@@ -196,11 +211,18 @@ impl WinitWindow {
                 self.dispatch_input(InputEvent::PointerMove(PointerData::mouse(point)));
             }
             WindowEvent::CursorEntered { .. } => {
+                self.leave_deferred = false;
                 if let Some(point) = self.cursor {
                     self.dispatch_input(InputEvent::PointerEnter(PointerData::mouse(point)));
                 }
             }
             WindowEvent::CursorLeft { .. } => {
+                if self.buttons_down > 0 {
+                    // Keep the press alive so drags (selection, scrollbar
+                    // thumbs) keep tracking the pointer outside the window.
+                    self.leave_deferred = true;
+                    return;
+                }
                 let point = self.cursor.unwrap_or_default();
                 self.dispatch_input(InputEvent::PointerLeave(PointerData::mouse(point)));
                 self.cursor = None;
@@ -208,6 +230,12 @@ impl WinitWindow {
             WindowEvent::MouseInput { state, button, .. } => {
                 let pointer = PointerData::mouse(self.cursor.unwrap_or_default());
                 let button = pointer_button(button);
+                match state {
+                    ElementState::Pressed => self.buttons_down += 1,
+                    ElementState::Released => {
+                        self.buttons_down = self.buttons_down.saturating_sub(1)
+                    }
+                }
                 if state == ElementState::Pressed
                     && button == PointerButton::Left
                     && !self.options.native_titlebar
@@ -259,6 +287,12 @@ impl WinitWindow {
                     if let Some(point) = self.cursor {
                         self.sync_cursor(point);
                     }
+                }
+                if self.buttons_down == 0 && self.leave_deferred {
+                    self.leave_deferred = false;
+                    let point = self.cursor.unwrap_or_default();
+                    self.dispatch_input(InputEvent::PointerLeave(PointerData::mouse(point)));
+                    self.cursor = None;
                 }
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
