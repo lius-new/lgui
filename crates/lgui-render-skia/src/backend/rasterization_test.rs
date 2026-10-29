@@ -1,6 +1,40 @@
 use super::*;
 use skia_safe::{FontHinting, PixelGeometry, font::Edging};
 
+#[test]
+fn grayscale_controls_reach_native_styles_surfaces_and_cached_paragraphs() {
+    use lgui_core::text::{TextHinting, TextRenderingOptions};
+    let options = TextRenderingOptions::default()
+        .with_grayscale_hinting(TextHinting::None)
+        .with_grayscale_gamma(1.6)
+        .unwrap()
+        .with_grayscale_contrast(0.25)
+        .unwrap();
+    let mut native = SkTextStyle::new();
+    TextRasterization::Grayscale.configure_with_options(&mut native, options);
+    assert_eq!(native.font_hinting(), FontHinting::None);
+    assert_eq!(native.font_edging(), Edging::AntiAlias);
+    let props = TextRasterization::Grayscale.surface_props_with_options(options);
+    assert_eq!(props.pixel_geometry(), PixelGeometry::Unknown);
+    assert_eq!(props.text_gamma(), 1.6);
+    assert_eq!(props.text_contrast(), 0.25);
+    let mut cache = SkiaCache::new(4 * 1024 * 1024);
+    let mut surface = target_with_props(&props, false);
+    let rect = UiRect::new(0.0, 0.0, 360.0, 48.0);
+    let style = TextStyle::new(Color::WHITE, 12.8, 400);
+    cache.draw_text(surface.canvas(), rect, "Small text 中文", style);
+    cache.set_text_rendering(options);
+    cache.draw_text(surface.canvas(), rect, "Small text 中文", style);
+    assert_eq!(cache.stats().text_entries, 2);
+    cache.draw_text(surface.canvas(), rect, "Small text 中文", style);
+    assert_eq!(cache.stats().text_hits, 1);
+    // Changing only coverage reuses shaping; hinting changes do not.
+    cache.set_text_rendering(options.with_grayscale_gamma(1.8).unwrap());
+    cache.draw_text(surface.canvas(), rect, "Small text 中文", style);
+    assert_eq!(cache.stats().text_entries, 2);
+    assert_eq!(cache.stats().text_hits, 2);
+}
+
 fn target(mode: TextRasterization, opaque: bool) -> Surface {
     target_with_props(&mode.surface_props(), opaque)
 }

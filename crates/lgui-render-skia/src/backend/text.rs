@@ -77,6 +77,16 @@ pub(super) fn build_skia_paragraph_with_rasterization(
     color: Option<SkColor>,
     rasterization: TextRasterization,
 ) -> Paragraph {
+    build_skia_paragraph_with_options(request, fonts, color, rasterization, Default::default())
+}
+
+pub(super) fn build_skia_paragraph_with_options(
+    request: &lgui_core::text::TextLayoutRequest<'_>,
+    fonts: FontCollection,
+    color: Option<SkColor>,
+    rasterization: TextRasterization,
+    options: lgui_core::text::TextRenderingOptions,
+) -> Paragraph {
     let direction = resolved_text_direction(request.text, request.direction);
     let mut paragraph_style = ParagraphStyle::new();
     paragraph_style
@@ -103,7 +113,7 @@ pub(super) fn build_skia_paragraph_with_rasterization(
         request.features,
         color,
     );
-    rasterization.configure(&mut base_style);
+    rasterization.configure_with_options(&mut base_style, options);
     paragraph_style.set_text_style(&base_style);
     let mut builder = ParagraphBuilder::new(&paragraph_style, fonts);
     if request.spans.is_empty() {
@@ -149,7 +159,7 @@ pub(super) fn build_skia_paragraph_with_rasterization(
                     },
                     color,
                 );
-                rasterization.configure(&mut style);
+                rasterization.configure_with_options(&mut style, options);
                 builder
                     .push_style(&style)
                     .add_text(&request.text[char_boundaries[start]..char_boundaries[end]])

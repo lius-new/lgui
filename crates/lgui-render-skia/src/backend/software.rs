@@ -7,7 +7,7 @@ pub struct SkiaSoftwareSurface {
     cache: SkiaCache,
     opaque: bool,
     text_rendering: TextRenderingOptions,
-    last_text_props: Option<(skia_safe::PixelGeometry, u32, u32)>,
+    last_text_props: Option<(skia_safe::PixelGeometry, u32, u32, TextRenderingOptions)>,
     painted_full_frame: bool,
 }
 
@@ -66,12 +66,13 @@ impl SkiaSoftwareSurface {
         let props = if self.opaque {
             TextRasterization::system().surface_props_with_options(self.text_rendering)
         } else {
-            TextRasterization::Grayscale.surface_props()
+            TextRasterization::Grayscale.surface_props_with_options(self.text_rendering)
         };
         let text_props = (
             props.pixel_geometry(),
             props.text_gamma().to_bits(),
             props.text_contrast().to_bits(),
+            self.text_rendering,
         );
         // A gamma/pixel-order change affects every retained glyph, even when
         // the caller only invalidated a small part of the window.
@@ -81,7 +82,8 @@ impl SkiaSoftwareSurface {
             frame.scale(),
             frame.reason(),
             frame.is_full_redraw() || self.last_text_props != Some(text_props),
-        );
+        )
+        .with_text_rendering(self.text_rendering);
         let mut surface = surfaces::wrap_pixels(
             &info,
             self.pixels.as_mut_slice(),
@@ -132,8 +134,9 @@ pub fn paint_scene_damage(
     scene: &Scene,
     frame: &FrameInfo<'_>,
 ) -> Result<(), String> {
+    let rendering_changed = cache.set_text_rendering(frame.text_rendering());
     cache.begin_frame();
-    let clips: Vec<PhysicalRect> = if frame.is_full_redraw() {
+    let clips: Vec<PhysicalRect> = if frame.is_full_redraw() || rendering_changed {
         vec![frame.viewport()]
     } else {
         frame.damage().to_vec()
@@ -161,6 +164,49 @@ mod startup_tests {
     use super::*;
     use lgui_core::core::{RenderPhase, UiId, UiScale};
     use lgui_render_api::FrameReason;
+
+    #[test]
+    fn grayscale_profile_changes_refresh_retained_pixels_on_partial_frames() {
+        let scale = UiScale::new(0.8);
+        let bounds = UiRect::new(0.0, 0.0, 420.0, 60.0);
+        let viewport = scale.physical_rect(bounds);
+        let mut scene = Scene::new();
+        scene.push(ScenePrimitive::Rect {
+            id: UiId::new("bg"),
+            rect: bounds,
+            style: VisualStyle::filled(Color(0x14161b)),
+            phase: RenderPhase::Content,
+        });
+        scene.push(ScenePrimitive::Text {
+            id: UiId::new("text"),
+            rect: UiRect::new(80.0, 0.0, 420.0, 60.0),
+            text: "Fractional text 中文".into(),
+            style: TextStyle::new(Color::WHITE, 16.0, 400),
+            phase: RenderPhase::Content,
+        });
+        let physical = scene.project_to_physical(scale);
+        let damage = [PhysicalRect::new(0, 0, 4, 4)];
+        let partial = FrameInfo::new(viewport, &damage, scale, FrameReason::SceneChange, false);
+        let full = FrameInfo::new(viewport, &[], scale, FrameReason::SceneChange, true);
+        let custom = TextRenderingOptions::default()
+            .with_grayscale_gamma(1.4)
+            .unwrap()
+            .with_grayscale_hinting(lgui_core::text::TextHinting::None);
+        let mut retained = SkiaSoftwareSurface::new(4 * 1024 * 1024);
+        for options in [
+            TextRenderingOptions::default(),
+            custom,
+            TextRenderingOptions::default(),
+        ] {
+            retained.set_text_rendering(options);
+            retained.draw(&physical, &partial).unwrap();
+            assert!(retained.painted_full_frame());
+            let mut fresh = SkiaSoftwareSurface::new(4 * 1024 * 1024);
+            fresh.set_text_rendering(options);
+            fresh.draw(&physical, &full).unwrap();
+            assert_eq!(retained.pixels(), fresh.pixels());
+        }
+    }
 
     #[test]
     fn coverage_changes_refresh_cached_text_outside_partial_damage() {

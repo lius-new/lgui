@@ -47,9 +47,18 @@ impl SkiaPainter<'_> {
                             let mut paint = Paint::default();
                             paint.set_alpha_f(blur.opacity.clamp(0.0, 1.0));
                             paint.set_image_filter(blur_image_filter(*blur));
-                            draw_image(canvas, &image, *rect, *fit, Some(&paint));
+                            draw_image(
+                                canvas,
+                                &image,
+                                *rect,
+                                *fit,
+                                request.sampling_value(),
+                                Some(&paint),
+                            );
                         }
-                        _ => draw_image(canvas, &image, *rect, *fit, None),
+                        _ => {
+                            draw_image(canvas, &image, *rect, *fit, request.sampling_value(), None)
+                        }
                     }
                 }
             }
@@ -141,7 +150,11 @@ impl SkiaPainter<'_> {
                 let image = match image {
                     Some(image) => image,
                     None => {
-                        let mut surface = layer_surface(rect.width(), rect.height())?;
+                        let mut surface = layer_surface_with_options(
+                            rect.width(),
+                            rect.height(),
+                            self.cache.text_rendering,
+                        )?;
                         let layer_canvas = surface.canvas();
                         if spec.background == StaticLayerBackground::Opaque {
                             layer_canvas.clear(SkColor::BLACK);
@@ -162,6 +175,7 @@ impl SkiaPainter<'_> {
                                     &base,
                                     UiRect::new(0.0, 0.0, rect.width(), rect.height()),
                                     fit,
+                                    lgui_core::core::ImageSampling::default(),
                                     None,
                                 );
                             }
@@ -229,7 +243,7 @@ impl SkiaPainter<'_> {
         opaque: bool,
         shadow: Option<lgui_core::core::ShadowStyle>,
     ) -> Result<Image, String> {
-        let mut surface = layer_surface(size.0, size.1)?;
+        let mut surface = layer_surface_with_options(size.0, size.1, self.cache.text_rendering)?;
         let canvas = surface.canvas();
         canvas.clear(if opaque {
             SkColor::BLACK
@@ -399,7 +413,8 @@ impl SkiaPainter<'_> {
         let content = if let Some(image) = self.cache.get(&key) {
             image
         } else {
-            let mut surface = layer_surface(rect.width(), rect.height())?;
+            let mut surface =
+                layer_surface_with_options(rect.width(), rect.height(), self.cache.text_rendering)?;
             let layer_canvas = surface.canvas();
             layer_canvas.clear(SkColor::TRANSPARENT);
             layer_canvas.translate((-rect.left, -rect.top));
@@ -440,7 +455,11 @@ impl SkiaPainter<'_> {
             if let Some(image) = painter.cache.get(&key) {
                 return Ok(image);
             }
-            let mut surface = layer_surface(viewport.width(), height.max(1.0))?;
+            let mut surface = layer_surface_with_options(
+                viewport.width(),
+                height.max(1.0),
+                painter.cache.text_rendering,
+            )?;
             let tile_canvas = surface.canvas();
             if let Some(fill) = spec.background_fill {
                 tile_canvas.clear(sk_color(fill, 255));
@@ -494,7 +513,7 @@ impl SkiaPainter<'_> {
 fn rasterize_svg_icon(svg: &str, width: i32, height: i32, key: &str) -> Result<Image, String> {
     let mut dom = skia_safe::svg::Dom::from_bytes(svg.as_bytes(), FontMgr::default())
         .map_err(|_| format!("Skia could not parse SVG icon {key}"))?;
-    let mut surface = layer_surface(width as f32, height as f32)?;
+    let mut surface = layer_surface_with_options(width as f32, height as f32, Default::default())?;
     surface.canvas().clear(SkColor::TRANSPARENT);
 
     let intrinsic = dom.root().intrinsic_size();
@@ -568,8 +587,8 @@ fn scaled_by_alpha(filter: skia_safe::ImageFilter, opacity: f32) -> skia_safe::I
         return filter;
     }
     let matrix: [f32; 20] = [
-        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, opacity, 0.0,
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        opacity, 0.0,
     ];
     let alpha = skia_safe::color_filters::matrix_row_major(&matrix, None);
     skia_safe::image_filters::color_filter(alpha, filter.clone(), None).unwrap_or(filter)

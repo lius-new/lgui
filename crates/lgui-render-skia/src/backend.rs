@@ -63,3 +63,7 @@ mod tests;
 #[path = "backend/rasterization_test.rs"]
 #[cfg(test)]
 mod rasterization_tests;
+
+#[path = "backend/sampling_test.rs"]
+#[cfg(test)]
+mod sampling_tests;

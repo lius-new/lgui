@@ -3,9 +3,9 @@ use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use crate::memory::ImageCachePolicy;
 
 use super::{
-    ActionId, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec,
-    CursorIcon, CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle,
-    PhysicalSize, RenderPhase, ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction,
+    ActionId, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec, CursorIcon,
+    CustomPaintStyle, IconStyle, ImageFit, LayoutSpec, OverlayStyle, PathStyle, PhysicalSize,
+    RenderPhase, ScrollRasterSpec, Semantics, StaticLayerSpec, TextStyle, UiAction,
     UiActionBinding, UiActionHandler, UiEventContext, UiEventHandler, UiEventKind, UiEventPayload,
     UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, VisualStyle,
 };
@@ -98,11 +98,22 @@ pub enum ImageDecodePolicy {
     FitTarget(PhysicalSize),
 }
 
+/// Reconstruction filter used when displaying an image. Independent of fitting
+/// and decoding; changing it does not require decoding the source again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImageSampling {
+    #[default]
+    Nearest,
+    Linear,
+    Mitchell,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ImageRequest {
     source: UiImageSource,
     cache_policy: ImageCachePolicy,
     decode_policy: ImageDecodePolicy,
+    sampling: ImageSampling,
     priority: crate::memory::CachePriority,
     namespace: String,
     version: u64,
@@ -115,6 +126,7 @@ impl ImageRequest {
             source: source.into(),
             cache_policy: ImageCachePolicy::ApplicationDefault,
             decode_policy: ImageDecodePolicy::Original,
+            sampling: ImageSampling::default(),
             priority: crate::memory::CachePriority::Normal,
             namespace: "images".to_owned(),
             version: 1,
@@ -130,6 +142,15 @@ impl ImageRequest {
     pub fn decode_policy(mut self, policy: ImageDecodePolicy) -> Self {
         self.decode_policy = policy;
         self
+    }
+
+    pub fn sampling(mut self, sampling: ImageSampling) -> Self {
+        self.sampling = sampling;
+        self
+    }
+
+    pub const fn sampling_value(&self) -> ImageSampling {
+        self.sampling
     }
 
     pub fn priority(mut self, priority: crate::memory::CachePriority) -> Self {

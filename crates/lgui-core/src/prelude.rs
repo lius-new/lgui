@@ -3,22 +3,22 @@ pub use crate::application::{
     RenderErrorStage,
 };
 pub use crate::command::{
-    invoke, Command, CommandContext, CommandFuture, CommandHandle, CommandHandler,
+    Command, CommandContext, CommandFuture, CommandHandle, CommandHandler, invoke,
 };
 pub use crate::core::{
-    async_handler, async_handler_with, component, context_provider, group, Align, Axis, BlurEdgeMode,
-    BlurStyle, Color, EdgeInsets, Element, ElementKey, ImageCachePolicy, ImageDecodePolicy,
-    ImageRequest, RenderCx, RootComponent, ShadowStyle, Size, State, StateSetter, Stroke,
-    TextAlign, TextStyle, TextWrap, UiAsyncContext, UiEventContext, UiRect, VisualStyle,
+    Align, Axis, BlurEdgeMode, BlurStyle, Color, EdgeInsets, Element, ElementKey, ImageCachePolicy,
+    ImageDecodePolicy, ImageRequest, ImageSampling, RenderCx, RootComponent, ShadowStyle, Size,
+    State, StateSetter, Stroke, TextAlign, TextStyle, TextWrap, UiAsyncContext, UiEventContext,
+    UiRect, VisualStyle, async_handler, async_handler_with, component, context_provider, group,
 };
 pub use crate::events::{
-    emit, listen, listen_async, listen_async_with, listen_with, AsyncEventHandler, Event,
-    EventFuture, EventKey, EventSubscription, InvalidEventKey,
+    AsyncEventHandler, Event, EventFuture, EventKey, EventSubscription, InvalidEventKey, emit,
+    listen, listen_async, listen_async_with, listen_with,
 };
 pub use crate::memory::{CachePriority, MemoryBudget, MemoryOptions, RetentionClass};
 pub use crate::platform::{
-    dpi::{ScaleContext, ScalePreference, WorkArea},
     InputSink, WakeHandle,
+    dpi::{ScaleContext, ScalePreference, WorkArea},
 };
 pub use crate::resources::Resources;
 pub use crate::session::UiSession;

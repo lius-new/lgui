@@ -20,6 +20,7 @@ pub(super) struct ParagraphCacheKey {
     style: TextStyle,
     families: Vec<&'static str>,
     rasterization: TextRasterization,
+    hinting: lgui_core::text::TextHinting,
 }
 
 pub(super) struct CachedParagraph {
@@ -38,6 +39,7 @@ pub(super) enum Slot {
 }
 
 pub struct SkiaCache {
+    pub(super) text_rendering: lgui_core::text::TextRenderingOptions,
     pub(super) entries: HashMap<String, CachedImage>,
     pub(super) paragraphs: HashMap<ParagraphCacheKey, CachedParagraph>,
     pub(super) slots: HashMap<EntryId, Slot>,
@@ -74,8 +76,27 @@ pub struct SkiaCacheStats {
 }
 
 impl SkiaCache {
+    pub(super) fn set_text_rendering(
+        &mut self,
+        options: lgui_core::text::TextRenderingOptions,
+    ) -> bool {
+        if self.text_rendering == options {
+            return false;
+        }
+        // Raster layers bake coverage into pixels. Keep reusable shaped text;
+        // its key records hinting independently of coverage curves.
+        for key in self.entries.keys().cloned().collect::<Vec<_>>() {
+            if self.remove_image(&key).is_some() {
+                self.evictions += 1;
+            }
+        }
+        self.text_rendering = options;
+        true
+    }
+
     pub fn new(budget_bytes: usize) -> Self {
         Self {
+            text_rendering: Default::default(),
             entries: HashMap::new(),
             paragraphs: HashMap::new(),
             slots: HashMap::new(),
@@ -115,6 +136,11 @@ impl SkiaCache {
             style,
             families: families.to_vec(),
             rasterization,
+            hinting: if rasterization == TextRasterization::Grayscale {
+                self.text_rendering.grayscale_hinting()
+            } else {
+                lgui_core::text::TextHinting::Slight
+            },
         };
         if let Some(entry) = self.paragraphs.get_mut(&key) {
             self.text_hits = self.text_hits.saturating_add(1);
@@ -124,11 +150,12 @@ impl SkiaCache {
         }
         self.text_misses = self.text_misses.saturating_add(1);
         let request = scene_text_layout_request(text, rect, style);
-        let mut paragraph = build_skia_paragraph_with_rasterization(
+        let mut paragraph = build_skia_paragraph_with_options(
             &request,
             self.fonts.clone(),
             Some(sk_color(style.color, style.alpha)),
             rasterization,
+            self.text_rendering,
         );
         paragraph.layout(rect.width().max(1.0));
         paint_cached_paragraph(canvas, rect, &paragraph, style.vertical_align);

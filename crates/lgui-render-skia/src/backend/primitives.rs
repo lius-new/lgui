@@ -1,7 +1,21 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn layer_surface(width: f32, height: f32) -> Result<Surface, String> {
-    surfaces::raster_n32_premul((width.ceil().max(1.0) as i32, height.ceil().max(1.0) as i32))
+    layer_surface_with_options(width, height, Default::default())
+}
+
+pub(super) fn layer_surface_with_options(
+    width: f32,
+    height: f32,
+    options: lgui_core::text::TextRenderingOptions,
+) -> Result<Surface, String> {
+    let info = ImageInfo::new_n32_premul(
+        (width.ceil().max(1.0) as i32, height.ceil().max(1.0) as i32),
+        None,
+    );
+    let props = TextRasterization::Grayscale.surface_props_with_options(options);
+    surfaces::raster(&info, None, Some(&props))
         .ok_or_else(|| "Skia could not create an offscreen layer".to_owned())
 }
 
@@ -49,6 +63,7 @@ pub(super) fn draw_image(
     image: &Image,
     rect: UiRect,
     fit: ImageFit,
+    sampling: lgui_core::core::ImageSampling,
     paint: Option<&Paint>,
 ) {
     let image_size = (image.width() as f32, image.height() as f32);
@@ -62,7 +77,13 @@ pub(super) fn draw_image(
         image,
         None,
         sk_rect(destination),
-        SamplingOptions::default(),
+        match sampling {
+            lgui_core::core::ImageSampling::Nearest => SamplingOptions::default(),
+            lgui_core::core::ImageSampling::Linear => skia_safe::FilterMode::Linear.into(),
+            lgui_core::core::ImageSampling::Mitchell => {
+                skia_safe::CubicResampler::mitchell().into()
+            }
+        },
         paint.unwrap_or(&default_paint),
     );
     if fit == ImageFit::Cover {

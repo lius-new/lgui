@@ -13,7 +13,7 @@ pub use model::{
     TextLayoutRequest, TextLineMetrics, TextMeasureRequest, TextMetrics, TextSpan,
     TextVerticalAlign,
 };
-pub use rendering::{TextRenderingError, TextRenderingOptions};
+pub use rendering::{TextHinting, TextRenderingError, TextRenderingOptions};
 pub use service::{TextSystem, TextSystemHandle, layout, measure, measure_width};
 
 pub(crate) use fonts::{FontAssets, font_assets, font_families};

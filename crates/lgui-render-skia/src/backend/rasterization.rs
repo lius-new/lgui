@@ -38,6 +38,20 @@ impl TextRasterization {
     }
 
     pub fn configure(self, style: &mut TextStyle) {
+        self.configure_with_options(style, Default::default());
+    }
+
+    pub fn configure_with_options(
+        self,
+        style: &mut TextStyle,
+        options: lgui_core::text::TextRenderingOptions,
+    ) {
+        use lgui_core::text::TextHinting;
+        let hinting = if self == Self::Grayscale {
+            options.grayscale_hinting()
+        } else {
+            TextHinting::Slight
+        };
         style
             .set_font_edging(match self {
                 Self::Grayscale => Edging::AntiAlias,
@@ -45,7 +59,12 @@ impl TextRasterization {
             })
             // Subpixel positioning and LCD antialiasing are separate controls.
             .set_subpixel(true)
-            .set_font_hinting(FontHinting::Slight);
+            .set_font_hinting(match hinting {
+                TextHinting::None => FontHinting::None,
+                TextHinting::Slight => FontHinting::Slight,
+                TextHinting::Normal => FontHinting::Normal,
+                TextHinting::Full => FontHinting::Full,
+            });
     }
 
     pub fn surface_props(self) -> SurfaceProps {
@@ -59,8 +78,8 @@ impl TextRasterization {
         )
     }
 
-    /// Apply explicit LCD coverage overrides. Parameter selection belongs to
-    /// the caller; grayscale fallback targets retain backend defaults.
+    /// Apply explicit coverage overrides for the actual raster mode.
+    /// Parameter selection belongs to the application.
     pub fn surface_props_with_options(
         self,
         options: lgui_core::text::TextRenderingOptions,
@@ -74,7 +93,14 @@ impl TextRasterization {
                 options.lcd_gamma().unwrap_or(defaults.text_gamma()),
             )
         } else {
-            defaults
+            SurfaceProps::new_with_text_properties(
+                SurfacePropsFlags::empty(),
+                PixelGeometry::Unknown,
+                options
+                    .grayscale_contrast()
+                    .unwrap_or(defaults.text_contrast()),
+                options.grayscale_gamma().unwrap_or(defaults.text_gamma()),
+            )
         }
     }
 
