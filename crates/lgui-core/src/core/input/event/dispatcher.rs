@@ -57,6 +57,13 @@ impl UiEventDispatcher {
     }
 
     fn semantic(&mut self, tree: &HostTree, input: SemanticInput) -> Vec<UiEvent> {
+        let target = match &input {
+            SemanticInput::Click(id) | SemanticInput::Focus(id) | SemanticInput::Blur(id) => id,
+            SemanticInput::SetValue { target, .. } | SemanticInput::Action { target, .. } => target,
+        };
+        if !tree.is_interactive(target) && !matches!(input, SemanticInput::Blur(_)) {
+            return Vec::new();
+        }
         match input {
             SemanticInput::Click(id) => tree
                 .hit_for_id(&id)
@@ -113,7 +120,12 @@ impl UiEventDispatcher {
         events
     }
 
-    fn pointer_down(&mut self, tree: &HostTree, pointer: PointerData, button: PointerButton) -> Vec<UiEvent> {
+    fn pointer_down(
+        &mut self,
+        tree: &HostTree,
+        pointer: PointerData,
+        button: PointerButton,
+    ) -> Vec<UiEvent> {
         let hit = tree.hit_test(pointer.point).filter(|hit| hit.policy.press);
         let current = hit.as_ref().map(|hit| hit.id.clone());
         let mut events = Vec::new();
@@ -139,7 +151,11 @@ impl UiEventDispatcher {
                     });
                 }
             }
-            events.push(UiEvent::PointerPressed { hit, pointer, button });
+            events.push(UiEvent::PointerPressed {
+                hit,
+                pointer,
+                button,
+            });
         } else if let Some(previous) = self.state.focused.take() {
             events.push(UiEvent::FocusChanged {
                 previous: Some(previous),

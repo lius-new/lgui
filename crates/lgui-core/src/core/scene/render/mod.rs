@@ -7,10 +7,10 @@ use std::{
 };
 
 use super::{
-    normalized_f32_bits, BlurStyle, Color, CompositingLayerSpec, CustomPaintStyle,
-    HostTree, IconStyle, ImageFit, ImageRequest, OverlayStyle, PathStyle, Point, StaticLayerSpec,
-    Stroke, TextStyle, UiId, UiImageSource, UiNode, UiNodeKind, UiPath, UiPathCommand, UiRect,
-    UiScale, VisualStyle,
+    BlurStyle, Color, CompositingLayerSpec, CustomPaintStyle, HostTree, IconStyle, ImageFit,
+    ImageRequest, OverlayStyle, PathStyle, Point, StaticLayerSpec, Stroke, TextStyle, UiId,
+    UiImageSource, UiNode, UiNodeKind, UiPath, UiPathCommand, UiRect, UiScale, VisualStyle,
+    normalized_f32_bits,
 };
 
 mod compiler;
@@ -29,8 +29,8 @@ pub use damage::compositing_layer_damage;
 pub(crate) use memory::estimate_scene_commands_bytes;
 pub use phase::commands_for_phase;
 pub use primitive::{RenderPhase, ScenePrimitive, ScenePrimitiveKind, ScrollRasterSpec};
-pub(crate) use scene::patch_compositing_layer_spec;
 pub use scene::Scene;
+pub(crate) use scene::patch_compositing_layer_spec;
 pub use scroll_cache::scroll_raster_command_snapshot_exists;
 pub(crate) use scroll_cache::set_scroll_raster_command_cache_budget;
 #[doc(hidden)]

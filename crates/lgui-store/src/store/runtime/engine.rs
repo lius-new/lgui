@@ -9,9 +9,9 @@ use crate::{
 };
 
 use super::super::{
+    StoreUnit,
     definition::StoreDefinition,
     subscription::{StoreNotification, StoreObserver, Subscription, SubscriptionToken},
-    StoreUnit,
 };
 use super::registry::StoreRegistry;
 

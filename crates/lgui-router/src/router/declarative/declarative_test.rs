@@ -1,18 +1,18 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use crate::{
+    RouterApplicationExt as _,
     application::{AppView, ApplicationContext},
     core::{
-        component, context_provider, group, text, Color, Element, HostTree, HostTreeBuilder,
-        InputEvent, InteractionRole, Point, PointerButton, PointerData, RenderCx, RootComponent,
-        TextStyle, UiElement, UiRect, UiRuntime, UiScale, VisualStyle,
+        Color, Element, HostTree, HostTreeBuilder, InputEvent, InteractionRole, Point,
+        PointerButton, PointerData, RenderCx, RootComponent, TextStyle, UiElement, UiRect,
+        UiRuntime, UiScale, VisualStyle, component, context_provider, group, text,
     },
     router::{Location, RouteMatchHooks as _},
     session::UiSession,
-    RouterApplicationExt as _,
 };
 
 use super::*;
@@ -138,24 +138,30 @@ fn matching_prefers_the_most_specific_complete_branch() {
 #[test]
 fn invalid_tree_shapes_fail_during_router_creation() {
     assert!(std::panic::catch_unwind(|| { create_router(route("relative", empty)) }).is_err());
-    assert!(std::panic::catch_unwind(|| {
-        create_router(route("/root", empty).children(route("/absolute", empty)))
-    })
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(|| {
+            create_router(route("/root", empty).children(route("/absolute", empty)))
+        })
+        .is_err()
+    );
     assert!(
         std::panic::catch_unwind(|| { create_router(route("/files/*path/more", empty)) }).is_err()
     );
-    assert!(std::panic::catch_unwind(|| {
-        create_router((
-            route("/community/articles/:article_id", empty),
-            scope("/community", route("articles/:id", empty)),
-        ))
-    })
-    .is_err());
-    assert!(std::panic::catch_unwind(|| {
-        create_router(route("/users/:id", empty).children(route("posts/:id", empty)))
-    })
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(|| {
+            create_router((
+                route("/community/articles/:article_id", empty),
+                scope("/community", route("articles/:id", empty)),
+            ))
+        })
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(|| {
+            create_router(route("/users/:id", empty).children(route("posts/:id", empty)))
+        })
+        .is_err()
+    );
 }
 
 struct NestedRouterRoot {
@@ -255,10 +261,11 @@ fn nested_outlet_preserves_parent_layout_lifecycle_across_child_navigation() {
     assert_eq!(feed_renders.load(Ordering::SeqCst), 1);
 
     router.navigate(Location::new("/community/events"));
-    assert!(!ui
-        .apply_pending_updates(&crate::core::HostTree::new())
-        .dirty_ids
-        .is_empty());
+    assert!(
+        !ui.apply_pending_updates(&crate::core::HostTree::new())
+            .dirty_ids
+            .is_empty()
+    );
     mount_nested_router(&ui, application, routes);
     ui.run_effects();
 
@@ -340,11 +347,13 @@ fn navigation_commits_the_new_nested_outlet_in_the_first_retained_frame() {
 
     session.render_view(&view, viewport, UiScale::ONE);
     session.runtime().run_effects();
-    assert!(session
-        .tree()
-        .nodes()
-        .iter()
-        .any(|node| node.text.as_deref() == Some("login")));
+    assert!(
+        session
+            .tree()
+            .nodes()
+            .iter()
+            .any(|node| node.text.as_deref() == Some("login"))
+    );
 
     session.handle_input(InputEvent::PointerDown {
         pointer: PointerData::mouse(Point::new(
@@ -358,22 +367,28 @@ fn navigation_commits_the_new_nested_outlet_in_the_first_retained_frame() {
     assert!(!session.apply_pending_updates().dirty_ids.is_empty());
     let commit = session.render_view(&view, viewport, UiScale::ONE);
 
-    assert!(session
-        .tree()
-        .nodes()
-        .iter()
-        .any(|node| node.text.as_deref() == Some("register")));
-    assert!(!session
-        .tree()
-        .nodes()
-        .iter()
-        .any(|node| node.text.as_deref() == Some("login")));
-    assert!(commit
-        .damage
-        .dirty
-        .effective_rects()
-        .iter()
-        .any(|dirty| dirty.intersect(outlet_bounds).is_some()));
+    assert!(
+        session
+            .tree()
+            .nodes()
+            .iter()
+            .any(|node| node.text.as_deref() == Some("register"))
+    );
+    assert!(
+        !session
+            .tree()
+            .nodes()
+            .iter()
+            .any(|node| node.text.as_deref() == Some("login"))
+    );
+    assert!(
+        commit
+            .damage
+            .dirty
+            .effective_rects()
+            .iter()
+            .any(|dirty| dirty.intersect(outlet_bounds).is_some())
+    );
 }
 
 #[test]
@@ -407,10 +422,11 @@ fn route_match_consumers_refresh_alongside_the_changed_outlet() {
     mount_nested_router(&ui, application.clone(), routes.clone());
     ui.run_effects();
     router.navigate(Location::new("/dialog"));
-    assert!(!ui
-        .apply_pending_updates(&crate::core::HostTree::new())
-        .dirty_ids
-        .is_empty());
+    assert!(
+        !ui.apply_pending_updates(&crate::core::HostTree::new())
+            .dirty_ids
+            .is_empty()
+    );
     mount_nested_router(&ui, application, routes);
 
     assert_eq!(metadata_renders.load(Ordering::SeqCst), 2);

@@ -18,4 +18,4 @@ pub use system_usage::{system_usage_sample_interval_ms, system_usage_snapshot};
 #[doc(hidden)]
 pub use tray::Win32TrayHost;
 #[cfg(feature = "tray-win32")]
-pub use tray::{taskbar_created_message, TrayIconHandle, Win32TrayIcon, TRAY_MESSAGE_ID};
+pub use tray::{TRAY_MESSAGE_ID, TrayIconHandle, Win32TrayIcon, taskbar_created_message};

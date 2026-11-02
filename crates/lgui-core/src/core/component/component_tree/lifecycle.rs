@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::storage::{node_mut, stable_hash, ComponentIdentity};
+use super::storage::{ComponentIdentity, node_mut, stable_hash};
 use super::*;
 
 impl ComponentTree {

@@ -3,8 +3,8 @@ use std::{
     sync::Arc,
 };
 
-use crate::core::{Observable, ObservableListener, RenderCx, UiEffect};
 use crate::StoreApplicationExt as _;
+use crate::core::{Observable, ObservableListener, RenderCx, UiEffect};
 
 use super::{
     StoreDefinition, StoreNotification, StoreObserver, StoreRuntime, StoreUnit, Subscription,

@@ -48,7 +48,7 @@ pub(super) fn project_command(command: &ScenePrimitive, scale: UiScale) -> Scene
         } => ScenePrimitive::Custom {
             id: id.clone(),
             rect: scale.physical_ui_rect(*rect),
-            key,
+            key: key.clone(),
             style: *style,
             phase: *phase,
         },
@@ -104,7 +104,7 @@ pub(super) fn project_command(command: &ScenePrimitive, scale: UiScale) -> Scene
         } => ScenePrimitive::Icon {
             id: id.clone(),
             rect: scale.physical_ui_rect(*rect),
-            key,
+            key: key.clone(),
             style: *style,
             phase: *phase,
         },

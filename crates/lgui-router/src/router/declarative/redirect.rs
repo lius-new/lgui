@@ -1,6 +1,6 @@
-use crate::{core::group, router::Location, RouterHooks as _};
+use crate::{RouterHooks as _, core::group, router::Location};
 
-use super::{route, Route};
+use super::{Route, route};
 
 /// Defines an absolute replace redirect. Redirects run after a committed render.
 pub fn redirect(pattern: &'static str, destination: &'static str) -> Route<Location> {

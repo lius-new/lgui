@@ -3,13 +3,13 @@ use std::sync::Arc;
 use crate::RouterApplicationExt as _;
 
 use crate::core::{
-    component, context_provider, group, Element, Observable, ObservableListener, RenderCx, UiEffect,
+    Element, Observable, ObservableListener, RenderCx, UiEffect, component, context_provider, group,
 };
 
 use super::{
     super::{
-        matcher::matches::{CurrentRouteMatch, RouteMatchesObservable},
         Location, RouteMatch, RouteMatches, Router,
+        matcher::matches::{CurrentRouteMatch, RouteMatchesObservable},
     },
     builder::{DeclarativeRouter, ResolvedBranch},
 };

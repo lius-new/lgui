@@ -21,11 +21,11 @@ mod resources;
 #[cfg(feature = "images")]
 use lgui_core::{core, memory};
 
+#[cfg(feature = "images")]
+pub use cache::{ImageCacheHandle, ImageCacheStats, request_image};
 #[cfg(test)]
 #[doc(hidden)]
 pub use cache::{load_url_image, prepare_image_bytes, validate_encoded_bytes};
-#[cfg(feature = "images")]
-pub use cache::{request_image, ImageCacheHandle, ImageCacheStats};
 #[cfg(feature = "svg")]
 pub use custom_paint::SvgRenderer;
 #[cfg(feature = "images")]
@@ -37,11 +37,11 @@ pub use lgui_core::core::{ImageCachePolicy, ImageDecodePolicy, ImageRequest};
 #[cfg(feature = "images")]
 pub use model::{AssetBytes, AssetError, ImageData, ImageSource, ImageStatus};
 #[cfg(feature = "images")]
-pub use resolver::{http_image_loader, HttpImageLoader};
-#[cfg(feature = "images")]
 pub use resolver::{
     AssetResolver, ImageLoader, RemoteImageLoader, RemoteImageLoaderHandle, RemoteImageResponse,
 };
+#[cfg(feature = "images")]
+pub use resolver::{HttpImageLoader, http_image_loader};
 #[cfg(feature = "images")]
 pub use resources::RenderResources;
 

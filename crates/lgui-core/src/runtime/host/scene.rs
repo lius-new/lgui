@@ -3,8 +3,9 @@ use super::*;
 impl HostRuntime {
     pub(super) fn scene_owner_source(&self, id: HostNodeId) -> Option<UiId> {
         let mut current = id;
-        let mut owner = (is_scene_drawable(self.node(current).kind)
-            || self.node(current).node.shadow.is_some())
+        let mut owner = (is_scene_drawable(self.node(current).kind.clone())
+            || self.node(current).node.shadow.is_some()
+            || self.node(current).node.overflow.clips())
         .then_some(current);
         while let Some(parent) = self.node(current).parent {
             let current_node = self.node(current);
@@ -14,7 +15,10 @@ impl HostRuntime {
             {
                 break;
             }
-            if is_scene_container(parent_node.kind) || parent_node.node.shadow.is_some() {
+            if is_scene_container(parent_node.kind.clone())
+                || parent_node.node.shadow.is_some()
+                || parent_node.node.overflow.clips()
+            {
                 owner = Some(parent);
             }
             current = parent;
@@ -242,8 +246,10 @@ pub(super) fn shadow_bounds(commands: &[ScenePrimitive]) -> Option<UiRect> {
 
 fn scene_owner_source_for_tree(tree: &HostTree, source: &UiId) -> Option<UiId> {
     let mut current = tree.node(source)?;
-    let mut owner =
-        (is_scene_drawable(current.kind) || current.shadow.is_some()).then(|| current.id.clone());
+    let mut owner = (is_scene_drawable(current.kind.clone())
+        || current.shadow.is_some()
+        || current.overflow.clips())
+    .then(|| current.id.clone());
     while let Some(parent_id) = current.parent.as_ref() {
         let Some(parent) = tree.node(parent_id) else {
             break;
@@ -253,7 +259,10 @@ fn scene_owner_source_for_tree(tree: &HostTree, source: &UiId) -> Option<UiId> {
         {
             break;
         }
-        if is_scene_container(parent.kind) || parent.shadow.is_some() {
+        if is_scene_container(parent.kind.clone())
+            || parent.shadow.is_some()
+            || parent.overflow.clips()
+        {
             owner = Some(parent.id.clone());
         }
         current = parent;

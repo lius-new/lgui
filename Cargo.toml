@@ -84,3 +84,7 @@ lgui-platform-win32 = { version = "0.2.2", path = "crates/lgui-platform-win32", 
 [[example]]
 name = "counter"
 required-features = ["renderer-skia-software", "widgets"]
+
+[[example]]
+name = "capabilities"
+required-features = ["renderer-skia-software", "widgets"]

@@ -1,8 +1,8 @@
 use std::any::Any;
 
 use crate::core::{
-    ComponentActionOutcome, ComponentState, UiAction, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION,
-    POINTER_UP_ACTION,
+    ComponentActionOutcome, ComponentState, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION,
+    POINTER_UP_ACTION, UiAction,
 };
 
 use super::{

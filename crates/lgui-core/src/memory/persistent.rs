@@ -186,7 +186,7 @@ impl FileCacheStore {
         let mut metadata = match read_metadata(&paths.metadata) {
             Ok(metadata) => metadata,
             Err(CacheStoreError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(None)
+                return Ok(None);
             }
             Err(_) => {
                 remove_paths(&paths);

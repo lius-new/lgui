@@ -49,9 +49,16 @@ fn instance_ids_are_unique() {
 #[test]
 fn transient_reservations_release_on_drop() {
     let governor = MemoryGovernor::new(test_memory_options());
-    let first = governor.try_reserve(256 * MIB).expect("first reservation fits");
-    let _second = governor.try_reserve(256 * MIB).expect("second reservation fits");
-    assert!(governor.try_reserve(1).is_none(), "512 MiB ceiling enforced");
+    let first = governor
+        .try_reserve(256 * MIB)
+        .expect("first reservation fits");
+    let _second = governor
+        .try_reserve(256 * MIB)
+        .expect("second reservation fits");
+    assert!(
+        governor.try_reserve(1).is_none(),
+        "512 MiB ceiling enforced"
+    );
     drop(first);
     assert!(governor.try_reserve(256 * MIB).is_some());
 }

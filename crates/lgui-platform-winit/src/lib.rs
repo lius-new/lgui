@@ -34,12 +34,12 @@ use lgui_core::{
         AppView, ApplicationBackend, ApplicationContext, ApplicationHandle, ApplicationTask,
     },
     core::{
-        dispatch_runtime_output, CursorIcon, ImeEvent, InputEvent, KeyLocation, KeyModifiers,
-        KeyState, KeyboardEvent, LogicalKey, PhysicalKey, PhysicalPoint, PhysicalRect,
-        PhysicalSize, Point, PointerButton, PointerData, PointerId, PointerKind, TouchPhase,
-        UiRect, UiScale, WheelDelta,
+        CursorIcon, ImeEvent, InputEvent, KeyLocation, KeyModifiers, KeyState, KeyboardEvent,
+        LogicalKey, PhysicalKey, PhysicalPoint, PhysicalRect, PhysicalSize, Point, PointerButton,
+        PointerData, PointerId, PointerKind, TouchPhase, UiRect, UiScale, WheelDelta,
+        dispatch_runtime_output,
     },
-    platform::dpi::{ScaleContext, WorkArea, BASE_DPI},
+    platform::dpi::{BASE_DPI, ScaleContext, WorkArea},
     session::UiSession,
     window::{ClosePolicy, WindowId, WindowMode, WindowOptions, WindowPosition},
 };
@@ -49,9 +49,9 @@ use lgui_diagnostics::{
     FrameSample,
 };
 #[cfg(all(feature = "tray-win32", target_os = "windows"))]
-use lgui_services::{dispatch_tray_action, TrayRegistration};
+use lgui_services::{TrayRegistration, dispatch_tray_action};
 
-use lgui_core::backend::{application_root_view, WindowCommand};
+use lgui_core::backend::{WindowCommand, application_root_view};
 pub use lgui_render_api::GraphicsPreference;
 use lgui_render_api::{FrameInfo, FrameReason, MemoryPressure};
 #[cfg(feature = "renderer-skia")]
@@ -87,7 +87,6 @@ mod window;
 mod window_options;
 
 pub use application::{WinitApplication, WinitApplicationError};
-pub use window_options::{WinitIconError, WinitWindowIcon, WinitWindowOptions};
 use event_loop::WinitHost;
 pub(crate) use event_loop::WinitUserEvent;
 use input::*;
@@ -99,6 +98,7 @@ use input::*;
 pub(crate) use renderer::WinitFrameTimings;
 use renderer::*;
 use window::*;
+pub use window_options::{WinitIconError, WinitWindowIcon, WinitWindowOptions};
 
 #[path = "winit_test.rs"]
 #[cfg(test)]

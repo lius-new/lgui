@@ -9,8 +9,8 @@
 //! example's own top-level window by title + process id and applies `DwmSetWindowAttribute`
 //! (Windows 11) with a `SetWindowCompositionAttribute` fallback (Windows 10).
 
-use lgui::prelude::*;
 use lgui::WinitApplication;
+use lgui::prelude::*;
 
 const WINDOW_TITLE: &str = "lgui acrylic window";
 
@@ -72,15 +72,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(target_os = "windows")]
 fn apply_acrylic_backdrop() {
     use std::ffi::c_void;
-    use windows::core::{s, w, PCWSTR};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWM_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW,
-        DWMWA_SYSTEMBACKDROP_TYPE,
+        DWM_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
+        DwmSetWindowAttribute,
     };
     use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
+    use windows::core::{PCWSTR, s, w};
 
     fn find_own_window() -> Option<HWND> {
         let title: Vec<u16> = WINDOW_TITLE

@@ -16,6 +16,8 @@ pub enum SemanticRole {
     Navigation,
     List,
     ListItem,
+    Tree,
+    TreeItem,
     Table,
     Row,
     Cell,
@@ -157,6 +159,9 @@ impl SemanticNode {
             .semantics
             .clone()
             .unwrap_or_else(|| inferred_semantics(node));
+        semantics.state.hidden |=
+            node.visibility != crate::core::Visibility::Visible || node.overflow_hidden;
+        semantics.state.disabled |= node.inert;
         if node.event_policy.focus && !semantics.actions.contains(&SemanticAction::Focus) {
             semantics.actions.push(SemanticAction::Focus);
         }
@@ -200,7 +205,7 @@ impl SemanticUpdate {
 }
 
 fn inferred_semantics(node: &UiNode) -> Semantics {
-    let role = match (node.kind, node.interaction) {
+    let role = match (&node.kind, node.interaction) {
         (UiNodeKind::Root, _) => SemanticRole::Window,
         (UiNodeKind::Text, _) => SemanticRole::Text,
         (UiNodeKind::Image | UiNodeKind::Icon, _) => SemanticRole::Image,

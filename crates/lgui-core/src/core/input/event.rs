@@ -1,8 +1,8 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf};
 
 use super::{
-    normalized_f32_bits, AnimProperty, AnimationRegistry, EventPolicy, HitResult, HostTree, Point,
-    UiId,
+    AnimProperty, AnimationRegistry, EventPolicy, HitResult, HostTree, Point, UiId,
+    normalized_f32_bits,
 };
 
 pub use keyboard_types::{

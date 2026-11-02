@@ -2,11 +2,7 @@ use std::hash::{Hash, Hasher};
 
 fn normalize(value: f32) -> f32 {
     if value.is_finite() {
-        if value == 0.0 {
-            0.0
-        } else {
-            value
-        }
+        if value == 0.0 { 0.0 } else { value }
     } else {
         0.0
     }

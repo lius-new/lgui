@@ -6,9 +6,9 @@ use windows::Win32::System::Registry::{
     RegCreateKeyExW, RegSetValueExW,
 };
 use windows::{
-    core::{HSTRING, PCWSTR},
     Data::Xml::Dom::{XmlDocument, XmlElement},
     UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager},
+    core::{HSTRING, PCWSTR},
 };
 
 use lgui_services::{Notification, NotificationService};

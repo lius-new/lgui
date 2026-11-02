@@ -4,12 +4,15 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
     let mut list = Scene::new();
     let mut skip = HashSet::new();
     for node in tree.nodes() {
+        if !tree.is_visible(&node.id) {
+            continue;
+        }
         if skip.contains(&node.id) {
             continue;
         }
         let command_start = list.commands.len();
         let include_popup_subtree = node.render_phase == RenderPhase::Popup;
-        if node.shadow.is_some() {
+        if node.shadow.is_some() || node.overflow.clips() {
             push_node_and_children(
                 tree,
                 node,
@@ -140,6 +143,7 @@ pub fn scene_root_ids(tree: &HostTree) -> Vec<UiId> {
             continue;
         }
         if node.shadow.is_some()
+            || node.overflow.clips()
             || matches!(
                 node.kind,
                 UiNodeKind::CompositingLayer
@@ -171,13 +175,16 @@ pub fn scene_root_ids(tree: &HostTree) -> Vec<UiId> {
 /// Compiles one retained scene root. Normal commits call this only for inserted or paint-dirty
 /// roots; unchanged roots keep their previously committed primitive vectors.
 pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
+    if !tree.is_visible(id) {
+        return Scene::new();
+    }
     let Some(node) = tree.node(id) else {
         return Scene::new();
     };
     let mut list = Scene::new();
     let mut skip = HashSet::new();
     let include_popup_subtree = node.render_phase == RenderPhase::Popup;
-    if node.shadow.is_some() {
+    if node.shadow.is_some() || node.overflow.clips() {
         push_node_and_children(
             tree,
             node,
@@ -306,7 +313,8 @@ fn compile_static_layer_commands(
     include_popup_subtree: bool,
 ) -> Vec<ScenePrimitive> {
     let mut commands = Vec::new();
-    for child_id in &root.children {
+    for child in tree.paint_children(root) {
+        let child_id = &child.id;
         compile_static_layer_child(tree, child_id, &mut commands, skip, include_popup_subtree);
     }
     commands
@@ -348,7 +356,8 @@ fn mark_node_and_descendants_skipped(
     include_popup_subtree: bool,
 ) {
     skip.insert(node.id.clone());
-    for child_id in &node.children {
+    for child in tree.paint_children(node) {
+        let child_id = &child.id;
         if let Some(child) = tree.node(child_id) {
             if child.render_phase == RenderPhase::Popup && !include_popup_subtree {
                 continue;
@@ -383,7 +392,8 @@ fn compile_clip_commands(
 ) -> Vec<ScenePrimitive> {
     let mut commands = Vec::new();
     let (offset_x, offset_y) = root.content_offset;
-    for child_id in &root.children {
+    for child in tree.paint_children(root) {
+        let child_id = &child.id;
         compile_clip_child(
             tree,
             child_id,
@@ -426,6 +436,24 @@ fn push_node_and_children(
     skip: &mut HashSet<UiId>,
     include_popup_subtree: bool,
 ) {
+    if !tree.is_visible(&node.id) {
+        return;
+    }
+    if node.overflow.clips() {
+        let mut source = node.clone();
+        source.overflow = crate::core::Overflow::Visible;
+        let mut nested = Vec::new();
+        push_node_and_children(tree, &source, &mut nested, skip, include_popup_subtree);
+        let signature = command_signature(&nested);
+        commands.push(ScenePrimitive::Clip {
+            id: node.id.clone(),
+            rect: node.layout_rect,
+            commands: nested,
+            child_signature: signature,
+            phase: node.render_phase,
+        });
+        return;
+    }
     if node.render_phase == RenderPhase::Popup && !include_popup_subtree {
         return;
     }
@@ -572,7 +600,8 @@ fn push_node_and_children(
     ) {
         push_node_commands_vec(commands, node);
     }
-    for child_id in &node.children {
+    for child in tree.paint_children(node) {
+        let child_id = &child.id;
         let Some(child) = tree.node(child_id) else {
             continue;
         };
@@ -612,7 +641,10 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
             });
         }
     }
-    if let (Some(text), Some(style)) = (node.text.clone(), node.text_style) {
+    if let (Some(text), Some(style)) = (
+        node.display_text.clone().or_else(|| node.text.clone()),
+        node.text_style,
+    ) {
         push(ScenePrimitive::Text {
             id: node.id.clone(),
             rect: node.layout_rect,
@@ -621,11 +653,11 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
             phase: node.render_phase,
         });
     }
-    if let UiNodeKind::Custom(key) = node.kind {
+    if let UiNodeKind::Custom(key) = &node.kind {
         push(ScenePrimitive::Custom {
             id: node.id.clone(),
             rect: node.layout_rect,
-            key,
+            key: key.clone(),
             style: node.custom_style,
             phase: node.render_phase,
         });
@@ -666,11 +698,11 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
         }
     }
     if let UiNodeKind::Icon = node.kind {
-        if let Some(key) = node.icon_key {
+        if let Some(key) = &node.icon_key {
             push(ScenePrimitive::Icon {
                 id: node.id.clone(),
                 rect: node.layout_rect,
-                key,
+                key: key.clone(),
                 style: node.icon_style,
                 phase: node.render_phase,
             });

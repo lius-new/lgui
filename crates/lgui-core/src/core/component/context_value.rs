@@ -1,5 +1,5 @@
 use std::{
-    any::{type_name, Any, TypeId},
+    any::{Any, TypeId, type_name},
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,

@@ -3,8 +3,8 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
     },
 };
 

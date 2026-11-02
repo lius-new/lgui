@@ -103,11 +103,7 @@ impl DirtyRegionSet {
     }
 
     pub fn rect_count(&self) -> usize {
-        if self.full {
-            1
-        } else {
-            self.rects.len()
-        }
+        if self.full { 1 } else { self.rects.len() }
     }
 
     pub fn dirty_area(&self) -> f64 {

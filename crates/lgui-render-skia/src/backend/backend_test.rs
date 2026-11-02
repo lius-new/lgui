@@ -207,7 +207,7 @@ fn primitive_inventory() -> Vec<ScenePrimitive> {
         ScenePrimitive::Custom {
             id: test_id("custom"),
             rect,
-            key: "test.custom",
+            key: "test.custom".into(),
             style: Some(CustomPaintStyle::new(Color::WHITE, 1.0)),
             phase: RenderPhase::Content,
         },
@@ -237,7 +237,7 @@ fn primitive_inventory() -> Vec<ScenePrimitive> {
         ScenePrimitive::Icon {
             id: test_id("icon"),
             rect,
-            key: "copy",
+            key: "copy".into(),
             style: IconStyle::new(Color::WHITE),
             phase: RenderPhase::Content,
         },
@@ -587,8 +587,14 @@ fn backdrop_blur_samples_pixels_behind_and_reacts_to_them() {
     draw_scene(&mut surface, &blue, true, &full);
 
     let center_after = pixel(&surface, 16, 16);
-    assert!(center_after[0] > 0, "backdrop must sample blue, got {center_after:?}");
-    assert_ne!(center, center_after, "backdrop must react to the background behind it");
+    assert!(
+        center_after[0] > 0,
+        "backdrop must sample blue, got {center_after:?}"
+    );
+    assert_ne!(
+        center, center_after,
+        "backdrop must react to the background behind it"
+    );
 }
 
 #[test]
@@ -617,7 +623,10 @@ fn backdrop_blur_softens_edges_and_respects_opacity() {
 
     // At the edge, full-opacity backdrop blur mixes the two colors (BGRA: [B, G, R, A]).
     let blurred = pixel(&surface, 16, 16);
-    assert!(blurred[0] > 0 && blurred[2] > 0, "blur must mix red and blue, got {blurred:?}");
+    assert!(
+        blurred[0] > 0 && blurred[2] > 0,
+        "blur must mix red and blue, got {blurred:?}"
+    );
 
     // At zero opacity the frost disappears and the raw sharp edge shows through.
     let mut scene = Scene::new();
@@ -635,8 +644,14 @@ fn backdrop_blur_softens_edges_and_respects_opacity() {
     draw_scene(&mut surface, &scene, true, &full);
 
     let raw = pixel(&surface, 16, 16);
-    assert_eq!(raw[0], 255, "zero opacity must reveal the raw blue edge, got {raw:?}");
-    assert_eq!(raw[2], 0, "zero opacity must reveal the raw blue edge, got {raw:?}");
+    assert_eq!(
+        raw[0], 255,
+        "zero opacity must reveal the raw blue edge, got {raw:?}"
+    );
+    assert_eq!(
+        raw[2], 0,
+        "zero opacity must reveal the raw blue edge, got {raw:?}"
+    );
 }
 
 #[test]
@@ -675,12 +690,17 @@ fn icons_snap_to_the_device_pixel_grid() {
         scene.push(ScenePrimitive::Icon {
             id: test_id("snapped-icon"),
             rect,
-            key: "copy",
+            key: "copy".into(),
             style: IconStyle::new(Color::WHITE),
             phase: RenderPhase::Content,
         });
         let mut surface = SkiaSoftwareSurface::new(TEST_CACHE_BUDGET);
-        draw_scene(&mut surface, &scene, true, &[PhysicalRect::new(0, 0, 32, 32)]);
+        draw_scene(
+            &mut surface,
+            &scene,
+            true,
+            &[PhysicalRect::new(0, 0, 32, 32)],
+        );
         surface
     }
 
@@ -760,14 +780,18 @@ fn paragraph_layout_exposes_bidi_carets_selection_and_hit_testing() {
     assert!(layout.width > 0.0);
     assert!(layout.caret_rect(0).is_some());
     assert!(layout.caret_rect(request.text.chars().count()).is_some());
-    assert!(layout
-        .clusters()
-        .iter()
-        .any(|cluster| cluster.direction == lgui_core::text::TextDirection::LeftToRight));
-    assert!(layout
-        .clusters()
-        .iter()
-        .any(|cluster| cluster.direction == lgui_core::text::TextDirection::RightToLeft));
+    assert!(
+        layout
+            .clusters()
+            .iter()
+            .any(|cluster| cluster.direction == lgui_core::text::TextDirection::LeftToRight)
+    );
+    assert!(
+        layout
+            .clusters()
+            .iter()
+            .any(|cluster| cluster.direction == lgui_core::text::TextDirection::RightToLeft)
+    );
     assert!(!layout.selection_rects(1..6).is_empty());
     let cluster = layout.clusters().last().unwrap();
     let hit = layout.hit_test(
@@ -809,10 +833,12 @@ fn paragraph_clusters_keep_combining_sequences_together() {
         400,
     );
     let layout = lgui_core::text::TextSystem::layout(&SkiaTextSystem, &request).unwrap();
-    assert!(layout
-        .clusters()
-        .iter()
-        .any(|cluster| cluster.range == (0..2)));
+    assert!(
+        layout
+            .clusters()
+            .iter()
+            .any(|cluster| cluster.range == (0..2))
+    );
 }
 
 #[test]
@@ -910,7 +936,6 @@ fn visual_center_aligns_ink_closer_to_bounds_center() {
         "CapCenter {cap_center} should sit between XCenter {x_center} and line-centered {line_center}"
     );
 }
-
 
 #[test]
 fn optimized_geometry_preserves_native_carets_and_measurement() {

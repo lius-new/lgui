@@ -1,11 +1,11 @@
 use std::future::Future;
 
-use crate::core::{async_handler, UiAsyncContext, UiEventContext};
 use crate::core::{
     AnimProperty, AnimationBinding, Element, ElementKey, ElementRenderCx, InteractionRole,
     IntoElementContent, SemanticAction, SemanticRole, Semantics, TextStyle, UiElement,
     UiEventHandler, UiRect, VisualStyle,
 };
+use crate::core::{UiAsyncContext, UiEventContext, async_handler};
 
 #[derive(Clone, Copy)]
 pub struct ButtonStyle {

@@ -1,12 +1,12 @@
 use std::{borrow::Cow, future::Future, sync::Arc};
 
 use super::{
-    async_handler, AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec,
-    CursorIcon, CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, ImageRequest,
+    AnimationBinding, BlurStyle, Color, ComponentId, CompositingLayerSpec, CursorIcon,
+    CustomPaintStyle, EventPolicy, HostTreeBuilder, IconStyle, ImageFit, ImageRequest,
     InteractionRole, LayoutSpec, OverlayStyle, PathStyle, RenderPhase, ScrollRasterSpec,
     StaticLayerSpec, TextStyle, UiAction, UiAsyncContext, UiEventContext, UiEventHandler,
     UiEventKind, UiEventPayload, UiId, UiImageSource, UiInputEventHandler, UiNode, UiNodeKind,
-    UiPath, UiRect, VisualStyle,
+    UiPath, UiRect, VisualStyle, async_handler,
 };
 
 #[derive(Clone)]
@@ -33,6 +33,13 @@ impl UiComponent for UiElement {
 }
 
 impl UiElement {
+    pub(crate) fn from_node(node: UiNode) -> Self {
+        Self {
+            node,
+            children: Arc::new(Vec::new()),
+            component_boundary: None,
+        }
+    }
     pub fn new(id: UiId, kind: UiNodeKind, rect: UiRect) -> Self {
         Self {
             node: UiNode::new(id, kind, rect),
@@ -80,14 +87,14 @@ impl UiElement {
         Self::new(id, UiNodeKind::Text, rect).text_content(text, style)
     }
 
-    pub fn custom(id: UiId, rect: UiRect, key: &'static str) -> Self {
-        Self::new(id, UiNodeKind::Custom(key), rect)
+    pub fn custom(id: UiId, rect: UiRect, key: impl Into<Arc<str>>) -> Self {
+        Self::new(id, UiNodeKind::Custom(key.into()), rect)
     }
 
     pub fn custom_paint(
         id: UiId,
         rect: UiRect,
-        key: &'static str,
+        key: impl Into<Arc<str>>,
         style: CustomPaintStyle,
     ) -> Self {
         Self::custom(id, rect, key).custom_style(style)
@@ -115,7 +122,7 @@ impl UiElement {
         Self::new(id, UiNodeKind::Image, rect).image_request(request, fit)
     }
 
-    pub fn icon(id: UiId, rect: UiRect, key: &'static str) -> Self {
+    pub fn icon(id: UiId, rect: UiRect, key: impl Into<Arc<str>>) -> Self {
         Self::new(id, UiNodeKind::Icon, rect).icon_key(key)
     }
 
@@ -127,12 +134,7 @@ impl UiElement {
         Self::new(id, UiNodeKind::BackdropBlur, rect).backdrop_blur_style(style)
     }
 
-    pub fn backdrop_blur_path(
-        id: UiId,
-        rect: UiRect,
-        path: UiPath,
-        style: BlurStyle,
-    ) -> Self {
+    pub fn backdrop_blur_path(id: UiId, rect: UiRect, path: UiPath, style: BlurStyle) -> Self {
         Self::new(id, UiNodeKind::BackdropBlurPath, rect)
             .path_content(path, PathStyle::default())
             .backdrop_blur_style(style)
@@ -231,9 +233,7 @@ impl UiElement {
     /// keeps its hover styling and `on_click` (which should toggle maximize)
     /// on every platform.
     pub fn window_maximize_button(mut self) -> Self {
-        self.node = self
-            .node
-            .interaction(InteractionRole::WindowMaximizeButton);
+        self.node = self.node.interaction(InteractionRole::WindowMaximizeButton);
         self
     }
 
@@ -355,6 +355,48 @@ impl UiElement {
         self.node = self.node.layout(layout);
         self
     }
+    pub fn public_id(mut self, id: impl Into<Arc<str>>) -> Self {
+        self.node = self.node.public_id(id);
+        self
+    }
+    pub fn position(mut self, v: crate::core::Position) -> Self {
+        self.node = self.node.position(v);
+        self
+    }
+    pub fn visibility(mut self, v: crate::core::Visibility) -> Self {
+        self.node = self.node.visibility(v);
+        self
+    }
+    pub fn overflow(mut self, v: crate::core::Overflow) -> Self {
+        self.node = self.node.overflow(v);
+        self
+    }
+    pub fn z_index(mut self, v: i32) -> Self {
+        self.node = self.node.z_index(v);
+        self
+    }
+    pub fn inert(mut self, v: bool) -> Self {
+        self.node = self.node.inert(v);
+        self
+    }
+
+    pub fn size_constraints(mut self, constraints: crate::core::SizeConstraints) -> Self {
+        self.node = self.node.size_constraints(constraints);
+        self
+    }
+
+    pub fn flex_item(mut self, item: crate::core::FlexItem) -> Self {
+        self.node = self.node.flex_item(item);
+        self
+    }
+    pub fn dock(mut self, side: crate::core::DockSide) -> Self {
+        self.node = self.node.dock(side);
+        self
+    }
+    pub fn grid_cell(mut self, cell: crate::core::GridCell) -> Self {
+        self.node = self.node.grid_cell(cell);
+        self
+    }
 
     pub fn style(mut self, style: VisualStyle) -> Self {
         self.node = self.node.style(style);
@@ -386,7 +428,7 @@ impl UiElement {
         self
     }
 
-    pub fn icon_key(mut self, key: &'static str) -> Self {
+    pub fn icon_key(mut self, key: impl Into<Arc<str>>) -> Self {
         self.node = self.node.icon(key);
         self
     }

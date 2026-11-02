@@ -2,8 +2,8 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
     },
 };
 

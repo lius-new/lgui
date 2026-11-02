@@ -145,6 +145,13 @@ impl Element {
         self.key.explicit = Some(stable_hash(key.as_ref()));
         self
     }
+    pub fn key_if_absent(self, key: impl AsRef<str>) -> Self {
+        if self.key.explicit.is_none() {
+            self.key(key)
+        } else {
+            self
+        }
+    }
 
     #[doc(hidden)]
     pub fn source_key(mut self, key: ElementKey) -> Self {
@@ -369,9 +376,64 @@ impl ElementKey {
 }
 
 impl Element {
-    pub(super) fn with_layout(mut self, layout: LayoutSpec) -> Self {
+    /// Sets child sizing without changing its identity or its container layout.
+    pub fn public_id(mut self, id: impl Into<Arc<str>>) -> Self {
+        let id = id.into();
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).public_id(id));
+        self
+    }
+
+    /// Sets child sizing without changing its identity or its container layout.
+    pub fn size_constraints(mut self, constraints: crate::core::SizeConstraints) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).size_constraints(constraints));
+        self
+    }
+
+    pub fn layout(mut self, layout: crate::core::LayoutSpec) -> Self {
         let render = self.render;
         self.render = Box::new(move |cx| render(cx).layout(layout));
+        self
+    }
+    pub fn position(mut self, v: crate::core::Position) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).position(v));
+        self
+    }
+    pub fn visibility(mut self, v: crate::core::Visibility) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).visibility(v));
+        self
+    }
+    pub fn overflow(mut self, v: crate::core::Overflow) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).overflow(v));
+        self
+    }
+    pub fn z_index(mut self, v: i32) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).z_index(v));
+        self
+    }
+    pub fn inert(mut self, v: bool) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).inert(v));
+        self
+    }
+    pub fn flex_item(mut self, item: crate::core::FlexItem) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).flex_item(item));
+        self
+    }
+    pub fn dock(mut self, side: crate::core::DockSide) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).dock(side));
+        self
+    }
+    pub fn grid_cell(mut self, cell: crate::core::GridCell) -> Self {
+        let render = self.render;
+        self.render = Box::new(move |cx| render(cx).grid_cell(cell));
         self
     }
 }

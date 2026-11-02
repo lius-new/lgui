@@ -21,7 +21,7 @@ impl SvgIconSource {
 
 #[derive(Clone, Default)]
 pub struct SvgIconRegistry {
-    icons: HashMap<&'static str, SvgIconSource>,
+    icons: HashMap<Arc<str>, SvgIconSource>,
 }
 
 impl SvgIconRegistry {
@@ -29,20 +29,20 @@ impl SvgIconRegistry {
         Self::default()
     }
 
-    pub fn with_icon(mut self, key: &'static str, svg: impl Into<SvgIconSource>) -> Self {
-        self.icons.insert(key, svg.into());
+    pub fn with_icon(mut self, key: impl Into<Arc<str>>, svg: impl Into<SvgIconSource>) -> Self {
+        self.icons.insert(key.into(), svg.into());
         self
     }
 
-    pub fn with_icon_bytes(mut self, key: &'static str, bytes: &'static [u8]) -> Self {
+    pub fn with_icon_bytes(mut self, key: impl Into<Arc<str>>, bytes: &'static [u8]) -> Self {
         self.icons
-            .insert(key, SvgIconSource::Bytes(Cow::Borrowed(bytes)));
+            .insert(key.into(), SvgIconSource::Bytes(Cow::Borrowed(bytes)));
         self
     }
 
-    pub fn with_icon_text(mut self, key: &'static str, svg: &'static str) -> Self {
+    pub fn with_icon_text(mut self, key: impl Into<Arc<str>>, svg: &'static str) -> Self {
         self.icons
-            .insert(key, SvgIconSource::Text(Cow::Borrowed(svg)));
+            .insert(key.into(), SvgIconSource::Text(Cow::Borrowed(svg)));
         self
     }
 

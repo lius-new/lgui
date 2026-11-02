@@ -13,9 +13,14 @@ mod memory {
 }
 
 pub mod theme;
+mod value;
+pub use value::WidgetValue;
 #[cfg(feature = "widgets")]
 pub mod widgets;
 
-pub use theme::{ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens};
+pub use theme::{
+    ColorTokens, MotionTokens, RadiusTokens, SpacingTokens, ThemeContext, ThemeTokens,
+    TypographyTokens,
+};
 #[cfg(feature = "widgets")]
 pub use widgets::*;

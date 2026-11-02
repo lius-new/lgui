@@ -7,11 +7,11 @@ use crate::{
 
 use super::{
     super::{
+        Location, RouteId,
         matcher::{
             matches::ErasedRouteHandle,
             pattern::{MatchStep, PathPattern},
         },
-        Location, RouteId,
     },
     outlet,
 };
@@ -60,9 +60,9 @@ impl<R> Route<R> {
 pub fn route(
     pattern: &'static str,
     view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-        + Send
-        + Sync
-        + 'static,
+    + Send
+    + Sync
+    + 'static,
 ) -> Route<Location> {
     let pattern = PathPattern::parse(pattern);
     let source = pattern.source;
@@ -81,9 +81,9 @@ pub fn route(
 /// Defines the default child for a parent path.
 pub fn index(
     view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-        + Send
-        + Sync
-        + 'static,
+    + Send
+    + Sync
+    + 'static,
 ) -> Route<Location> {
     Route {
         pattern: "<index>",
@@ -108,9 +108,9 @@ pub fn index(
 /// selected descendant belongs.
 pub fn layout<R>(
     view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-        + Send
-        + Sync
-        + 'static,
+    + Send
+    + Sync
+    + 'static,
     children: impl IntoRoutes<R>,
 ) -> Route<R> {
     Route {
@@ -131,9 +131,9 @@ pub fn scope(pattern: &'static str, children: impl IntoRoutes<Location>) -> Rout
 /// Defines a sibling fallback. Normal siblings are always attempted before it.
 pub fn not_found(
     view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-        + Send
-        + Sync
-        + 'static,
+    + Send
+    + Sync
+    + 'static,
 ) -> Route<Location> {
     Route {
         pattern: "<not-found>",

@@ -3,7 +3,7 @@ use super::{
     ComponentStateStore, ComponentTree, CompositingLayerAnimation, CompositingLayerSpec,
     ContextRegistry, CursorIcon, CustomPaintStyle, EffectRegistry, HookStateStore, IconStyle,
     ImageFit, KeyboardEvent, LayoutSpec, OverlayStyle, PathStyle, PhysicalSize, Point, PointerData,
-    RenderCx, RenderPhase, Scene, ScrollRasterSpec, Semantics, ShadowStyle, Size, StaticLayerSpec,
+    RenderCx, RenderPhase, Scene, ScrollRasterSpec, Semantics, ShadowStyle, StaticLayerSpec,
     TextStyle, UiAction, UiActionBinding, UiActionHandler, UiAsyncContext, UiEvent, UiEventContext,
     UiEventHandler, UiEventKind, UiEventPayload, UiHandlerEvent, UiId, UiInputEventBinding,
     UiInputEventHandler, UiInteractionState, UiPath, UiPathCommand, UiRect, UiRenderContext,
@@ -11,10 +11,20 @@ use super::{
     compile_scene,
 };
 
+mod behaviors;
 mod builder;
+#[cfg(test)]
+mod capabilities_test;
 mod declarative;
+mod description;
 mod element;
 mod node;
+mod public;
+pub use description::{
+    DescriptionError, DescriptionTree, DescriptionUpdate, NodeDescription, NodeProperties,
+    described, described_with_events,
+};
+pub use public::{IdentifiedEvent, PublicNode, PublicSemantics};
 mod tree;
 
 pub use builder::{HostProjectionMetrics, HostTreeBuilder, RootComponent};

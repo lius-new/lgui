@@ -1,8 +1,8 @@
 use std::{future::Future, ops::Range, sync::Arc};
 
 use super::{
-    ActionId, KeyboardEvent, PointerButton, PointerData, UiAction, UiAsyncContext,
-    UiEventContext, UiId, WheelDelta,
+    ActionId, KeyboardEvent, PointerButton, PointerData, UiAction, UiAsyncContext, UiEventContext,
+    UiId, WheelDelta,
 };
 
 pub type UiEventHandler = Arc<dyn Fn(&mut UiEventContext) + Send + Sync>;
@@ -50,10 +50,25 @@ pub enum UiEventKind {
     Focus,
     Blur,
     Change,
+    OutsidePointer,
+    CloseRequested,
+    Visibility,
+    Selection,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiEventPayload {
+    OutsidePointer {
+        pointer: PointerData,
+        button: PointerButton,
+    },
+    CloseRequested,
+    Visibility {
+        visible: bool,
+    },
+    Selection {
+        range: Range<usize>,
+    },
     Click,
     PointerDown {
         pointer: PointerData,
@@ -93,6 +108,10 @@ pub enum UiEventPayload {
 impl UiEventPayload {
     pub const fn kind(&self) -> UiEventKind {
         match self {
+            Self::OutsidePointer { .. } => UiEventKind::OutsidePointer,
+            Self::CloseRequested => UiEventKind::CloseRequested,
+            Self::Visibility { .. } => UiEventKind::Visibility,
+            Self::Selection { .. } => UiEventKind::Selection,
             Self::Click => UiEventKind::Click,
             Self::PointerDown { .. } => UiEventKind::PointerDown,
             Self::PointerMove { .. } => UiEventKind::PointerMove,

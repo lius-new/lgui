@@ -1,14 +1,14 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 use std::{
     any::Any,
-    panic::{catch_unwind, AssertUnwindSafe},
+    panic::{AssertUnwindSafe, catch_unwind},
 };
 
 use super::*;
-use crate::core::{component, context_provider, group, ComponentState, UiRuntime};
+use crate::core::{ComponentState, UiRuntime, component, context_provider, group};
 
 struct CountingRoot {
     executions: Arc<AtomicUsize>,
@@ -166,6 +166,64 @@ fn identical_dirty_component_does_not_report_projection_changes() {
     assert!(changes.changed.is_empty());
     assert!(changes.removed.is_empty());
     assert!(!changes.structure_changed);
+}
+
+struct PublicReplacementRoot(usize, bool);
+
+impl RootComponent for PublicReplacementRoot {
+    fn render_root(self, _cx: &mut RenderCx<'_, '_>) -> crate::core::Element {
+        let rect = UiRect::new(0.0, 0.0, 30.0, 10.0);
+        let mut root = group(rect);
+        for _ in 0..self.0 {
+            root = root.child(group(rect));
+        }
+        root = root.child(group(rect).public_id("status"));
+        if self.1 {
+            root = root.child(group(rect).public_id("status"));
+        }
+        root
+    }
+}
+
+fn mount_public_replacement(
+    runtime: &UiRuntime,
+    tree: HostTree,
+    count: usize,
+    duplicate: bool,
+) -> HostTree {
+    let mut builder = HostTreeBuilder::from_retained(tree);
+    builder.mount(
+        PublicReplacementRoot(count, duplicate),
+        UiRect::new(0.0, 0.0, 30.0, 10.0),
+        &runtime.interaction_state(),
+        runtime.animations(),
+        runtime.component_states(),
+        runtime.component_tree(),
+        runtime.contexts(),
+        runtime.hook_states(),
+        runtime.hook_updates(),
+        runtime.task_spawner(),
+        runtime.effects(),
+        UiScale::ONE,
+    );
+    builder.finish()
+}
+
+#[test]
+fn public_id_can_move_between_unkeyed_nodes_during_retained_render() {
+    let runtime = UiRuntime::new();
+    let mut tree = HostTree::new();
+    for count in [0, 2, 1, 0, 3] {
+        tree = mount_public_replacement(&runtime, tree, count, false);
+        assert_eq!(tree.nodes().len(), count + 2);
+        assert!(tree.public_node("status").is_some());
+    }
+}
+
+#[test]
+#[should_panic(expected = "duplicate public node identifier: status")]
+fn retained_render_still_rejects_two_live_nodes_with_the_same_public_id() {
+    mount_public_replacement(&UiRuntime::new(), HostTree::new(), 0, true);
 }
 
 #[derive(Clone, Default)]

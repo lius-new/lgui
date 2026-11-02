@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::super::{location::percent_decode, Location};
+use super::super::{Location, location::percent_decode};
 
 pub(in crate::router) struct MatchStep {
     pub next_offset: usize,

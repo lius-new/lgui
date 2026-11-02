@@ -76,7 +76,10 @@ pub mod theme {
     pub use lgui_widgets::theme::*;
 }
 #[cfg(feature = "theme")]
-pub use lgui_widgets::{ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens};
+pub use lgui_widgets::{
+    ColorTokens, MotionTokens, RadiusTokens, SpacingTokens, ThemeContext, ThemeTokens,
+    TypographyTokens, WidgetValue,
+};
 
 #[cfg(feature = "widgets")]
 pub mod widgets {
@@ -135,7 +138,8 @@ pub mod prelude {
     pub use lgui_widgets::widgets::*;
     #[cfg(feature = "theme")]
     pub use lgui_widgets::{
-        ColorTokens, SpacingTokens, ThemeContext, ThemeTokens, TypographyTokens,
+        ColorTokens, MotionTokens, RadiusTokens, SpacingTokens, ThemeContext, ThemeTokens,
+        TypographyTokens, WidgetValue,
     };
 }
 

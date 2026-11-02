@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use super::{CacheHooks, MemoryOptions};
@@ -104,18 +104,14 @@ impl MemoryGovernor {
             if next > TRANSIENT_HARD_BYTES {
                 return None;
             }
-            match reserved.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match reserved.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => {
                     return Some(MemoryReservation {
                         bytes,
                         accounted_bytes: bytes,
                         reserved: Arc::clone(reserved),
-                    })
+                    });
                 }
                 Err(actual) => current = actual,
             }

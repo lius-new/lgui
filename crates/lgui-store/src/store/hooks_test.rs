@@ -1,11 +1,11 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use crate::core::{
-    component, content_text, context_provider, HostTreeBuilder, RenderCx, RootComponent, UiRect,
-    UiRuntime, UiScale,
+    HostTreeBuilder, RenderCx, RootComponent, UiRect, UiRuntime, UiScale, component, content_text,
+    context_provider,
 };
 
 use super::*;
@@ -97,10 +97,11 @@ fn selectors_ignore_unrelated_fields_and_bound_actions_batch_component_updates()
     assert_eq!(executions.load(Ordering::SeqCst), 1);
 
     stores.update_defined(COUNTER, "label", |store| store.label = "renamed");
-    assert!(ui
-        .apply_pending_updates(&crate::core::HostTree::new())
-        .dirty_ids
-        .is_empty());
+    assert!(
+        ui.apply_pending_updates(&crate::core::HostTree::new())
+            .dirty_ids
+            .is_empty()
+    );
     mount(
         &ui,
         context.clone(),

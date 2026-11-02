@@ -39,10 +39,36 @@ impl HostRuntime {
         interaction: &UiInteractionState,
         viewport: UiRect,
         invalidations: &mut InvalidationSet,
-        changes: crate::core::ProjectionChanges,
+        mut changes: crate::core::ProjectionChanges,
     ) -> HostCommit {
         #[cfg(feature = "diagnostics-timing")]
         let change_scan_started = Instant::now();
+        // A hidden ordinary Group owns no scene root. Its retained descendants
+        // must be invalidated even when their own paint properties are unchanged.
+        let mut visibility_sources = HashSet::new();
+        fn descendants(tree: &HostTree, id: &UiId, out: &mut HashSet<UiId>) {
+            if !out.insert(id.clone()) {
+                return;
+            }
+            if let Some(node) = tree.node(id) {
+                for child in &node.children {
+                    descendants(tree, child, out);
+                }
+            }
+        }
+        for source in &changes.changed {
+            if let (Some(id), Some(next)) = (self.sources.get(source), tree.node(source)) {
+                let previous = &self.node(*id).node;
+                if previous.visibility != next.visibility
+                    || previous.overflow_hidden != next.overflow_hidden
+                    || previous.inert != next.inert
+                    || previous.parent != next.parent
+                {
+                    descendants(tree, source, &mut visibility_sources);
+                }
+            }
+        }
+        changes.changed.extend(visibility_sources.iter().cloned());
         let semantic_changed = changes.changed.clone();
         let semantic_removed = changes.removed.clone();
         let semantic_full = !self.initialized;
@@ -72,6 +98,7 @@ impl HostRuntime {
                 || previous.kind != next.kind
                 || previous.render_phase != next.render_phase
                 || previous.shadow.is_some() != next.shadow.is_some()
+                || previous.overflow.clips() != next.overflow.clips()
         });
         let scene_structure_changed =
             changes.structure_changed || !changes.removed.is_empty() || scene_topology_changed;
@@ -161,6 +188,7 @@ impl HostRuntime {
             let old_interaction = existing.interaction;
             let next_paint = effective_node_paint_bounds(node);
             let compositing_only = was_mounted
+                && !visibility_sources.contains(&node.id)
                 && compositing_spec_only_changed(&existing.node, node)
                 && !tree.has_shadow_ancestor(&node.id);
 
@@ -183,7 +211,9 @@ impl HostRuntime {
                         dirty_scene_sources.insert(node.id.clone());
                     }
                 }
-                if paint_props_changed(&existing.node, node) {
+                if paint_props_changed(&existing.node, node)
+                    || visibility_sources.contains(&node.id)
+                {
                     mutations.push(HostMutation::UpdateProps {
                         id,
                         source: node.id.clone(),
@@ -234,7 +264,7 @@ impl HostRuntime {
             current.parent = parent;
             current.mounted = true;
             current.children = children;
-            current.kind = node.kind;
+            current.kind = node.kind.clone();
             current.layout_bounds = node.layout_rect;
             current.paint_bounds = next_paint;
             current.interaction = flags;

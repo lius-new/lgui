@@ -1,9 +1,12 @@
-use std::{
-    collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
-};
+use std::collections::{HashMap, HashSet};
 
-use super::{EdgeInsets, HostTree, Size, UiId, UiRect};
+use super::SizeConstraints;
+use super::measure::{
+    IntrinsicInput, MeasurementCache, content_rect, desired_size, intrinsic_input, rect_size,
+};
+#[cfg(test)]
+use super::{EdgeInsets, Size};
+use super::{HostTree, LayoutSpec, UiId, UiRect};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Axis {
@@ -19,80 +22,9 @@ pub enum Align {
     Stretch,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum LayoutSpec {
-    Absolute,
-    Stack {
-        axis: Axis,
-        gap: f32,
-        padding: EdgeInsets,
-        align: Align,
-    },
-    Fixed(Size),
-}
-
-impl Eq for LayoutSpec {}
-
-impl Hash for LayoutSpec {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
-        match self {
-            Self::Absolute => {}
-            Self::Stack {
-                axis,
-                gap,
-                padding,
-                align,
-            } => {
-                axis.hash(state);
-                gap.to_bits().hash(state);
-                padding.hash(state);
-                align.hash(state);
-            }
-            Self::Fixed(size) => size.hash(state),
-        }
-    }
-}
-
-impl Default for LayoutSpec {
-    fn default() -> Self {
-        Self::Absolute
-    }
-}
-
 pub fn apply_layout(tree: &mut HostTree, root: UiId) {
-    let Some(root_node) = tree.node(&root).cloned() else {
-        return;
-    };
-    let LayoutSpec::Stack {
-        axis,
-        gap,
-        padding,
-        align,
-    } = root_node.layout
-    else {
-        return;
-    };
-    let children = root_node.children.clone();
-    let mut cursor = match axis {
-        Axis::Horizontal => root_node.layout_rect.left + padding.left,
-        Axis::Vertical => root_node.layout_rect.top + padding.top,
-    };
-    let content = root_node.layout_rect.inset(padding);
-    for child_id in children {
-        let Some(child) = tree.node_mut(&child_id) else {
-            continue;
-        };
-        let size = Size::new(child.layout_rect.width(), child.layout_rect.height());
-        let rect = stack_child_rect(content, axis, align, cursor, size);
-        child.layout_rect = rect;
-        child.hit_rect = rect;
-        child.paint_bounds = rect;
-        cursor += match axis {
-            Axis::Horizontal => size.width + gap,
-            Axis::Vertical => size.height + gap,
-        };
-    }
+    layout_subtree(tree, root);
+    finish_layout(tree);
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -115,6 +47,16 @@ struct LayoutInput {
     parent: Option<UiId>,
     children: Vec<UiId>,
     spec: LayoutSpec,
+    sizing: Option<SizeConstraints>,
+    item: super::LayoutItem,
+    position: super::Position,
+    visibility: super::Visibility,
+    overflow: super::Overflow,
+    public_id: Option<std::sync::Arc<str>>,
+    z_index: i32,
+    clip: Option<UiRect>,
+    offset: crate::core::Point,
+    intrinsic: Option<IntrinsicInput>,
     rect: UiRect,
     hit_rect: UiRect,
     paint_bounds: UiRect,
@@ -125,6 +67,10 @@ struct LayoutOutput {
     layout_rect: UiRect,
     hit_rect: UiRect,
     paint_bounds: UiRect,
+    clip: Option<UiRect>,
+    origin: Option<UiRect>,
+    display: Option<std::borrow::Cow<'static, str>>,
+    overflow_hidden: bool,
 }
 
 #[derive(Default)]
@@ -132,9 +78,21 @@ pub struct LayoutRuntime {
     inputs: HashMap<UiId, LayoutInput>,
     outputs: HashMap<UiId, LayoutOutput>,
     metrics: LayoutCommitMetrics,
+    viewport: Option<UiRect>,
+    force_layout: bool,
+    position_errors: Vec<super::PositionError>,
 }
 
 impl LayoutRuntime {
+    pub fn set_viewport(&mut self, viewport: UiRect) {
+        if self.viewport != Some(viewport) {
+            self.viewport = Some(viewport);
+            self.force_layout = true;
+        }
+    }
+    pub fn position_errors(&self) -> &[super::PositionError] {
+        &self.position_errors
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -151,7 +109,8 @@ impl LayoutRuntime {
         tree: &mut HostTree,
         mut changes: super::ProjectionChanges,
     ) -> (LayoutCommitMetrics, super::ProjectionChanges) {
-        let first_layout = self.inputs.is_empty();
+        let first_layout = self.inputs.is_empty() || self.force_layout;
+        self.force_layout = false;
         let candidate_ids = if first_layout {
             tree.nodes()
                 .iter()
@@ -169,7 +128,20 @@ impl LayoutRuntime {
                     LayoutInput {
                         parent: node.parent.clone(),
                         children: node.children.clone(),
-                        spec: node.layout,
+                        spec: node.layout.clone(),
+                        sizing: node.size_constraints,
+                        item: node.layout_item,
+                        position: node.position.clone(),
+                        visibility: node.visibility,
+                        overflow: node.overflow,
+                        public_id: node.public_id.clone(),
+                        z_index: node.z_index,
+                        clip: node.clip_rect,
+                        offset: crate::core::Point::new(
+                            node.content_offset.0,
+                            node.content_offset.1,
+                        ),
+                        intrinsic: intrinsic_input(node),
                         rect: node.layout_rect,
                         hit_rect: node.hit_rect,
                         paint_bounds: node.paint_bounds,
@@ -195,14 +167,13 @@ impl LayoutRuntime {
                     }
                     Some(previous) if previous != input => {
                         dirty.insert(layout_boundary(tree, id));
-                        if previous.parent != input.parent || previous.children != input.children {
-                            if let Some(parent) = previous
+                        if (previous.parent != input.parent || previous.children != input.children)
+                            && let Some(parent) = previous
                                 .parent
                                 .as_ref()
                                 .filter(|parent| next_inputs.contains_key(*parent))
-                            {
-                                dirty.insert(layout_boundary(tree, parent));
-                            }
+                        {
+                            dirty.insert(layout_boundary(tree, parent));
                         }
                     }
                     Some(_) => {}
@@ -225,30 +196,56 @@ impl LayoutRuntime {
                 node.layout_rect = output.layout_rect;
                 node.hit_rect = output.hit_rect;
                 node.paint_bounds = output.paint_bounds;
+                node.clip_rect = output.clip;
+                node.position_origin = output.origin;
+                node.display_text = output.display.clone();
+                node.overflow_hidden = output.overflow_hidden;
             }
         }
 
         let dirty_roots = minimal_dirty_roots(tree, dirty);
-        let laid_out_ids = dirty_roots
+        let mut laid_out_ids = dirty_roots
             .iter()
             .flat_map(|root| subtree_ids(tree, root))
             .collect::<HashSet<_>>();
         for id in &laid_out_ids {
-            let Some(input) = next_inputs.get(id) else {
+            let Some(input) = next_inputs.get(id).or_else(|| self.inputs.get(id)) else {
                 continue;
             };
             if let Some(node) = tree.node_mut(id) {
                 node.layout_rect = input.rect;
                 node.hit_rect = input.hit_rect;
                 node.paint_bounds = input.paint_bounds;
+                node.clip_rect = input.clip;
+                node.position_origin = None;
+                node.display_text = None;
+                node.overflow_hidden = false;
             }
         }
         for root in dirty_roots {
             layout_subtree(tree, root);
         }
+        if !laid_out_ids.is_empty() {
+            let viewport = self.viewport.unwrap_or_else(|| {
+                tree.nodes()
+                    .iter()
+                    .filter(|n| n.parent.is_none())
+                    .map(|n| n.layout_rect)
+                    .reduce(UiRect::union)
+                    .unwrap_or_default()
+            });
+            let (positioned, errors) = super::position::apply(tree, viewport);
+            self.position_errors = errors;
+            laid_out_ids.extend(positioned);
+            super::overflow::apply(tree, &laid_out_ids);
+            tree.reorder_by_hierarchy();
+            let extra = tree.take_projection_changes();
+            changes.structure_changed |= extra.structure_changed;
+            changes.changed.extend(extra.changed);
+        }
         for removed in &changes.removed {
-            self.inputs.remove(&removed);
-            self.outputs.remove(&removed);
+            self.inputs.remove(removed);
+            self.outputs.remove(removed);
         }
         self.inputs.extend(next_inputs);
         for id in &laid_out_ids {
@@ -261,6 +258,10 @@ impl LayoutRuntime {
                     layout_rect: node.layout_rect,
                     hit_rect: node.hit_rect,
                     paint_bounds: node.paint_bounds,
+                    clip: node.clip_rect,
+                    origin: node.position_origin,
+                    display: node.display_text.clone(),
+                    overflow_hidden: node.overflow_hidden,
                 },
             );
         }
@@ -284,20 +285,22 @@ impl LayoutRuntime {
 }
 
 fn layout_boundary(tree: &HostTree, id: &UiId) -> UiId {
-    let Some(node) = tree.node(id) else {
-        return id.clone();
-    };
-    let Some(parent_id) = node.parent.as_ref() else {
-        return id.clone();
-    };
-    if tree
-        .node(parent_id)
-        .is_some_and(|parent| matches!(parent.layout, LayoutSpec::Stack { .. }))
-    {
-        parent_id.clone()
-    } else {
-        id.clone()
+    let mut boundary = id.clone();
+    let mut parent = tree.node(id).and_then(|node| node.parent.as_ref());
+    while let Some(parent_id) = parent {
+        let Some(node) = tree.node(parent_id) else {
+            break;
+        };
+        if node.layout.is_container()
+            || node
+                .size_constraints
+                .is_some_and(|sizing| sizing.measures_content())
+        {
+            boundary = parent_id.clone();
+        }
+        parent = node.parent.as_ref();
     }
+    boundary
 }
 
 fn minimal_dirty_roots(tree: &HostTree, dirty: HashSet<UiId>) -> Vec<UiId> {
@@ -338,47 +341,98 @@ pub fn apply_layout_tree(tree: &mut HostTree) {
     for root in roots {
         layout_subtree(tree, root);
     }
+    finish_layout(tree);
+}
+
+fn finish_layout(tree: &mut HostTree) {
+    let viewport = tree
+        .nodes()
+        .iter()
+        .filter(|n| n.parent.is_none())
+        .map(|n| n.layout_rect)
+        .reduce(UiRect::union)
+        .unwrap_or_default();
+    super::position::apply(tree, viewport);
+    let ids = tree.nodes().iter().map(|n| n.id.clone()).collect();
+    super::overflow::apply(tree, &ids);
+    tree.reorder_by_hierarchy();
 }
 
 fn layout_subtree(tree: &mut HostTree, root: UiId) {
+    arrange_subtree(tree, root, false, &mut MeasurementCache::new());
+}
+
+fn arrange_subtree(
+    tree: &mut HostTree,
+    root: UiId,
+    sized_by_parent: bool,
+    measurements: &mut MeasurementCache,
+) {
+    let Some(node) = tree.node(&root) else { return };
+    let available = node
+        .parent
+        .as_ref()
+        .and_then(|p| tree.node(p))
+        .map(content_rect)
+        .map(rect_size)
+        .unwrap_or_else(|| rect_size(node.layout_rect));
+    let collapsed = node.visibility == super::Visibility::Collapsed
+        || super::measure::collapses(node, available);
+    if let Some(n) = tree.node_mut(&root) {
+        n.overflow_hidden = collapsed;
+    }
+    if collapsed {
+        return;
+    }
+    let node = tree.node(&root).unwrap();
+    if !sized_by_parent && node.size_constraints.is_some() {
+        let rect = node.layout_rect;
+        let available = node
+            .parent
+            .as_ref()
+            .and_then(|id| tree.node(id))
+            .map(content_rect)
+            .unwrap_or(rect);
+        let size = desired_size(tree, &root, rect_size(available), measurements);
+        place_subtree(
+            tree,
+            &root,
+            UiRect::new(
+                rect.left,
+                rect.top,
+                rect.left + size.width,
+                rect.top + size.height,
+            ),
+        );
+    }
     let Some(root_node) = tree.node(&root).cloned() else {
         return;
     };
-    if let LayoutSpec::Stack {
-        axis,
-        gap,
-        padding,
-        align,
-    } = root_node.layout
-    {
-        let mut cursor = match axis {
-            Axis::Horizontal => root_node.layout_rect.left + padding.left,
-            Axis::Vertical => root_node.layout_rect.top + padding.top,
-        };
-        let content = root_node.layout_rect.inset(padding);
-        for child_id in &root_node.children {
-            let Some(child) = tree.node(child_id).cloned() else {
-                continue;
-            };
-            let size = match child.layout {
-                LayoutSpec::Fixed(size) => size,
-                _ => Size::new(child.layout_rect.width(), child.layout_rect.height()),
-            };
-            let rect = stack_child_rect(content, axis, align, cursor, size);
-            translate_subtree(
-                tree,
-                child_id,
-                rect.left - child.layout_rect.left,
-                rect.top - child.layout_rect.top,
-            );
-            cursor += match axis {
-                Axis::Horizontal => size.width + gap,
-                Axis::Vertical => size.height + gap,
-            };
-        }
+    for (child, rect) in super::containers::arrange(tree, &root_node, measurements) {
+        place_subtree(tree, &child, rect);
     }
     for child in root_node.children {
-        layout_subtree(tree, child);
+        let sized = root_node.layout.is_container()
+            && tree.node(&child).is_some_and(|n| n.position.participates());
+        arrange_subtree(tree, child, sized, measurements);
+    }
+}
+
+pub(super) fn place_subtree(tree: &mut HostTree, root: &UiId, rect: UiRect) {
+    let Some(node) = tree.node(root) else { return };
+    let old = node.layout_rect;
+    translate_subtree(tree, root, rect.left - old.left, rect.top - old.top);
+    if let Some(node) = tree.node_mut(root) {
+        let dw = rect.width() - old.width();
+        let dh = rect.height() - old.height();
+        if node.clip_rect == Some(node.layout_rect) {
+            node.clip_rect = Some(rect);
+        }
+        node.layout_rect = rect;
+        node.hit_rect.right += dw;
+        node.hit_rect.bottom += dh;
+        node.paint_bounds.right += dw;
+        node.paint_bounds.bottom += dh;
     }
 }
 
@@ -398,39 +452,10 @@ fn translate_subtree(tree: &mut HostTree, root: &UiId, x: f32, y: f32) {
     }
 }
 
-fn stack_child_rect(content: UiRect, axis: Axis, align: Align, cursor: f32, size: Size) -> UiRect {
-    match axis {
-        Axis::Horizontal => {
-            let top = match align {
-                Align::Start => content.top,
-                Align::Center => content.top + (content.height() - size.height) / 2.0,
-                Align::End => content.bottom - size.height,
-                Align::Stretch => content.top,
-            };
-            let bottom = if align == Align::Stretch {
-                content.bottom
-            } else {
-                top + size.height
-            };
-            UiRect::new(cursor, top, cursor + size.width, bottom)
-        }
-        Axis::Vertical => {
-            let left = match align {
-                Align::Start => content.left,
-                Align::Center => content.left + (content.width() - size.width) / 2.0,
-                Align::End => content.right - size.width,
-                Align::Stretch => content.left,
-            };
-            let right = if align == Align::Stretch {
-                content.right
-            } else {
-                left + size.width
-            };
-            UiRect::new(left, cursor, right, cursor + size.height)
-        }
-    }
-}
-
 #[cfg(test)]
 #[path = "layout_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sizing_runtime_test.rs"]
+mod sizing_runtime_tests;

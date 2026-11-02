@@ -90,5 +90,9 @@ pub(super) fn paint_props_changed(previous: &UiNode, next: &UiNode) -> bool {
         || previous.content_offset != next.content_offset
         || previous.text != next.text
         || previous.text_style != next.text_style
+        || previous.display_text != next.display_text
+        || previous.visibility != next.visibility
+        || previous.overflow_hidden != next.overflow_hidden
+        || previous.overflow != next.overflow
         || previous.render_phase != next.render_phase
 }

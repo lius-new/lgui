@@ -177,9 +177,11 @@ fn transformed_layer_damage_stays_inside_the_parent_layer() {
     let parent = UiRect::new(0.0, 0.0, 160.0, 160.0);
     let damage = compositing_layer_damage(&previous, &next, parent);
     assert!(!damage.is_empty());
-    assert!(damage
-        .iter()
-        .all(|rect| rect.intersect(parent) == Some(*rect)));
+    assert!(
+        damage
+            .iter()
+            .all(|rect| rect.intersect(parent) == Some(*rect))
+    );
 }
 
 #[test]
@@ -260,18 +262,26 @@ fn compositing_layer_damage_tracks_moved_inserted_and_removed_commands() {
     ];
 
     let damage = compositing_layer_damage(&previous, &next, UiRect::new(0.0, 0.0, 100.0, 100.0));
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(15.0, 15.0))));
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(25.0, 55.0))));
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(65.0, 15.0))));
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(75.0, 65.0))));
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(15.0, 15.0)))
+    );
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(25.0, 55.0)))
+    );
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(65.0, 15.0)))
+    );
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(75.0, 65.0)))
+    );
 }
 
 #[test]
@@ -298,15 +308,21 @@ fn nested_compositing_layer_damage_stays_local_to_changed_content() {
         UiRect::new(0.0, 0.0, 500.0, 400.0),
     );
 
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(115.0, 95.0))));
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(125.0, 105.0))));
-    assert!(damage
-        .iter()
-        .all(|rect| rect.right < 200.0 && rect.bottom < 180.0));
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(115.0, 95.0)))
+    );
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(125.0, 105.0)))
+    );
+    assert!(
+        damage
+            .iter()
+            .all(|rect| rect.right < 200.0 && rect.bottom < 180.0)
+    );
 }
 
 #[test]

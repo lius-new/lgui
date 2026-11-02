@@ -30,15 +30,17 @@ fn run_ready<T>(future: impl Future<Output = T>) -> T {
 #[test]
 fn typed_commands_preserve_arguments_outputs_and_errors() {
     let application = ApplicationContext::empty(crate::memory::test_memory_options());
-    assert!(application
-        .command_registry()
-        .register::<Add>(|_, (left, right)| async move {
-            if left < 0 {
-                Err("negative")
-            } else {
-                Ok(left + right)
-            }
-        }));
+    assert!(
+        application
+            .command_registry()
+            .register::<Add>(|_, (left, right)| async move {
+                if left < 0 {
+                    Err("negative")
+                } else {
+                    Ok(left + right)
+                }
+            })
+    );
 
     let command = application.command::<Add>();
     assert_eq!(run_ready(command.invoke((2, 3))), Ok(5));
@@ -48,20 +50,26 @@ fn typed_commands_preserve_arguments_outputs_and_errors() {
 #[test]
 fn duplicate_command_registration_is_rejected() {
     let application = ApplicationContext::empty(crate::memory::test_memory_options());
-    assert!(application
-        .command_registry()
-        .register::<Add>(|_, _| async { Ok(0) }));
-    assert!(!application
-        .command_registry()
-        .register::<Add>(|_, _| async { Ok(1) }));
+    assert!(
+        application
+            .command_registry()
+            .register::<Add>(|_, _| async { Ok(0) })
+    );
+    assert!(
+        !application
+            .command_registry()
+            .register::<Add>(|_, _| async { Ok(1) })
+    );
 }
 
 #[test]
 fn free_invoke_routes_through_the_scoped_application() {
     let application = ApplicationContext::empty(crate::memory::test_memory_options());
-    assert!(application
-        .command_registry()
-        .register::<Add>(|_, (left, right)| async move { Ok(left + right) }));
+    assert!(
+        application
+            .command_registry()
+            .register::<Add>(|_, (left, right)| async move { Ok(left + right) })
+    );
 
     assert_eq!(run_ready(application.scope(invoke::<Add>((4, 5)))), Ok(9));
 }

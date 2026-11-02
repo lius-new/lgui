@@ -24,5 +24,5 @@ pub use semantics::{
 };
 #[cfg(feature = "tokio")]
 pub use task::TokioExecutor;
-pub use task::{noop_task_spawner, UiExecutor, UiTask, UiTaskSpawner};
+pub use task::{UiExecutor, UiTask, UiTaskSpawner, noop_task_spawner};
 pub use view::*;

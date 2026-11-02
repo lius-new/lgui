@@ -28,7 +28,7 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_i32);
     let increment = count.clone();
 
-    stack(UiRect::new(0.0, 0.0, 360.0, 200.0), Axis::Vertical)
+    flex(UiRect::new(0.0, 0.0, 360.0, 200.0), Axis::Vertical)
         .content((
             text(UiRect::new(0.0, 0.0, 312.0, 56.0), format!("{}", count.get()), TextStyle::default()),
             button(
@@ -78,6 +78,16 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md),
 ```powershell
 cargo test -p lgui-core --no-default-features
 ```
+
+The independent capability gallery demonstrates layouts, portable inputs, lists,
+trees, tabs, split resizing, status controls and application-owned floating content:
+
+```powershell
+cargo run --example capabilities --features renderer-skia-software
+```
+
+Requirement-level implementation and test evidence is recorded in
+[`IMPLEMENTATION.md`](IMPLEMENTATION.md).
 
 Add the Windows-native default configuration to an application with:
 

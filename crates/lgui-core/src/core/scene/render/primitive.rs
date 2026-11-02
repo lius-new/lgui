@@ -32,7 +32,7 @@ pub enum ScenePrimitive {
     Custom {
         id: UiId,
         rect: UiRect,
-        key: &'static str,
+        key: Arc<str>,
         // Style may contain caller animation state. Backends should treat Custom as immediate
         // paint unless the specific painter exposes a separate stable-cache contract.
         style: Option<CustomPaintStyle>,
@@ -64,7 +64,7 @@ pub enum ScenePrimitive {
     Icon {
         id: UiId,
         rect: UiRect,
-        key: &'static str,
+        key: Arc<str>,
         style: super::IconStyle,
         phase: RenderPhase,
     },

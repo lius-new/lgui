@@ -11,8 +11,11 @@ fn checkmark_is_a_continuous_rising_tick_inside_the_checkbox_bounds() {
         Stroke::new(Color(0xFFFFFF), 2.0, 0xFF),
     );
     let commands = checkmark.node().path.as_ref().unwrap().commands();
-    let [UiPathCommand::MoveTo(start), UiPathCommand::LineTo(bend), UiPathCommand::LineTo(end)] =
-        commands
+    let [
+        UiPathCommand::MoveTo(start),
+        UiPathCommand::LineTo(bend),
+        UiPathCommand::LineTo(end),
+    ] = commands
     else {
         panic!("checkbox checkmark must be one continuous three-point path");
     };

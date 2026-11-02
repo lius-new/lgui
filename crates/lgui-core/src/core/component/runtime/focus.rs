@@ -5,6 +5,11 @@ impl UiRuntime {
         if !tree.needs_focus_sync() {
             return false;
         }
+        self.reconcile_tree_focus(tree)
+    }
+
+    /// Layout-derived visibility can change without a focus property update.
+    pub(crate) fn reconcile_tree_focus(&mut self, tree: &HostTree) -> bool {
         let events = self.events.sync_focus_for_tree(tree);
         if events.is_empty() {
             return false;

@@ -48,13 +48,9 @@ fn pointer_move_and_drag_route_to_distinct_handlers() {
     let pointer = PointerData::mouse(Point::new(5.0, 5.0));
     let mut tree = HostTree::new();
     tree.push(
-        UiNode::new(
-            id,
-            UiNodeKind::Panel,
-            UiRect::new(0.0, 0.0, 10.0, 10.0),
-        )
-        .on_event(UiEventKind::PointerMove, |_context, _payload| {})
-        .on_event(UiEventKind::PointerDrag, |_context, _payload| {}),
+        UiNode::new(id, UiNodeKind::Panel, UiRect::new(0.0, 0.0, 10.0, 10.0))
+            .on_event(UiEventKind::PointerMove, |_context, _payload| {})
+            .on_event(UiEventKind::PointerDrag, |_context, _payload| {}),
     );
     let hit = tree.hit_test(pointer.point).expect("interactive target");
 

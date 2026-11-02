@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use crate::application::AppView;
 
 use super::{
-    super::{matcher::pattern::MatchStep, Location, PathParams, RouteId, RouteMatch, RouteMatches},
+    super::{Location, PathParams, RouteId, RouteMatch, RouteMatches, matcher::pattern::MatchStep},
     route::{IntoRoutes, Route, RouteKind},
 };
 

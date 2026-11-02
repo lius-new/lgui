@@ -2,13 +2,13 @@ use super::*;
 use crate::{
     application::AppView,
     core::{
-        component, group, text, Color, Element, ElementRenderCx, InputEvent, InteractionRole,
-        Point, PointerButton, PointerData, State, TextStyle, UiElement, UiId, VisualStyle,
+        Color, Element, ElementRenderCx, InputEvent, InteractionRole, Point, PointerButton,
+        PointerData, State, TextStyle, UiElement, UiId, VisualStyle, component, group, text,
     },
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 
 #[test]
@@ -138,9 +138,10 @@ fn state_update_uses_host_diff_damage_instead_of_invalidating_the_component_boun
     assert!(!second.damage.dirty.is_full());
     assert!(!second.damage.dirty.is_empty());
     assert!(second.damage.dirty.dirty_area() < second.damage.dirty.viewport_area() / 2.0);
-    assert!(second.damage.dirty.effective_rects().iter().all(|rect| rect
-        .intersect(UiRect::new(20.0, 20.0, 180.0, 60.0))
-        .is_none()));
+    assert!(second.damage.dirty.effective_rects().iter().all(|rect| {
+        rect.intersect(UiRect::new(20.0, 20.0, 180.0, 60.0))
+            .is_none()
+    }));
 }
 
 #[test]

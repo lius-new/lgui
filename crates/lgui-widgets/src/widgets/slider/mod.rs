@@ -4,7 +4,7 @@ mod render;
 mod state;
 
 pub use model::{
-    slider, IntoSliderChangeHandler, Slider, SliderChangeHandler, SliderStyle, SliderValueFormatter,
+    IntoSliderChangeHandler, Slider, SliderChangeHandler, SliderStyle, SliderValueFormatter, slider,
 };
 
 #[path = "slider_test.rs"]

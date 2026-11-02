@@ -3,8 +3,8 @@ use std::{future::Future, pin::Pin, sync::Arc};
 #[cfg(feature = "async")]
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     task::{Context, Poll, Waker},
 };

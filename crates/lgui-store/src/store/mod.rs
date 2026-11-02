@@ -4,7 +4,7 @@ mod runtime;
 mod subscription;
 mod unit;
 
-pub use definition::{create, StoreDefinition};
+pub use definition::{StoreDefinition, create};
 pub use hooks::{
     BoundStoreAction, BoundStoreActionWith, StoreAction, StoreActionWith, StoreContext, StoreHooks,
 };

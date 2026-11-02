@@ -2,35 +2,35 @@ use std::{
     cell::RefCell,
     io,
     mem::size_of,
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     thread::{self, JoinHandle},
 };
 
 use windows::{
-    core::PCWSTR,
     Win32::{
         Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-                LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
-                TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
-                IDI_APPLICATION, MSG, SM_CXSMICON, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP,
-                WM_RBUTTONUP, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
+                DestroyWindow, DispatchMessageW, GetMessageW, IDC_ARROW, IDI_APPLICATION,
+                LoadCursorW, LoadIconW, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
+                SM_CXSMICON, TranslateMessage, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP,
+                WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
             },
         },
     },
+    core::PCWSTR,
 };
 
 use lgui_services::{TrayAction, TrayOptions};
 
 use super::{
+    TRAY_MESSAGE_ID,
     icon::Win32TrayIcon,
     menu::show_tray_menu,
     support::{taskbar_created_message, wide, windows_io_error},
-    TRAY_MESSAGE_ID,
 };
 
 const TRAY_HOST_CLASS: &str = "LguiIndependentTrayHost";

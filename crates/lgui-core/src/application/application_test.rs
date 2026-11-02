@@ -1,8 +1,8 @@
 use std::{
     future::Future,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     task::{Context, Poll, Waker},
 };

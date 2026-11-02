@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use windows::{core::w, Win32::UI::WindowsAndMessaging::RegisterWindowMessageW};
+use windows::{Win32::UI::WindowsAndMessaging::RegisterWindowMessageW, core::w};
 
 pub fn taskbar_created_message() -> u32 {
     static MESSAGE: OnceLock<u32> = OnceLock::new();

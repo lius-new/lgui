@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::{component, context_provider, Element, RenderCx, RootComponent};
+use crate::core::{Element, RenderCx, RootComponent, component, context_provider};
 
 use super::ApplicationContext;
 

@@ -1,5 +1,5 @@
 use std::{
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
 };

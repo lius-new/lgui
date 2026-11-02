@@ -75,11 +75,45 @@ impl Default for TypographyTokens {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RadiusTokens {
+    pub small: u16,
+    pub medium: u16,
+    pub large: u16,
+    pub pill: u16,
+}
+impl Default for RadiusTokens {
+    fn default() -> Self {
+        Self {
+            small: 3,
+            medium: 6,
+            large: 10,
+            pill: 999,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MotionTokens {
+    pub fast_ms: u32,
+    pub normal_ms: u32,
+    pub slow_ms: u32,
+}
+impl Default for MotionTokens {
+    fn default() -> Self {
+        Self {
+            fast_ms: 90,
+            normal_ms: 160,
+            slow_ms: 240,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ThemeTokens {
     pub colors: ColorTokens,
     pub spacing: SpacingTokens,
     pub typography: TypographyTokens,
+    pub radii: RadiusTokens,
+    pub motion: MotionTokens,
 }
 
 #[derive(Clone)]

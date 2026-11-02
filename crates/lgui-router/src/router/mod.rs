@@ -7,8 +7,8 @@ mod runtime;
 
 pub use context::{Back, Navigate, Replace, RouterContext};
 pub use declarative::{
-    create_router, index, layout, not_found, outlet, redirect, route, scope, DeclarativeRouter,
-    IntoRoutes, Route,
+    DeclarativeRouter, IntoRoutes, Route, create_router, index, layout, not_found, outlet,
+    redirect, route, scope,
 };
 pub use hooks::RouterHooks;
 pub use location::{Location, PathParams};

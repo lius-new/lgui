@@ -294,6 +294,8 @@ fn role(role: SemanticRole) -> Role {
         SemanticRole::Navigation => Role::Navigation,
         SemanticRole::List => Role::List,
         SemanticRole::ListItem => Role::ListItem,
+        SemanticRole::Tree => Role::Tree,
+        SemanticRole::TreeItem => Role::TreeItem,
         SemanticRole::Table => Role::Table,
         SemanticRole::Row => Role::Row,
         SemanticRole::Cell => Role::Cell,

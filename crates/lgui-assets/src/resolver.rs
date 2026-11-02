@@ -111,7 +111,7 @@ impl RemoteImageLoader for HttpImageLoader {
         }
         let response = match request.call() {
             Ok(response) if response.status() == 304 => {
-                return Ok(RemoteImageResponse::not_modified())
+                return Ok(RemoteImageResponse::not_modified());
             }
             Ok(response) => response,
             Err(ureq::Error::Status(304, _)) => return Ok(RemoteImageResponse::not_modified()),

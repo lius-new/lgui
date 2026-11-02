@@ -10,7 +10,7 @@ use super::{
     UiId, UiInputEventBinding, UiInputEventHandler, UiPath, UiRect, VisualStyle,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiNodeKind {
     Root,
     Group,
@@ -34,7 +34,7 @@ pub enum UiNodeKind {
     ScrollRaster,
     Clip,
     ClipPath,
-    Custom(&'static str),
+    Custom(Arc<str>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,13 +278,24 @@ pub struct UiNode {
     pub animation_targets: Vec<(super::AnimProperty, bool)>,
     pub animation_outset: (f32, f32),
     pub layout: LayoutSpec,
+    pub public_id: Option<Arc<str>>,
+    pub position: crate::core::Position,
+    pub visibility: crate::core::Visibility,
+    pub overflow: crate::core::Overflow,
+    pub z_index: i32,
+    pub inert: bool,
+    pub(crate) position_origin: Option<UiRect>,
+    pub(crate) display_text: Option<Cow<'static, str>>,
+    pub(crate) overflow_hidden: bool,
+    pub layout_item: crate::core::LayoutItem,
+    pub size_constraints: Option<crate::core::SizeConstraints>,
     pub style: VisualStyle,
     pub path: Option<UiPath>,
     pub path_style: PathStyle,
     pub image_request: Option<ImageRequest>,
     pub image_fit: ImageFit,
     pub image_blur: Option<BlurStyle>,
-    pub icon_key: Option<&'static str>,
+    pub icon_key: Option<Arc<str>>,
     pub icon_style: IconStyle,
     pub glow: Option<(Color, u8)>,
     pub backdrop_blur_style: Option<BlurStyle>,
@@ -331,6 +342,17 @@ impl UiNode {
             animation_targets: Vec::new(),
             animation_outset: (0.0, 0.0),
             layout: LayoutSpec::default(),
+            public_id: None,
+            position: crate::core::Position::Flow,
+            visibility: crate::core::Visibility::Visible,
+            overflow: crate::core::Overflow::Visible,
+            z_index: 0,
+            inert: false,
+            position_origin: None,
+            display_text: None,
+            overflow_hidden: false,
+            layout_item: crate::core::LayoutItem::default(),
+            size_constraints: None,
             style: VisualStyle::default(),
             path: None,
             path_style: PathStyle::default(),
@@ -411,6 +433,14 @@ impl UiNode {
             && self.animation_targets == other.animation_targets
             && self.animation_outset == other.animation_outset
             && self.layout == other.layout
+            && self.public_id == other.public_id
+            && self.position == other.position
+            && self.visibility == other.visibility
+            && self.overflow == other.overflow
+            && self.z_index == other.z_index
+            && self.inert == other.inert
+            && self.layout_item == other.layout_item
+            && self.size_constraints == other.size_constraints
             && self.style == other.style
             && self.path == other.path
             && self.path_style == other.path_style
@@ -530,7 +560,11 @@ impl UiNode {
             | UiEventKind::Focus
             | UiEventKind::Blur
             | UiEventKind::Change => self.event_policy.focus = true,
-            UiEventKind::Wheel => {}
+            UiEventKind::Wheel
+            | UiEventKind::OutsidePointer
+            | UiEventKind::CloseRequested
+            | UiEventKind::Visibility
+            | UiEventKind::Selection => {}
         }
         self
     }
@@ -613,6 +647,65 @@ impl UiNode {
         self.layout = layout;
         self
     }
+    pub fn public_id(mut self, id: impl Into<Arc<str>>) -> Self {
+        self.public_id = Some(id.into());
+        self
+    }
+    pub(crate) fn install_public_events(&mut self) {
+        if self.public_id.is_some() {
+            for kind in [
+                UiEventKind::Change,
+                UiEventKind::Selection,
+                UiEventKind::Visibility,
+            ] {
+                if !self.input_event_handlers.iter().any(|b| b.kind == kind) {
+                    self.input_event_handlers.push(UiInputEventBinding {
+                        kind,
+                        capture: false,
+                        handler: Arc::new(|_, _| {}),
+                    });
+                }
+            }
+        }
+    }
+    pub fn position(mut self, v: crate::core::Position) -> Self {
+        self.position = v;
+        self
+    }
+    pub fn visibility(mut self, v: crate::core::Visibility) -> Self {
+        self.visibility = v;
+        self
+    }
+    pub fn overflow(mut self, v: crate::core::Overflow) -> Self {
+        self.overflow = v;
+        self
+    }
+    pub fn z_index(mut self, v: i32) -> Self {
+        self.z_index = v;
+        self
+    }
+    pub fn inert(mut self, v: bool) -> Self {
+        self.inert = v;
+        self
+    }
+
+    pub fn size_constraints(mut self, constraints: crate::core::SizeConstraints) -> Self {
+        self.size_constraints = Some(constraints);
+        self
+    }
+
+    pub fn flex_item(mut self, item: crate::core::FlexItem) -> Self {
+        self.layout_item.flex = item;
+        self
+    }
+    pub fn dock(mut self, side: crate::core::DockSide) -> Self {
+        self.layout_item.dock = side;
+        self
+    }
+    pub fn grid_cell(mut self, cell: crate::core::GridCell) -> Self {
+        self.layout_item.grid = cell;
+        self
+    }
 
     pub fn style(mut self, style: VisualStyle) -> Self {
         self.style = style;
@@ -648,8 +741,8 @@ impl UiNode {
         self
     }
 
-    pub fn icon(mut self, key: &'static str) -> Self {
-        self.icon_key = Some(key);
+    pub fn icon(mut self, key: impl Into<Arc<str>>) -> Self {
+        self.icon_key = Some(key.into());
         self
     }
 
@@ -717,6 +810,7 @@ impl UiNode {
     }
 
     pub fn translate(mut self, x: f32, y: f32) -> Self {
+        self.position_origin = self.position_origin.map(|r| r.translate(x, y));
         self.layout_rect = self.layout_rect.translate(x, y);
         self.hit_rect = self.hit_rect.translate(x, y);
         self.paint_bounds = self.paint_bounds.translate(x, y);

@@ -4,7 +4,7 @@ use super::{
     state::SliderState,
 };
 use crate::core::{
-    ComponentState, UiAction, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
+    ComponentState, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION, UiAction,
 };
 
 #[test]

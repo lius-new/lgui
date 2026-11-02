@@ -6,10 +6,12 @@ pub use crate::command::{
     Command, CommandContext, CommandFuture, CommandHandle, CommandHandler, invoke,
 };
 pub use crate::core::{
-    Align, Axis, BlurEdgeMode, BlurStyle, Color, EdgeInsets, Element, ElementKey, ImageCachePolicy,
-    ImageDecodePolicy, ImageRequest, ImageSampling, RenderCx, RootComponent, ShadowStyle, Size,
-    State, StateSetter, Stroke, TextAlign, TextStyle, TextWrap, UiAsyncContext, UiEventContext,
-    UiRect, VisualStyle, async_handler, async_handler_with, component, context_provider, group,
+    Align, AnchorSide, Axis, BlurEdgeMode, BlurStyle, Color, Dimension, DockSide, EdgeInsets,
+    Element, ElementKey, FlexItem, FlexLayout, GridCell, GridLayout, GridTrack, ImageCachePolicy,
+    ImageDecodePolicy, ImageRequest, ImageSampling, Justify, LayoutSpec, Overflow, Position,
+    RenderCx, RootComponent, ShadowStyle, Size, SizeConstraints, State, StateSetter, Stroke,
+    TextAlign, TextStyle, TextWrap, UiAsyncContext, UiEventContext, UiRect, Visibility,
+    VisualStyle, async_handler, async_handler_with, component, context_provider, group,
 };
 pub use crate::events::{
     AsyncEventHandler, Event, EventFuture, EventKey, EventSubscription, InvalidEventKey, emit,

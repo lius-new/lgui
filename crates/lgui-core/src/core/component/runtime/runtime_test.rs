@@ -2,10 +2,10 @@ use std::any::Any;
 
 use super::*;
 use crate::core::{
-    compile_scene, AnimationBinding, ComponentActionOutcome, ComponentState,
-    CompositingLayerAnimation, CompositingLayerSpec, ImeEvent, InputEvent, InteractionRole,
-    KeyModifiers, KeyboardEvent, Point, PointerButton, PointerData, ScenePrimitive, UiNode,
-    UiNodeKind, VisualStyle, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
+    AnimationBinding, ComponentActionOutcome, ComponentState, CompositingLayerAnimation,
+    CompositingLayerSpec, ImeEvent, InputEvent, InteractionRole, KeyModifiers, KeyboardEvent,
+    POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION, Point, PointerButton, PointerData,
+    ScenePrimitive, UiNode, UiNodeKind, VisualStyle, compile_scene,
 };
 
 fn key_down(key: NamedKey, modifiers: KeyModifiers) -> InputEvent {
@@ -92,10 +92,12 @@ fn pointer_motion_inside_the_same_hover_target_does_not_request_paint() {
         InputEvent::PointerMove(PointerData::mouse(Point::new(11.0, 10.0))),
     );
 
-    assert!(moved
-        .events
-        .iter()
-        .any(|event| matches!(event, UiEvent::PointerMoved { .. })));
+    assert!(
+        moved
+            .events
+            .iter()
+            .any(|event| matches!(event, UiEvent::PointerMoved { .. }))
+    );
     assert_eq!(moved.dirty_bounds, None);
     assert!(!moved.animation_changed);
 }
@@ -296,9 +298,11 @@ fn faster_core_animation_wins_over_component_frame_interval() {
         .animation(animation)
         .animation_target(AnimProperty::Active, true),
     );
-    assert!(runtime
-        .animations_mut()
-        .set_binding_target(animation_id, animation, true));
+    assert!(
+        runtime
+            .animations_mut()
+            .set_binding_target(animation_id, animation, true)
+    );
     runtime.component_states().with_mut_for_component(
         &UiId::owned("mixed-rail.h.state.0"),
         owner,
@@ -640,7 +644,7 @@ fn text_input_default_action_can_be_prevented_before_control_mutation() {
     tree.push(
         UiNode::new(
             input_id.clone(),
-            UiNodeKind::Custom("test-input"),
+            UiNodeKind::Custom("test-input".into()),
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
         .interaction(InteractionRole::Custom("input"))
@@ -672,7 +676,7 @@ fn change_event_is_emitted_only_when_the_default_action_changes_state() {
     tree.push(
         UiNode::new(
             input_id.clone(),
-            UiNodeKind::Custom("test-input"),
+            UiNodeKind::Custom("test-input".into()),
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
         .on_event(crate::core::UiEventKind::Change, |_, _| {}),
@@ -701,7 +705,7 @@ fn ime_lifecycle_and_commit_use_the_generic_focused_event_route() {
     tree.push(
         UiNode::new(
             input_id.clone(),
-            UiNodeKind::Custom("test-input"),
+            UiNodeKind::Custom("test-input".into()),
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
         .interaction(InteractionRole::Custom("input"))
@@ -755,7 +759,7 @@ fn backspace_uses_the_focused_text_default_action_route() {
     tree.push(
         UiNode::new(
             input_id.clone(),
-            UiNodeKind::Custom("test-input"),
+            UiNodeKind::Custom("test-input".into()),
             UiRect::new(0.0, 0.0, 100.0, 40.0),
         )
         .interaction(InteractionRole::Custom("input")),

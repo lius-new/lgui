@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-use super::{normalized_f32_bits, ImageFit};
+use super::{ImageFit, normalized_f32_bits};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StaticLayerSource {

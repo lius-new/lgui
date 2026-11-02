@@ -35,11 +35,13 @@ fn shadow_changes_and_removal_damage_the_entire_filtered_subtree() {
         viewport,
         &mut InvalidationSet::new(),
     );
-    assert!(changed
-        .damage
-        .details
-        .iter()
-        .any(|detail| detail.reason == DamageReason::Paint));
+    assert!(
+        changed
+            .damage
+            .details
+            .iter()
+            .any(|detail| detail.reason == DamageReason::Paint)
+    );
     let damage = changed
         .damage
         .dirty
@@ -56,12 +58,14 @@ fn shadow_changes_and_removal_damage_the_entire_filtered_subtree() {
         &mut InvalidationSet::new(),
     );
     for bounds in [old_bounds, moved.scene.commands()[0].paint_bounds()] {
-        assert!(moved
-            .damage
-            .dirty
-            .rects()
-            .iter()
-            .any(|rect| rect.intersect(bounds) == Some(bounds)));
+        assert!(
+            moved
+                .damage
+                .dirty
+                .rects()
+                .iter()
+                .any(|rect| rect.intersect(bounds) == Some(bounds))
+        );
     }
     let removed = host.commit(
         &HostTree::new(),
@@ -70,12 +74,14 @@ fn shadow_changes_and_removal_damage_the_entire_filtered_subtree() {
         &mut InvalidationSet::new(),
     );
     let previous_bounds = moved.scene.commands()[0].paint_bounds();
-    assert!(removed
-        .damage
-        .dirty
-        .rects()
-        .iter()
-        .any(|rect| rect.intersect(previous_bounds) == Some(previous_bounds)));
+    assert!(
+        removed
+            .damage
+            .dirty
+            .rects()
+            .iter()
+            .any(|rect| rect.intersect(previous_bounds) == Some(previous_bounds))
+    );
 }
 
 #[test]
@@ -277,12 +283,16 @@ fn moving_layer_damages_old_and_new_bounds_without_recompiling_siblings() {
     );
 
     let dirty = commit.damage.dirty.effective_rects();
-    assert!(dirty
-        .iter()
-        .any(|rect| rect.contains(Point::new(20.0, 30.0))));
-    assert!(dirty
-        .iter()
-        .any(|rect| rect.contains(Point::new(210.0, 170.0))));
+    assert!(
+        dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(20.0, 30.0)))
+    );
+    assert!(
+        dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(210.0, 170.0)))
+    );
     assert!(
         !dirty
             .iter()
@@ -341,12 +351,16 @@ fn shrinking_a_transformed_layer_damages_pixels_outside_its_layout_rect() {
     );
 
     let dirty = commit.damage.dirty.effective_rects();
-    assert!(dirty
-        .iter()
-        .any(|rect| rect.contains(Point::new(33.0, 80.0))));
-    assert!(dirty
-        .iter()
-        .any(|rect| rect.contains(Point::new(80.0, 80.0))));
+    assert!(
+        dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(33.0, 80.0)))
+    );
+    assert!(
+        dirty
+            .iter()
+            .any(|rect| rect.contains(Point::new(80.0, 80.0)))
+    );
 }
 
 #[test]
@@ -388,12 +402,13 @@ fn composition_only_update_patches_the_retained_scene_without_compiling_children
 
     tree.node_mut(&child_id).expect("child").style =
         VisualStyle::filled(crate::core::Color(0xFF0000));
-    assert!(tree
-        .update_compositing_layer(
+    assert!(
+        tree.update_compositing_layer(
             &layer_id,
             CompositingLayerSpec::new().translation(50.0, 25.0),
         )
-        .is_some());
+        .is_some()
+    );
     let changes = tree.take_projection_changes();
     assert_eq!(changes.changed.len(), 1);
     let second = host.commit_projection(
@@ -483,12 +498,16 @@ fn inserting_content_into_a_large_layer_keeps_window_damage_local() {
     );
 
     let damage = commit.damage.dirty.effective_rects();
-    assert!(damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(140.0, 120.0))));
-    assert!(!damage
-        .iter()
-        .any(|rect| rect.contains(Point::new(700.0, 500.0))));
+    assert!(
+        damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(140.0, 120.0)))
+    );
+    assert!(
+        !damage
+            .iter()
+            .any(|rect| rect.contains(Point::new(700.0, 500.0)))
+    );
 }
 
 #[test]

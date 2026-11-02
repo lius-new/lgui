@@ -1,11 +1,11 @@
 use std::future::Future;
 
-use crate::core::{async_handler, UiAsyncContext, UiEventContext};
 use crate::core::{
     AnimProperty, AnimationBinding, Element, ElementKey, ElementRenderCx, InteractionRole,
     IntoElementContent, RenderPhase, UiAction, UiElement, UiEventHandler, UiId, UiRect,
     VisualStyle,
 };
+use crate::core::{UiAsyncContext, UiEventContext, async_handler};
 
 pub struct Panel {
     key: ElementKey,

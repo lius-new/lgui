@@ -2,8 +2,8 @@ use super::*;
 use crate::{
     application::ApplicationContext,
     core::{
-        component, content_text, context_provider, ComponentTree, HostTree, HostTreeBuilder,
-        RootComponent, UiRect, UiRuntime, UiScale, UiTask,
+        ComponentTree, HostTree, HostTreeBuilder, RootComponent, UiRect, UiRuntime, UiScale,
+        UiTask, component, content_text, context_provider,
     },
     events::{Event, EventKey},
 };

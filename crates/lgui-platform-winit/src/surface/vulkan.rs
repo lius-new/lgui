@@ -10,8 +10,9 @@ use std::{
 use ash::{vk, vk::Handle};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use skia_safe::{
-    gpu::{self, backend_render_targets, direct_contexts, surfaces, SurfaceOrigin},
-    surfaces as raster_surfaces, Color as SkColor, ColorType, ImageInfo, Paint, Rect, Surface,
+    Color as SkColor, ColorType, ImageInfo, Paint, Rect, Surface,
+    gpu::{self, SurfaceOrigin, backend_render_targets, direct_contexts, surfaces},
+    surfaces as raster_surfaces,
 };
 use winit::window::Window;
 
@@ -19,8 +20,8 @@ use crate::WinitFrameTimings;
 use lgui_core::core::Scene;
 use lgui_render_api::{FrameInfo, MemoryPressure};
 use lgui_render_skia::{
-    cpu_cache_budget, gpu_cache_budget, paint_scene_damage, with_gpu_cache_usage, SkiaCache,
-    SkiaCacheStats,
+    SkiaCache, SkiaCacheStats, cpu_cache_budget, gpu_cache_budget, paint_scene_damage,
+    with_gpu_cache_usage,
 };
 
 const VULKAN_API_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);

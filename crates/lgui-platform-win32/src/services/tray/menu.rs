@@ -1,21 +1,22 @@
 use std::{io, mem::size_of};
 
 use windows::{
-    core::PWSTR,
     Win32::{
         Foundation::{HWND, POINT, WPARAM},
         Graphics::Gdi::{DeleteObject, HBITMAP},
         UI::{
             HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
             WindowsAndMessaging::{
-                CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuItemW, PostMessageW,
-                SetForegroundWindow, SetWindowPos, TrackPopupMenu, HWND_TOPMOST, MENUITEMINFOW,
-                MFS_CHECKED, MFS_DISABLED, MFS_ENABLED, MFT_SEPARATOR, MFT_STRING, MIIM_BITMAP,
-                MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, SM_CXSMICON, SWP_NOACTIVATE,
-                SWP_NOSIZE, SWP_NOZORDER, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_NULL,
+                CreatePopupMenu, DestroyMenu, GetCursorPos, HWND_TOPMOST, InsertMenuItemW,
+                MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFS_ENABLED, MFT_SEPARATOR, MFT_STRING,
+                MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, PostMessageW,
+                SM_CXSMICON, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
+                SetWindowPos, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+                WM_NULL,
             },
         },
     },
+    core::PWSTR,
 };
 
 use lgui_services::{TrayAction, TrayMenuEntry};
@@ -28,8 +29,8 @@ use lgui_core::core::{Color, IconStyle, UiRect};
 use std::{ffi::c_void, ptr::null_mut};
 #[cfg(feature = "svg")]
 use windows::Win32::Graphics::Gdi::{
-    CreateDIBSection, GetSysColor, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, COLOR_MENUTEXT,
-    DIB_RGB_COLORS,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, COLOR_MENUTEXT, CreateDIBSection, DIB_RGB_COLORS,
+    GetSysColor,
 };
 
 const MENU_COMMAND_BASE: u32 = 1;

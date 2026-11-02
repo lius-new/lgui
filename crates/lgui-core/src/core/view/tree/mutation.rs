@@ -10,7 +10,13 @@ impl HostTree {
         }
     }
 
-    pub fn push(&mut self, node: UiNode) {
+    pub fn push(&mut self, mut node: UiNode) {
+        node.install_public_events();
+        self.assert_public_id_available(&node);
+        self.push_validated(node);
+    }
+
+    fn push_validated(&mut self, node: UiNode) {
         self.projection_changes.changed.insert(node.id.clone());
         self.projection_changes.structure_changed = true;
         self.mark_runtime_sync_for_insert(&node);
@@ -30,7 +36,20 @@ impl HostTree {
         self.nodes.push(Arc::new(node));
     }
 
-    pub(crate) fn upsert(&mut self, node: UiNode) {
+    pub(crate) fn upsert(&mut self, mut node: UiNode) {
+        node.install_public_events();
+        self.assert_public_id_available(&node);
+        self.upsert_validated(node);
+    }
+
+    /// Retained renders may temporarily contain both an old node and its
+    /// replacement. Public IDs are validated after stale owners are pruned.
+    pub(crate) fn upsert_during_render(&mut self, mut node: UiNode) {
+        node.install_public_events();
+        self.upsert_validated(node);
+    }
+
+    fn upsert_validated(&mut self, node: UiNode) {
         if let Some(index) = self.node_indices.get(&node.id).copied() {
             if !self.nodes[index].projection_eq(&node) {
                 self.projection_changes.changed.insert(node.id.clone());
@@ -53,11 +72,17 @@ impl HostTree {
             }
             self.nodes[index] = Arc::new(node);
         } else {
-            self.push(node);
+            self.push_validated(node);
         }
     }
 
     pub(crate) fn set_children(&mut self, parent: &UiId, children: Vec<UiId>) {
+        if self
+            .node(parent)
+            .is_none_or(|node| node.children == children)
+        {
+            return;
+        }
         let changed = {
             let Some(parent) = self.node_mut(parent) else {
                 return;
@@ -102,7 +127,7 @@ impl HostTree {
         self.remove_ids(&remove)
     }
 
-    fn remove_ids(&mut self, remove: &std::collections::HashSet<UiId>) -> bool {
+    pub(crate) fn remove_ids(&mut self, remove: &std::collections::HashSet<UiId>) -> bool {
         if remove.is_empty() {
             return false;
         }
@@ -173,7 +198,9 @@ impl HostTree {
                 return;
             };
             ordered.push(node.clone());
-            for child in &node.children {
+            let mut children: Vec<_> = node.children.iter().collect();
+            children.sort_by_key(|id| nodes.get(*id).map_or(0, |n| n.z_index));
+            for child in children {
                 append(child, nodes, seen, ordered);
             }
         }
@@ -182,6 +209,9 @@ impl HostTree {
         }
         for id in nodes.keys() {
             append(id, &nodes, &mut seen, &mut ordered);
+        }
+        if previous_order != ordered.iter().map(|n| n.id.clone()).collect::<Vec<_>>() {
+            self.projection_changes.structure_changed = true;
         }
         self.nodes = ordered;
         self.rebuild_node_indices();
@@ -312,4 +342,6 @@ fn focus_projection_eq(previous: &UiNode, next: &UiNode) -> bool {
         && previous.event_policy.focus == next.event_policy.focus
         && previous.auto_focus == next.auto_focus
         && previous.focus_scope == next.focus_scope
+        && previous.visibility == next.visibility
+        && previous.inert == next.inert
 }

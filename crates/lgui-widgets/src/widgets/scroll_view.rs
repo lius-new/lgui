@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::core::{
     Color, ComponentActionOutcome, ComponentState, CursorIcon, Element, ElementKey,
-    ElementRenderCx, EventPolicy, InteractionRole, IntoElementContent, RenderPhase, UiAction,
-    UiElement, UiEventKind, UiId, UiRect, VisualStyle, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION,
-    POINTER_UP_ACTION, WHEEL_ACTION,
+    ElementRenderCx, EventPolicy, InteractionRole, IntoElementContent, POINTER_DOWN_ACTION,
+    POINTER_DRAG_ACTION, POINTER_UP_ACTION, RenderPhase, UiAction, UiElement, UiEventKind, UiId,
+    UiRect, VisualStyle, WHEEL_ACTION,
 };
 
 /// Pixels moved by one wheel line.
@@ -301,11 +301,7 @@ impl ThumbState {
 
     fn offset(&self) -> f32 {
         let offsets = self.shared.lock().expect("scroll offsets poisoned");
-        if self.vertical {
-            offsets.y
-        } else {
-            offsets.x
-        }
+        if self.vertical { offsets.y } else { offsets.x }
     }
 
     fn position(&self, action: &UiAction) -> Option<f32> {

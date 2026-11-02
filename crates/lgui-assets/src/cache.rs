@@ -7,8 +7,8 @@ use std::{
     collections::HashMap,
     fs,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -640,11 +640,7 @@ pub fn prepare_image_bytes(
             "image decode target must be positive".to_owned(),
         ));
     };
-    validate_decoded_dimensions(
-        target_width,
-        target_height,
-        MAX_DECODED_RESOURCE_BYTES,
-    )?;
+    validate_decoded_dimensions(target_width, target_height, MAX_DECODED_RESOURCE_BYTES)?;
     if width <= target_width && height <= target_height {
         return Ok(bytes);
     }
@@ -656,10 +652,7 @@ pub fn prepare_image_bytes(
     resized
         .write_to(&mut encoded, image::ImageFormat::Png)
         .map_err(|error| AssetError::InvalidData(error.to_string()))?;
-    validate_encoded_bytes(
-        Arc::from(encoded.into_inner()),
-        MAX_ENCODED_RESOURCE_BYTES,
-    )
+    validate_encoded_bytes(Arc::from(encoded.into_inner()), MAX_ENCODED_RESOURCE_BYTES)
 }
 
 #[cfg(any(test, feature = "backend-winit"))]

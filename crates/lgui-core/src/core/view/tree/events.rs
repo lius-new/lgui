@@ -85,7 +85,7 @@ impl HostTree {
     pub fn focusable_hits(&self) -> Vec<HitResult> {
         self.nodes
             .iter()
-            .filter(|node| node.event_policy.focus)
+            .filter(|node| node.event_policy.focus && self.is_interactive(&node.id))
             .map(|node| self.hit_for_node(node, None))
             .collect()
     }
@@ -95,6 +95,7 @@ impl HostTree {
             .iter()
             .filter(|node| {
                 node.event_policy.focus
+                    && self.is_interactive(&node.id)
                     && (&node.id == scope_id || self.node_is_descendant_of(&node.id, scope_id))
             })
             .map(|node| self.hit_for_node(node, None))
@@ -104,7 +105,7 @@ impl HostTree {
     pub fn focusable_hit(&self, id: &UiId) -> Option<HitResult> {
         self.nodes
             .iter()
-            .find(|node| &node.id == id && node.event_policy.focus)
+            .find(|node| &node.id == id && node.event_policy.focus && self.is_interactive(&node.id))
             .map(|node| self.hit_for_node(node, None))
     }
 
@@ -157,7 +158,11 @@ impl HostTree {
                 )
                 .into_iter()
                 .collect(),
-            UiEvent::PointerPressed { hit, pointer, button } => self
+            UiEvent::PointerPressed {
+                hit,
+                pointer,
+                button,
+            } => self
                 .handler_event(
                     &hit.id,
                     UiEventPayload::PointerDown {
@@ -167,11 +172,10 @@ impl HostTree {
                 )
                 .into_iter()
                 .collect(),
-            UiEvent::PointerMoved { hit, pointer } => {
-                self.handler_event(&hit.id, UiEventPayload::PointerMove { pointer: *pointer })
-                    .into_iter()
-                    .collect()
-            }
+            UiEvent::PointerMoved { hit, pointer } => self
+                .handler_event(&hit.id, UiEventPayload::PointerMove { pointer: *pointer })
+                .into_iter()
+                .collect(),
             UiEvent::PointerDragged { hit, pointer } => self
                 .handler_event(&hit.id, UiEventPayload::PointerDrag { pointer: *pointer })
                 .into_iter()
@@ -237,7 +241,9 @@ impl HostTree {
     pub fn auto_focus_hit(&self) -> Option<HitResult> {
         self.nodes
             .iter()
-            .find(|node| node.auto_focus && node.event_policy.focus)
+            .find(|node| {
+                node.auto_focus && node.event_policy.focus && self.is_interactive(&node.id)
+            })
             .map(|node| self.hit_for_node(node, None))
     }
 
@@ -253,8 +259,17 @@ impl HostTree {
         self.nodes
             .iter()
             .rev()
-            .find(|node| node.focus_scope && node.render_phase == RenderPhase::Popup)
-            .or_else(|| self.nodes.iter().rev().find(|node| node.focus_scope))
+            .find(|node| {
+                node.focus_scope
+                    && node.render_phase == RenderPhase::Popup
+                    && self.is_interactive(&node.id)
+            })
+            .or_else(|| {
+                self.nodes
+                    .iter()
+                    .rev()
+                    .find(|node| node.focus_scope && self.is_interactive(&node.id))
+            })
             .map(|node| node.id.clone())
     }
 
@@ -262,6 +277,7 @@ impl HostTree {
         self.node(id)
             .filter(|node| {
                 node.event_policy.focus
+                    && self.is_interactive(&node.id)
                     && (&node.id == scope_id || self.node_is_descendant_of(&node.id, scope_id))
             })
             .map(|node| self.hit_for_node(node, None))
@@ -273,6 +289,7 @@ impl HostTree {
             .find(|node| {
                 node.auto_focus
                     && node.event_policy.focus
+                    && self.is_interactive(&node.id)
                     && self.node_is_descendant_of(&node.id, scope_id)
             })
             .map(|node| self.hit_for_node(node, None))
@@ -297,6 +314,7 @@ impl HostTree {
         let contains = |node: &UiNode| {
             let offset = self.ancestor_content_offset(node);
             accepts(node)
+                && self.is_interactive(&node.id)
                 && node.hit_rect.translate(offset.0, offset.1).contains(point)
                 && self.node_visible_at_point(node, point)
         };

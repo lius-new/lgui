@@ -1,11 +1,11 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use crate::core::{
-    component, content_text, group, HostTreeBuilder, RenderCx, RootComponent, UiRect, UiRuntime,
-    UiScale,
+    HostTreeBuilder, RenderCx, RootComponent, UiRect, UiRuntime, UiScale, component, content_text,
+    group,
 };
 
 use super::*;

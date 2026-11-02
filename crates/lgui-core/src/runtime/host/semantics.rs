@@ -19,7 +19,10 @@ impl HostRuntime {
         };
         let mut nodes = Vec::new();
         for node in candidates {
-            let semantic = SemanticNode::from_ui_node(node);
+            let mut semantic = SemanticNode::from_ui_node(node);
+            semantic.semantics.state.hidden |= !tree.is_visible(&node.id);
+            semantic.semantics.state.disabled |=
+                tree.is_visible(&node.id) && !tree.is_interactive(&node.id);
             if full || self.semantics.get(&node.id) != Some(&semantic) {
                 nodes.push(semantic.clone());
             }

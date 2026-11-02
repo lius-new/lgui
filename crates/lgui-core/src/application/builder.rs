@@ -12,8 +12,8 @@ use crate::{
 use crate::memory::PersistentCacheStore;
 
 use super::{
-    application_root_view, AppView, ApplicationBackend, ApplicationContext, RenderError,
-    RenderErrorRegistration, WindowOptions,
+    AppView, ApplicationBackend, ApplicationContext, RenderError, RenderErrorRegistration,
+    WindowOptions, application_root_view,
 };
 
 pub struct Application<B> {
@@ -112,9 +112,9 @@ where
     pub fn run(
         self,
         view: impl for<'scope, 'context> Fn(&mut RenderCx<'scope, 'context>) -> Element
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> Result<(), B::Error> {
         let context = ApplicationContext::new_with_memory(
             self.resources,

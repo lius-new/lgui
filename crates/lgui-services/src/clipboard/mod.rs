@@ -6,4 +6,4 @@ mod system;
 
 pub use contract::{Clipboard, ClipboardError, ClipboardHandle};
 #[cfg(feature = "clipboard")]
-pub use system::{read_text, system_clipboard, write_text, SystemClipboard};
+pub use system::{SystemClipboard, read_text, system_clipboard, write_text};

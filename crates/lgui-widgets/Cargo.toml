@@ -17,6 +17,7 @@ default = ["widgets"]
 widgets = []
 
 [dependencies]
+unicode-segmentation = "1.12"
 lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }
 
 [dev-dependencies]

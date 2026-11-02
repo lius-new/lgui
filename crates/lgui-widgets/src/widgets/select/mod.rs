@@ -3,8 +3,8 @@ mod render;
 mod state;
 
 pub use model::{
-    select, IntoSelectChangeHandler, Select, SelectChangeHandler, SelectOption, SelectPlacement,
-    SelectStyle, SelectSwatch, SELECT_OPTION_HEIGHT,
+    IntoSelectChangeHandler, SELECT_OPTION_HEIGHT, Select, SelectChangeHandler, SelectOption,
+    SelectPlacement, SelectStyle, SelectSwatch, select,
 };
 
 #[path = "select_test.rs"]

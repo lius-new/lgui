@@ -13,9 +13,7 @@ mod persistent;
 pub use evict::{
     CacheEvent, CacheHooks, CacheObserver, CacheView, EntryId, EntryInfo, ShrinkLevel,
 };
-pub use governor::{
-    DomainInstanceId, MemoryGovernor, MemoryReservation, MemoryTaskReservation,
-};
+pub use governor::{DomainInstanceId, MemoryGovernor, MemoryReservation, MemoryTaskReservation};
 #[doc(hidden)]
 pub use lru::LruCache;
 pub use options::{MemoryBudget, MemoryOptions};

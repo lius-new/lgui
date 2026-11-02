@@ -18,9 +18,9 @@ use lgui_core::text::{self, TextLayout, TextLayoutRequest};
 
 use crate::core::{
     Color, ComponentActionOutcome, ComponentState, CursorIcon, Element, ElementKey,
-    ElementRenderCx, EventPolicy, InteractionRole, IntoElementContent, RenderPhase, TextStyle,
-    UiAction, UiElement, UiEventContext, UiEventKind, UiId, UiNodeKind, UiRect, VisualStyle,
-    POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION,
+    ElementRenderCx, EventPolicy, InteractionRole, IntoElementContent, POINTER_DOWN_ACTION,
+    POINTER_DRAG_ACTION, POINTER_UP_ACTION, RenderPhase, TextStyle, UiAction, UiElement,
+    UiEventContext, UiEventKind, UiId, UiNodeKind, UiRect, VisualStyle,
 };
 
 const SELECTION_EVENT: &str = "selection_region.select";
@@ -557,7 +557,11 @@ mod tests {
         assert!(down.events.is_empty(), "a press alone selects nothing");
         let drag = press(&mut state, POINTER_DRAG_ACTION, 82.0, 5.0);
         assert!(drag.changed);
-        assert_eq!(drag.events[0].payload_value(), Some("llo wo"), "live while dragging");
+        assert_eq!(
+            drag.events[0].payload_value(),
+            Some("llo wo"),
+            "live while dragging"
+        );
         let up = press(&mut state, POINTER_UP_ACTION, 82.0, 5.0);
         assert_eq!(up.events.len(), 1);
         // From the middle of "hello" to the middle of "world", with the gap as a space.

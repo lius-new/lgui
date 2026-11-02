@@ -12,10 +12,10 @@ pub mod notification;
 pub mod open_url;
 pub mod tray;
 
+pub use application::{ServicesApplicationExt, ServicesContextExt};
 #[cfg(feature = "tray")]
 #[doc(hidden)]
-pub use application::{dispatch_tray_action, TrayCommandHandler, TrayRegistration};
-pub use application::{ServicesApplicationExt, ServicesContextExt};
+pub use application::{TrayCommandHandler, TrayRegistration, dispatch_tray_action};
 pub use clipboard::{Clipboard, ClipboardError, ClipboardHandle};
 pub use notification::{Notification, NotificationError, NotificationHandle, NotificationService};
 #[cfg(feature = "tray")]

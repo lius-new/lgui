@@ -7,7 +7,7 @@ use std::{
 
 use tiny_skia::{Pixmap, Transform};
 
-use lgui_assets::icons::{builtin_svg, SvgIconRegistry};
+use lgui_assets::icons::{SvgIconRegistry, builtin_svg};
 use lgui_core::core::{Color, IconStyle, UiRect};
 
 static SVG_REGISTRY: OnceLock<SvgIconRegistry> = OnceLock::new();

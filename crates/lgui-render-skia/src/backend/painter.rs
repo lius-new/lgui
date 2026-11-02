@@ -309,7 +309,7 @@ impl SkiaPainter<'_> {
     fn draw_icon(
         &mut self,
         canvas: &Canvas,
-        key: &'static str,
+        key: &str,
         rect: UiRect,
         style: lgui_core::core::IconStyle,
     ) -> Result<(), String> {
@@ -341,7 +341,7 @@ impl SkiaPainter<'_> {
 
     fn icon(
         &mut self,
-        key: &'static str,
+        key: &str,
         width: i32,
         height: i32,
         style: lgui_core::core::IconStyle,

@@ -437,10 +437,7 @@ fn resize_frame_data(window: &Window) -> Option<&ResizeFrameData> {
 
 /// Publish the app-drawn maximize button, in client-space physical pixels, to
 /// the native hit test. A no-op unless the outer resize frame is installed.
-pub(crate) fn set_maximize_button(
-    window: &Window,
-    button: Option<lgui_core::core::PhysicalRect>,
-) {
+pub(crate) fn set_maximize_button(window: &Window, button: Option<lgui_core::core::PhysicalRect>) {
     let Some(data) = resize_frame_data(window) else {
         return;
     };

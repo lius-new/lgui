@@ -76,6 +76,7 @@ impl UiSession {
     }
 
     pub fn prepare_render(&mut self, viewport: UiRect, scale: UiScale) {
+        self.layout.set_viewport(viewport);
         let context = (viewport, scale);
         if self.render_context != Some(context) {
             self.runtime.invalidate_all_components();
@@ -112,8 +113,12 @@ impl UiSession {
     }
 
     pub fn commit(&mut self, viewport: UiRect) -> HostCommit {
+        self.layout.set_viewport(viewport);
         let changes = self.tree.take_projection_changes();
-        let (_, changes) = self.layout.update_projection(&mut self.tree, changes);
+        let (layout, changes) = self.layout.update_projection(&mut self.tree, changes);
+        if layout.laid_out_nodes > 0 {
+            self.runtime.reconcile_tree_focus(&self.tree);
+        }
         self.host.commit_projection(
             &self.tree,
             &self.runtime.interaction_state(),
@@ -191,7 +196,10 @@ impl UiSession {
         #[cfg(feature = "diagnostics-timing")]
         let layout_started = Instant::now();
         let changes = self.tree.take_projection_changes();
-        let (_, changes) = self.layout.update_projection(&mut self.tree, changes);
+        let (layout, changes) = self.layout.update_projection(&mut self.tree, changes);
+        if layout.laid_out_nodes > 0 {
+            self.runtime.reconcile_tree_focus(&self.tree);
+        }
         #[cfg(feature = "diagnostics-timing")]
         let layout_ms = elapsed_ms(layout_started);
 

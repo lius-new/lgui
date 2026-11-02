@@ -1,9 +1,10 @@
 use super::{
-    apply_events_to_animations, AnimProperty, AnimationRegistry, CompositingLayerSpec,
-    DeclarativeView, DirtyTracker, HostTree, InputEvent, InteractionFlags, KeyState, LogicalKey,
-    NamedKey, SemanticAction, UiAction, UiActionEvent, UiAsyncContext, UiElement, UiEvent,
-    UiEventDispatcher, UiEventPayload, UiHandlerEvent, UiId, UiIdPath, UiInteractionState, UiRect,
-    UiScale, UiTaskSpawner, POINTER_DOWN_ACTION, POINTER_DRAG_ACTION, POINTER_UP_ACTION, WHEEL_ACTION,
+    AnimProperty, AnimationRegistry, CompositingLayerSpec, DeclarativeView, DirtyTracker, HostTree,
+    InputEvent, InteractionFlags, KeyState, LogicalKey, NamedKey, POINTER_DOWN_ACTION,
+    POINTER_DRAG_ACTION, POINTER_UP_ACTION, SemanticAction, UiAction, UiActionEvent,
+    UiAsyncContext, UiElement, UiEvent, UiEventDispatcher, UiEventPayload, UiHandlerEvent, UiId,
+    UiIdPath, UiInteractionState, UiRect, UiScale, UiTaskSpawner, WHEEL_ACTION,
+    apply_events_to_animations,
 };
 #[cfg(feature = "async")]
 use super::{noop_task_spawner, task};
@@ -27,7 +28,7 @@ pub use component_tree::{
 };
 pub use context::UiRenderContext;
 pub(crate) use context_value::stage_current_listener;
-pub use context_value::{try_use_context, use_context, ContextProviderGuard, ContextRegistry};
+pub use context_value::{ContextProviderGuard, ContextRegistry, try_use_context, use_context};
 pub use effect::{EffectRegistry, IntoEffectCleanup, UiEffect};
 pub use hook_state::{HookStateStore, UiUpdateQueue, UiWake};
 pub use observable::{Observable, ObservableListener};

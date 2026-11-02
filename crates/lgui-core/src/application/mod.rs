@@ -18,9 +18,9 @@ pub use context::ApplicationContext;
 pub(crate) use error::RenderErrorRegistration;
 pub use error::{RenderError, RenderErrorStage};
 pub use handle::{ApplicationHandle, ApplicationTask};
-pub(crate) use scope::{current_application, ApplicationScopeFuture};
-pub(crate) use view::application_root_view;
+pub(crate) use scope::{ApplicationScopeFuture, current_application};
 pub use view::AppView;
+pub(crate) use view::application_root_view;
 
 #[path = "application_test.rs"]
 #[cfg(test)]

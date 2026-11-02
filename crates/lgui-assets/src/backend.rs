@@ -14,7 +14,7 @@ use lgui_core::{
 use crate::AssetBytes;
 #[cfg(feature = "backend-winit")]
 use crate::RemoteImageLoaderHandle;
-use crate::{cache, resources, ImageCacheHandle, RenderResources};
+use crate::{ImageCacheHandle, RenderResources, cache, resources};
 
 pub fn render_resources() -> RenderResources {
     resources::render_resources()

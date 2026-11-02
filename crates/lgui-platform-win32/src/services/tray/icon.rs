@@ -4,14 +4,14 @@ use windows::Win32::{
     Foundation::HWND,
     UI::{
         Shell::{
-            Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD,
-            NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+            NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+            NOTIFYICONDATAW, Shell_NotifyIconW,
         },
         WindowsAndMessaging::{DestroyIcon, HICON},
     },
 };
 
-use super::{support::copy_wide, TRAY_MESSAGE_ID};
+use super::{TRAY_MESSAGE_ID, support::copy_wide};
 use crate::ico::create_icon_from_ico_bytes;
 
 const DEFAULT_TRAY_ICON_ID: u32 = 1;

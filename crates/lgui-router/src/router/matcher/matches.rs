@@ -5,7 +5,7 @@ use std::{
 
 use crate::core::{Observable, RenderCx};
 
-use super::super::{location::resolve_path, Location, PathParams};
+use super::super::{Location, PathParams, location::resolve_path};
 
 #[derive(Clone)]
 pub(in crate::router) struct ErasedRouteHandle {

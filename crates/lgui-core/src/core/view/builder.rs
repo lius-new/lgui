@@ -118,7 +118,7 @@ impl HostTreeBuilder {
                 .insert(id.clone());
         }
         if self.retained {
-            self.tree.upsert(node);
+            self.tree.upsert_during_render(node);
         } else {
             self.tree.push(node);
         }
@@ -258,6 +258,7 @@ impl HostTreeBuilder {
             self.structure_changed |= self.tree.retain_owner_nodes(owner, &keep);
         }
         self.structure_changed |= self.tree.prune_dead_component_owners(component_tree);
+        self.tree.assert_public_ids_unique();
         if self.structure_changed {
             self.tree.reorder_by_hierarchy();
         }

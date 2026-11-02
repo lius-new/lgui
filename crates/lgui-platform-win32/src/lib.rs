@@ -13,18 +13,18 @@ pub mod services;
 #[path = "assets/svg.rs"]
 mod svg;
 
-#[cfg(feature = "notifications-win32")]
-pub use services::{
-    install_notification_service, Win32NotificationApplicationExt, Win32NotificationService,
-};
 #[cfg(feature = "tray-win32")]
 pub use services::{
-    taskbar_created_message, TrayIconHandle, Win32TrayHost, Win32TrayIcon, TRAY_MESSAGE_ID,
+    TRAY_MESSAGE_ID, TrayIconHandle, Win32TrayHost, Win32TrayIcon, taskbar_created_message,
+};
+#[cfg(feature = "notifications-win32")]
+pub use services::{
+    Win32NotificationApplicationExt, Win32NotificationService, install_notification_service,
 };
 #[cfg(all(feature = "svg", feature = "tray-win32"))]
 pub use svg::{
-    install_application_svg_icons, install_svg_font_registry, install_svg_icon_registry, rasterize_svg_icon_bgra, SvgBitmap,
-    SvgFontRegistry,
+    SvgBitmap, SvgFontRegistry, install_application_svg_icons, install_svg_font_registry,
+    install_svg_icon_registry, rasterize_svg_icon_bgra,
 };
 
 #[cfg(feature = "system-diagnostics")]

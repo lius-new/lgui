@@ -2,6 +2,7 @@ use super::*;
 
 impl UiRuntime {
     pub fn handle_input(&mut self, tree: &HostTree, input: InputEvent) -> RuntimeOutput {
+        let behavior = tree.behavior_events(&input, self.events.state().focused.as_ref());
         let focus_traversal = match &input {
             InputEvent::Keyboard(event)
                 if event.state == KeyState::Down
@@ -206,10 +207,11 @@ impl UiRuntime {
                 });
             }
         }
-        let handler_events = events
+        let mut handler_events: Vec<_> = events
             .iter()
             .flat_map(|event| tree.handler_events(event))
             .collect();
+        handler_events.extend(behavior);
         for event in events.iter().cloned() {
             self.dirty.mark_event(event);
         }

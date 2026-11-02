@@ -48,8 +48,12 @@ pub fn content_text(value: impl Into<Cow<'static, str>>) -> Element {
     let height = 18;
     let width = (value.chars().count() as i32 * 9).max(1);
     let rect = UiRect::new(0.0, 0.0, width as f32, height as f32);
-    text(rect, value, TextStyle::new(Color::WHITE, 16.0, 400))
-        .with_layout(LayoutSpec::Fixed(Size::new(width as f32, height as f32)))
+    text(rect, value, TextStyle::new(Color::WHITE, 16.0, 400)).size_constraints(
+        crate::core::SizeConstraints::new(
+            crate::core::Dimension::Content,
+            crate::core::Dimension::Auto,
+        ),
+    )
 }
 
 pub fn fragment(content: impl IntoElementContent) -> Fragment {

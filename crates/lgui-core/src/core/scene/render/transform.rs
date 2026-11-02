@@ -97,7 +97,7 @@ fn translate_command_with_policy(
         } => ScenePrimitive::Custom {
             id: id.clone(),
             rect: translate_rect(*rect),
-            key,
+            key: key.clone(),
             style: *style,
             phase: *phase,
         },
@@ -153,7 +153,7 @@ fn translate_command_with_policy(
         } => ScenePrimitive::Icon {
             id: id.clone(),
             rect: translate_rect(*rect),
-            key,
+            key: key.clone(),
             style: *style,
             phase: *phase,
         },

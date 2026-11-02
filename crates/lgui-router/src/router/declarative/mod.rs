@@ -3,10 +3,10 @@ mod outlet;
 mod redirect;
 mod route;
 
-pub use builder::{create_router, DeclarativeRouter};
+pub use builder::{DeclarativeRouter, create_router};
 pub use outlet::outlet;
 pub use redirect::redirect;
-pub use route::{index, layout, not_found, route, scope, IntoRoutes, Route};
+pub use route::{IntoRoutes, Route, index, layout, not_found, route, scope};
 
 #[path = "declarative_test.rs"]
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{context_provider, HostTreeBuilder, RenderCx, RootComponent, UiRuntime, UiScale};
+use crate::core::{HostTreeBuilder, RenderCx, RootComponent, UiRuntime, UiScale, context_provider};
 
 struct ThemedSwitchRoot {
     theme: ThemeContext,

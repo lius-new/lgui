@@ -6,9 +6,9 @@ use std::{
 use crate::resources::Resources;
 
 use super::super::{
+    StoreUnit,
     definition::StoreDefinition,
     subscription::{StoreNotification, StoreObserverRef, Subscription, SubscriptionToken},
-    StoreUnit,
 };
 
 trait AnyStoreUnit: Send + Sync {

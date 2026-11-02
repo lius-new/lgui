@@ -13,12 +13,14 @@ fn layout_tree_positions_a_stack_and_translates_descendants() {
             UiNodeKind::Group,
             UiRect::new(10.0, 20.0, 210.0, 220.0),
         )
-        .layout(LayoutSpec::Stack {
+        .layout(LayoutSpec::Flex(crate::core::FlexLayout {
             axis: Axis::Vertical,
             gap: 4.0,
             padding: EdgeInsets::all(8.0),
             align: Align::Start,
-        }),
+            justify: crate::core::Justify::Start,
+            wrap: false,
+        })),
     );
     tree.push(
         UiNode::new(
@@ -27,7 +29,10 @@ fn layout_tree_positions_a_stack_and_translates_descendants() {
             UiRect::new(0.0, 0.0, 40.0, 30.0),
         )
         .parent(root_id)
-        .layout(LayoutSpec::Fixed(Size::new(40.0, 30.0))),
+        .size_constraints(SizeConstraints::new(
+            crate::core::Dimension::Points(40.0),
+            crate::core::Dimension::Points(30.0),
+        )),
     );
     tree.push(
         UiNode::new(
@@ -87,12 +92,16 @@ fn leaf_geometry_change_lays_out_only_its_nearest_stack_boundary() {
             (right.clone(), UiRect::new(100.0, 0.0, 200.0, 100.0)),
         ] {
             tree.push(
-                UiNode::new(id, UiNodeKind::Group, rect).layout(LayoutSpec::Stack {
-                    axis: Axis::Vertical,
-                    gap: 0.0,
-                    padding: EdgeInsets::all(0.0),
-                    align: Align::Start,
-                }),
+                UiNode::new(id, UiNodeKind::Group, rect).layout(LayoutSpec::Flex(
+                    crate::core::FlexLayout {
+                        axis: Axis::Vertical,
+                        gap: 0.0,
+                        padding: EdgeInsets::all(0.0),
+                        align: Align::Start,
+                        justify: crate::core::Justify::Start,
+                        wrap: false,
+                    },
+                )),
             );
         }
         tree.push(
@@ -102,7 +111,10 @@ fn leaf_geometry_change_lays_out_only_its_nearest_stack_boundary() {
                 UiRect::new(0.0, 0.0, left_width, 20.0),
             )
             .parent(left.clone())
-            .layout(LayoutSpec::Fixed(Size::new(left_width, 20.0))),
+            .size_constraints(SizeConstraints::new(
+                crate::core::Dimension::Points(left_width),
+                crate::core::Dimension::Points(20.0),
+            )),
         );
         tree.push(
             UiNode::new(
@@ -111,7 +123,10 @@ fn leaf_geometry_change_lays_out_only_its_nearest_stack_boundary() {
                 UiRect::new(0.0, 0.0, 40.0, 20.0),
             )
             .parent(right.clone())
-            .layout(LayoutSpec::Fixed(Size::new(40.0, 20.0))),
+            .size_constraints(SizeConstraints::new(
+                crate::core::Dimension::Points(40.0),
+                crate::core::Dimension::Points(20.0),
+            )),
         );
         tree
     };
@@ -135,12 +150,14 @@ fn inserting_a_stack_child_invalidates_its_layout_boundary() {
             UiNodeKind::Group,
             UiRect::new(0.0, 0.0, 100.0, 100.0),
         )
-        .layout(LayoutSpec::Stack {
+        .layout(LayoutSpec::Flex(crate::core::FlexLayout {
             axis: Axis::Vertical,
             gap: 4.0,
             padding: EdgeInsets::all(0.0),
             align: Align::Start,
-        }),
+            justify: crate::core::Justify::Start,
+            wrap: false,
+        })),
     );
     first.push(
         UiNode::new(
@@ -149,7 +166,10 @@ fn inserting_a_stack_child_invalidates_its_layout_boundary() {
             UiRect::new(0.0, 0.0, 20.0, 20.0),
         )
         .parent(root.clone())
-        .layout(LayoutSpec::Fixed(Size::new(20.0, 20.0))),
+        .size_constraints(SizeConstraints::new(
+            crate::core::Dimension::Points(20.0),
+            crate::core::Dimension::Points(20.0),
+        )),
     );
     let mut runtime = LayoutRuntime::new();
     runtime.update(&mut first);
@@ -161,7 +181,10 @@ fn inserting_a_stack_child_invalidates_its_layout_boundary() {
             UiRect::new(0.0, 0.0, 20.0, 20.0),
         )
         .parent(root)
-        .layout(LayoutSpec::Fixed(Size::new(20.0, 20.0))),
+        .size_constraints(SizeConstraints::new(
+            crate::core::Dimension::Points(20.0),
+            crate::core::Dimension::Points(20.0),
+        )),
     );
 
     let metrics = runtime.update(&mut second);

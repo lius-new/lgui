@@ -22,6 +22,176 @@ coverage gamma/contrast; defaults retain backend values. Update one window with
 values change. These parameters currently apply to software LCD rendering.
 Theme selection and the choice of coverage values remain application policy.
 
+## Child Sizing
+
+`Dimension` and `SizeConstraints` describe child-owned sizes independently of the
+parent's arrangement. Set them with `.size_constraints(...)` on `Element`,
+`UiElement`, or `UiNode`. Unspecified constraints preserve declared geometry.
+
+```rust,ignore
+use lgui::prelude::{Dimension, Size, SizeConstraints};
+
+let sizing = SizeConstraints::new(Dimension::Percent(0.5), Dimension::Auto)
+    .min_size(Size::new(80.0, 20.0))
+    .max_size(Size::new(240.0, 120.0))
+    .aspect_ratio(2.0);
+let item = group(rect).size_constraints(sizing);
+```
+
+`Points` uses logical units; `Percent(0.5)` uses half the parent's content size,
+after layout padding. `Auto` preserves the declared size. `Content` measures text
+through the installed text system or measures a container's children. A definite
+text width constrains word wrapping when measuring content height. Without a text
+system, declared geometry remains the fallback; plain content strings now use
+measured widths when a text system is available.
+
+An omitted maximum is unbounded. Minimums win over contradictory maximums, and
+explicit dimensions and size bounds take precedence over the preferred aspect
+ratio. Invalid lengths normalize to zero; invalid aspect ratios are ignored.
+Content changes invalidate containing layouts; paint-only text color/alpha changes
+reuse measurements. Parent resizing also updates retained percentage-sized children.
+Sizing does not select an overflow policy. Set `.overflow(Overflow::Clip)` for a
+clipped subtree, `Ellipsis` for measured, grapheme-safe text truncation, or
+`Collapse(Size::new(min_available_width, min_available_height))` to remove a node
+from layout when its parent's available size is below the threshold. Ellipsis
+preserves the full semantic text. `Visibility::Hidden` preserves layout space;
+`Collapsed` removes it. Hidden subtrees neither paint nor accept focus/pointers.
+
+## Layout And Position
+
+`flex(rect, axis)` replaces `stack`. Its `.gap`, `.padding`, `.align`, `.justify`
+and `.wrap(true)` configure `LayoutSpec::Flex(FlexLayout)`. Child `.flex_item`
+accepts `FlexItem { grow, shrink, basis, align_self }`. Shrink is weighted by the
+basis; allocation freezes children at their minimum/maximum before distributing
+remaining space. Wrapping supplies the Wrap capability; there is no second Wrap
+layout. `Justify` includes Start, Center, End, SpaceBetween, SpaceAround and
+SpaceEvenly; `Align` includes Start, Center, End and Stretch.
+
+`group(rect).layout(LayoutSpec::Dock { padding, gap })` arranges children with
+`.dock(DockSide::Top/Bottom/Left/Right)`, followed by a Fill child. Insertion order
+determines which edges consume space first. `LayoutSpec::Grid(GridLayout)` accepts
+column/row `GridTrack::Points`, `Content` and `Fraction`;
+`.grid_cell(GridCell::at(column, row).span(columns, rows))` selects/spans tracks. Unspecified cells are
+placed in unoccupied slots. `GridLayout::gap` supplies independent row/column gaps.
+All these layouts consume the same `SizeConstraints` and text measurement service.
+
+Position is a separate node property:
+
+```rust,ignore
+let floating = group(rect)
+    .position(Position::anchor("toolbar.button", AnchorSide::Bottom))
+    .z_index(10);
+let badge = group(rect).position(Position::Layer {
+    horizontal: Align::End, vertical: Align::Start,
+    offset: lgui::core::Point::new(-4.0, 4.0),
+});
+```
+
+`Position::Absolute(Point)` offsets from the parent's content origin; Layer aligns
+and offsets against that content rectangle. Both are outside sibling allocation.
+Sibling `z_index` is stable for equal values and controls paint and hit order.
+Anchor refers to a public ID, supports four sides, offset/gap, optional flipping,
+then clamps its origin to the viewport. Constrain oversized floating content with
+`SizeConstraints`; origin clamping cannot make oversized content fit. Missing or
+cyclic anchors are returned by `LayoutRuntime::position_errors`.
+`Position::Sticky { top, left }` preserves its flow slot and sticks to the nearest
+scroll clip; use Auto to leave an axis unstuck. Coordinates are logical pixels.
+
+Migration: remove `Stack`/`stack` calls in favor of Flex; replace
+`LayoutSpec::Absolute` with `LayoutSpec::None` plus `Position::Absolute` where an
+offset is required. Replace `LayoutSpec::Fixed(size)` with Points constraints.
+`LayoutSpec` is Clone rather than Copy because Grid owns its tracks.
+
+## Portable Controls
+
+`text_input(rect, State<TextInputModel>)` and `multiline_input` use the scoped text
+system for selection, caret geometry, pointer hit testing and scrolling. Their
+model supports grapheme editing, range selection, undo/redo and IME preedit without
+committing partial composition. Builders provide placeholder, read_only, password,
+style, clipboard callbacks, on_change and on_selection. Password display and
+semantic values are masked; copy/cut are disabled. `TextClipboard` is an injected
+pair of callbacks and does not introduce a platform dependency.
+
+```rust,ignore
+let editor = text_input(bounds, cx.state(TextInputModel::new("Hello")))
+    .public_id("editor")
+    .on_identified_event(|event| {
+        // Committed Change and Selection include event.node, the public string ID.
+    });
+```
+
+`progress_ring(rect, Option<f32>, color)` is determinate for Some and uses existing
+frame scheduling for None. `scrollbar(rect, axis, viewport_extent, content_extent,
+offset_state)` supports track clicks and thumb dragging. `resize_handle(rect,
+axis, value, min, max, callback)` clamps drag values. `split(rect, axis, ratio_state,
+(first_min, second_min), first, second)` uses Flex and writes back a normalized
+ratio; if the viewport is smaller than both minimums, it divides the available
+extent proportionally. Callbacks receive the two pane rectangles.
+
+`virtual_list(rect, Arc<RowHeights>, offset_state, render_row)` only constructs the
+visible range plus one overscan row per side. `RowHeights::uniform` has constant
+storage; `variable` stores measured heights and prefix sums for binary range
+lookup. Recreate variable heights when measurements change. An explicit row key
+is preserved; otherwise the row index supplies identity. The list supports wheel,
+PageUp/PageDown/Home/End and an integrated scrollbar.
+
+`tree_view(rect, nodes, expanded_state, selected_state, offset_state)` uses stable
+TreeNode IDs and virtualizes expanded rows. Arrows/Home/End navigate and expand;
+collapsed branches are omitted. `tabs(rect, labels, selected_state, render_page)`
+renders the active page and supports arrow/Home/End switching. Tab selection is
+exposed in semantics. `badge(rect, label, optional_color)` and
+`icon_button(rect, owned_key, accessible_label)` supply the smaller controls;
+attach ordinary click handlers to the icon button.
+
+## Public Nodes, Runtime Descriptions And Behaviors
+
+`.public_id(owned_string)` is optional and unique within one HostTree/window.
+Empty or duplicate IDs are rejected; a duplicate never replaces an existing node.
+`HostTree::public_node` and `public_roots` return public IDs, nearest named parents,
+named children, bounds and readable PublicSemantics. Private intermediary nodes
+and internal UiIds are absent from this projection. Semantic access requires no
+accessibility feature. Native accessibility remains a separate platform adapter.
+
+`RuntimeOutput::identified_events(tree)` maps click, raw input, pointer, key, IME,
+focus and registered handler events to the nearest public ancestor.
+`identified_payload(name, payload)` maps application-defined selection/change
+events, and `visibility_events(previous_tree)` reports show/hide/removal. Input
+controls also offer the unified committed-event callback shown above.
+
+`DescriptionTree::new(namespace, mount_public_id).update(&mut tree, descriptions)`
+accepts runtime-built `NodeDescription` trees. Properties include layouts, sizing,
+position, visibility, dynamic text/icons, semantics and interaction. Keys are unique
+within one DescriptionTree and retain identity across reordering; unchanged nodes retain shared
+storage. Only changed properties/structure are applied, removed nodes are reclaimed,
+and unowned mount children are preserved. The complete description is validated
+before mutation, so duplicate key/ID and mount/collision errors are atomic.
+`DescriptionUpdate` reports created/updated/reused/removed counts and public
+visibility events. `clear` removes that description tree. Commit the updated tree
+through the existing UiSession; no second UI runtime is created.
+
+`.on_outside_pointer`, `.focus_scope()` and `.on_close_requested` provide popup
+behavior primitives. Outside events target each registered node once, without
+ancestor rebubbling. Escape issues a close request to the active scope/handler;
+it does not delete UI. Existing focus traversal traps Tab in the scope and restores
+previous focus after scope removal. The application owns popup existence and stacking.
+
+Icon and custom paint keys now own `Arc<str>` data throughout nodes, scene commands
+and SvgIconRegistry. Builders accept String, Arc or literals; direct enum/scene
+construction uses `.into()`. `UiNodeKind` is Clone rather than Copy. Runtime SVG
+data uses `SvgIconSource::Text(Cow::Owned(svg))`; no leaked strings are needed.
+
+ThemeTokens contains colors, spacing, typography, radii and motion. New controls
+read ThemeContext defaults; explicit styles and colors remain supported.
+`VisibilityTransition::from_theme(tokens)` reads motion/spacing defaults.
+`presence(rect, visible, transition, child)` composes opacity/translation on the
+existing compositing layer and component frame runtime. Exit disables interaction
+immediately, retains the child while animating, then collapses it; reversing the
+target continues from current progress. Zero duration changes immediately.
+
+Run the independent gallery with `cargo run --example capabilities --features
+renderer-skia-software`. See IMPLEMENTATION.md for requirement-level evidence and
+the separate, deferred Loom integration gate.
+
 ## Memory And Resource Lifetime
 
 `lgui` has no default memory profile or framework-owned byte budgets. Every application must construct

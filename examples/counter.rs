@@ -1,11 +1,11 @@
-use lgui::prelude::*;
 use lgui::WinitApplication;
+use lgui::prelude::*;
 
 fn app(cx: &mut RenderCx<'_, '_>) -> Element {
     let count = cx.state(0_i32);
     let increment = count.clone();
 
-    stack(UiRect::new(0.0, 0.0, 360.0, 200.0), Axis::Vertical)
+    flex(UiRect::new(0.0, 0.0, 360.0, 200.0), Axis::Vertical)
         .gap(12.0)
         .padding(EdgeInsets::all(24.0))
         .align(Align::Stretch)
@@ -31,6 +31,10 @@ fn app(cx: &mut RenderCx<'_, '_>) -> Element {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     Application::with_backend(WinitApplication::new(GraphicsPreference::Auto))
+        .memory_options(MemoryOptions::unbounded(
+            ImageCachePolicy::WhileVisible,
+            false,
+        ))
         .provide(RendererKind::Skia(GraphicsPreference::Auto))
         .window_options(
             WindowOptions::new("counter")
