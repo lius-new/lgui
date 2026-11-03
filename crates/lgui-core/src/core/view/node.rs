@@ -251,6 +251,21 @@ impl EventPolicy {
     };
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RelativeRelation {
+    Before,
+    After,
+    Append,
+}
+
+/// A logical public-node reference, resolved again on every tree projection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelativePlacement {
+    pub target: Arc<str>,
+    pub relation: RelativeRelation,
+    pub order: i32,
+}
+
 #[derive(Clone)]
 pub struct UiNode {
     pub id: UiId,
@@ -279,6 +294,8 @@ pub struct UiNode {
     pub animation_outset: (f32, f32),
     pub layout: LayoutSpec,
     pub public_id: Option<Arc<str>>,
+    pub placement: Option<RelativePlacement>,
+    pub(crate) placement_source: Option<UiId>,
     pub position: crate::core::Position,
     pub visibility: crate::core::Visibility,
     pub overflow: crate::core::Overflow,
@@ -343,6 +360,8 @@ impl UiNode {
             animation_outset: (0.0, 0.0),
             layout: LayoutSpec::default(),
             public_id: None,
+            placement: None,
+            placement_source: None,
             position: crate::core::Position::Flow,
             visibility: crate::core::Visibility::Visible,
             overflow: crate::core::Overflow::Visible,
@@ -383,6 +402,16 @@ impl UiNode {
         std::mem::size_of::<Self>()
             .saturating_add(self.id.as_str().len())
             .saturating_add(
+                self.placement
+                    .as_ref()
+                    .map_or(0, |placement| placement.target.len()),
+            )
+            .saturating_add(
+                self.placement_source
+                    .as_ref()
+                    .map_or(0, |source| source.as_str().len()),
+            )
+            .saturating_add(
                 self.parent
                     .as_ref()
                     .map_or(0, |parent| parent.as_str().len()),
@@ -418,6 +447,8 @@ impl UiNode {
 
     pub(crate) fn projection_eq(&self, other: &Self) -> bool {
         self.parent == other.parent
+            && self.placement == other.placement
+            && self.placement_source == other.placement_source
             && self.kind == other.kind
             && self.layout_rect == other.layout_rect
             && self.hit_rect == other.hit_rect

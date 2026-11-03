@@ -36,8 +36,8 @@ pub use declarative::{
 };
 pub use element::{UiComponent, UiElement};
 pub use node::{
-    EventPolicy, ImageDecodePolicy, ImageRequest, ImageSampling, InteractionRole, UiImageSource,
-    UiNode, UiNodeKind,
+    EventPolicy, ImageDecodePolicy, ImageRequest, ImageSampling, InteractionRole,
+    RelativePlacement, RelativeRelation, UiImageSource, UiNode, UiNodeKind,
 };
 pub(crate) use tree::ProjectionChanges;
 pub use tree::{HitResult, HostTree};

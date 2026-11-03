@@ -84,6 +84,9 @@ impl HostTreeBuilder {
         if node.parent.is_none() {
             node.parent = self.parent_stack.last().cloned();
         }
+        if node.placement.is_some() {
+            node.placement_source = node.parent.clone();
+        }
         let id = node.id.clone();
         self.tree.push(node);
         id
@@ -94,6 +97,9 @@ impl HostTreeBuilder {
         let (mut node, children, boundary) = element.into_parts();
         if node.parent.is_none() {
             node.parent = self.parent_stack.last().cloned();
+        }
+        if node.placement.is_some() {
+            node.placement_source = node.parent.clone();
         }
         let id = node.id.clone();
         let previous_children = self
@@ -258,6 +264,7 @@ impl HostTreeBuilder {
             self.structure_changed |= self.tree.retain_owner_nodes(owner, &keep);
         }
         self.structure_changed |= self.tree.prune_dead_component_owners(component_tree);
+        self.structure_changed |= self.tree.resolve_relative_placements();
         self.tree.assert_public_ids_unique();
         if self.structure_changed {
             self.tree.reorder_by_hierarchy();

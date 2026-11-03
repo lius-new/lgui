@@ -188,6 +188,11 @@ impl UiElement {
         self.children.as_slice()
     }
 
+    pub fn relative_to(mut self, placement: super::RelativePlacement) -> Self {
+        self.node.placement = Some(placement);
+        self
+    }
+
     pub fn child(mut self, child: UiElement) -> Self {
         Arc::make_mut(&mut self.children).push(child);
         self
