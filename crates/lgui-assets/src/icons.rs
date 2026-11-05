@@ -120,7 +120,66 @@ pub fn builtin_svg(key: &str) -> Option<Cow<'static, str>> {
         "arrow-left" => Some(Cow::Borrowed(ARROW_LEFT)),
         "close" => Some(Cow::Owned(icondata_to_svg(icondata::LuX))),
         "minus" => Some(Cow::Owned(icondata_to_svg(icondata::LuMinus))),
-        _ => None,
+        _ => inline_path_svg(key),
+    }
+}
+
+/// A bounded, origin-zero filled path supplied by the caller, rather than a
+/// registry alias. Reuse the ordinary SVG icon cache, color and DPI handling.
+fn inline_path_svg(key: &str) -> Option<Cow<'static, str>> {
+    if key.len() > 256 {
+        return None;
+    }
+    let (view, data) = key.strip_prefix("svg-path:")?.split_once(':')?;
+    let (width, height) = view.split_once('x')?;
+    let width: f32 = width.parse().ok()?;
+    let height: f32 = height.parse().ok()?;
+    if ![width, height]
+        .into_iter()
+        .all(|v| v.is_finite() && (1.0..=4096.0).contains(&v))
+        || data.is_empty()
+        || !data.bytes().all(|b| {
+            b.is_ascii_digit()
+                || b.is_ascii_whitespace()
+                || b"MmZzLlHhVvCcSsQqTtAaEe.,+-".contains(&b)
+        })
+    {
+        return None;
+    }
+    // The whitelist excludes XML delimiters and attribute quotes. No resource
+    // references, scripts, fonts or other SVG elements can be introduced.
+    Some(Cow::Owned(format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width} {height}\"><path fill=\"currentColor\" d=\"{data}\"/></svg>"
+    )))
+}
+
+#[cfg(test)]
+mod inline_path_tests {
+    use super::*;
+    #[test]
+    fn inline_paths_use_the_normal_icon_resolver_without_registration() {
+        let key = "svg-path:20x20:M10 2A8 8 0 0 0 2 10H4A6 6 0 0 1 10 4Z";
+        let source = SvgIconRegistry::new().resolve(key).unwrap();
+        assert!(source.contains("viewBox=\"0 0 20 20\""));
+        assert!(source.contains("fill=\"currentColor\""));
+        assert!(source.contains("M10 2A8"));
+        assert!(builtin_svg(key).is_some());
+        assert!(SvgIconRegistry::new().resolve("close").is_some());
+    }
+    #[test]
+    fn inline_paths_reject_xml_resources_and_unbounded_input() {
+        for key in [
+            "svg-path:0x24:M0 0",
+            "svg-path:NaNx24:M0 0",
+            "svg-path:4097x24:M0 0",
+            "svg-path:24x24:",
+            "svg-path:24x24:<svg/>",
+            "svg-path:24x24:M0 0\"/>",
+            "svg-path:24x24:url(test)",
+        ] {
+            assert!(inline_path_svg(key).is_none(), "{key}");
+        }
+        assert!(inline_path_svg(&format!("svg-path:24x24:M0 0{}", "L1 1".repeat(100))).is_none());
     }
 }
 
