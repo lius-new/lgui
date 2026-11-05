@@ -12,6 +12,124 @@ use std::sync::{
 };
 
 #[test]
+fn relative_animated_content_stays_visible_when_its_parent_component_is_reused() {
+    use crate::core::*;
+    #[derive(Clone, Default)]
+    struct Spin(f32);
+    impl CompositingLayerAnimation for Spin {
+        fn advance(&mut self, elapsed: f32) -> bool {
+            self.0 += elapsed;
+            true
+        }
+        fn compositing_layer_spec(&self) -> CompositingLayerSpec {
+            CompositingLayerSpec::new().rotation_degrees(self.0)
+        }
+    }
+    let viewport = UiRect::new(0.0, 0.0, 400.0, 24.0);
+    let view: AppView = Arc::new(move |_| {
+        component((), move |_, _| {
+            group(viewport)
+                .child(
+                    group(viewport)
+                        .layout(LayoutSpec::Flex(FlexLayout::default()))
+                        .child(group(UiRect::new(0.0, 0.0, 60.0, 24.0)).public_id("target")),
+                )
+                .child(
+                    group(viewport).visibility(Visibility::Collapsed).child(
+                        Element::new(move |cx: ElementRenderCx<'_, '_, '_>| {
+                            UiElement::group(cx.id, UiRect::new(0.0, 0.0, 24.0, 24.0))
+                                .children(cx.children)
+                                .layout(LayoutSpec::Flex(FlexLayout::default()))
+                                .size_constraints(SizeConstraints::new(
+                                    Dimension::Content,
+                                    Dimension::Points(24.0),
+                                ))
+                                .overflow(Overflow::Clip)
+                                .relative_to(RelativePlacement {
+                                    target: "target".into(),
+                                    relation: RelativeRelation::Before,
+                                    order: 0,
+                                })
+                        })
+                        .child(
+                            animated_compositing_layer(
+                                UiRect::new(0.0, 0.0, 14.0, 14.0),
+                                |_: &mut Spin| {},
+                            )
+                            .public_id("spinner")
+                            .size_constraints(SizeConstraints::new(
+                                Dimension::Points(14.0),
+                                Dimension::Points(14.0),
+                            ))
+                            .flex_item(FlexItem {
+                                align_self: Some(Align::Center),
+                                ..Default::default()
+                            })
+                            .child(Element::new(
+                                move |cx: ElementRenderCx<'_, '_, '_>| {
+                                    UiElement::panel(
+                                        cx.id,
+                                        UiRect::new(0.0, 0.0, 14.0, 14.0),
+                                        VisualStyle::filled(Color::WHITE),
+                                    )
+                                    .size_constraints(SizeConstraints::new(
+                                        Dimension::Points(14.0),
+                                        Dimension::Points(14.0),
+                                    ))
+                                    .overflow(Overflow::Clip)
+                                },
+                            )),
+                        ),
+                    ),
+                )
+        })
+    });
+    let mut session = UiSession::new();
+    for frame in 0..5 {
+        if frame > 0 {
+            let output = session.advance(16.0);
+            assert!(output.animation_changed);
+            if let Some(bounds) = output.dirty_bounds {
+                session.invalidations_mut().invalidate_rect(bounds);
+            }
+        }
+        let commit = session.render_view(&view, viewport, UiScale::ONE);
+        let spinner = session
+            .tree()
+            .nodes()
+            .iter()
+            .find(|n| n.public_id.as_deref() == Some("spinner"))
+            .unwrap();
+        let child = session.tree().node(&spinner.children[0]).unwrap();
+        assert_eq!(
+            child.layout_rect, spinner.layout_rect,
+            "frame {frame}: layer content drifted"
+        );
+        if frame > 0 {
+            assert_eq!(
+                session.layout_metrics().laid_out_nodes,
+                0,
+                "composition must not run layout"
+            );
+        }
+        assert!(
+            session.tree().is_visible(&spinner.id),
+            "frame {frame}: hidden spinner"
+        );
+        assert!(
+            spinner.layout_rect.width() > 0.0,
+            "frame {frame}: empty spinner {:?}",
+            spinner.layout_rect
+        );
+        assert!(
+            !commit.scene.commands().is_empty(),
+            "frame {frame}: empty scene"
+        );
+        assert_eq!(session.runtime().frame_interval_ms(), Some(16));
+    }
+}
+
+#[test]
 fn full_invalidation_marks_retained_components_dirty() {
     let mut session = UiSession::new();
     let components = session.runtime().component_tree();

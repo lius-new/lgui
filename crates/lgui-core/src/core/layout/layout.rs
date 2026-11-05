@@ -123,6 +123,10 @@ impl LayoutRuntime {
             .iter()
             .filter_map(|id| {
                 let node = tree.node(id)?;
+                // Retained nodes already carry resolved geometry. A paint-only update
+                // (including a layer transform) must keep the original layout inputs,
+                // rather than feeding the previous layout output back in as new input.
+                let retained = self.inputs.get(id).zip(self.outputs.get(id));
                 Some((
                     id.clone(),
                     LayoutInput {
@@ -136,15 +140,23 @@ impl LayoutRuntime {
                         overflow: node.overflow,
                         public_id: node.public_id.clone(),
                         z_index: node.z_index,
-                        clip: node.clip_rect,
+                        clip: retained
+                            .filter(|(_, output)| node.clip_rect == output.clip)
+                            .map_or(node.clip_rect, |(input, _)| input.clip),
                         offset: crate::core::Point::new(
                             node.content_offset.0,
                             node.content_offset.1,
                         ),
                         intrinsic: intrinsic_input(node),
-                        rect: node.layout_rect,
-                        hit_rect: node.hit_rect,
-                        paint_bounds: node.paint_bounds,
+                        rect: retained
+                            .filter(|(_, output)| node.layout_rect == output.layout_rect)
+                            .map_or(node.layout_rect, |(input, _)| input.rect),
+                        hit_rect: retained
+                            .filter(|(_, output)| node.hit_rect == output.hit_rect)
+                            .map_or(node.hit_rect, |(input, _)| input.hit_rect),
+                        paint_bounds: retained
+                            .filter(|(_, output)| node.paint_bounds == output.paint_bounds)
+                            .map_or(node.paint_bounds, |(input, _)| input.paint_bounds),
                     },
                 ))
             })
