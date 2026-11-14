@@ -97,6 +97,8 @@ pub struct WheelDelta {
     pub y: f32,
     pub unit: WheelUnit,
     pub phase: TouchPhase,
+    /// Keyboard modifiers held when the wheel moved.
+    pub modifiers: KeyModifiers,
 }
 
 impl PartialEq for WheelDelta {
@@ -105,6 +107,7 @@ impl PartialEq for WheelDelta {
             && normalized_f32_bits(self.y) == normalized_f32_bits(other.y)
             && self.unit == other.unit
             && self.phase == other.phase
+            && self.modifiers == other.modifiers
     }
 }
 
@@ -117,6 +120,7 @@ impl WheelDelta {
             y,
             unit: WheelUnit::Lines,
             phase: TouchPhase::Moved,
+            modifiers: KeyModifiers::empty(),
         }
     }
 
@@ -126,6 +130,7 @@ impl WheelDelta {
             y,
             unit: WheelUnit::Pixels,
             phase: TouchPhase::Moved,
+            modifiers: KeyModifiers::empty(),
         }
     }
 }

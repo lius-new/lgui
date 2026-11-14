@@ -304,12 +304,14 @@ impl WinitWindow {
                         y,
                         unit: lgui_core::core::WheelUnit::Lines,
                         phase,
+                        modifiers: key_modifiers(self.modifiers),
                     },
                     MouseScrollDelta::PixelDelta(position) => WheelDelta {
                         x: position.x as f32 / self.scale.factor(),
                         y: position.y as f32 / self.scale.factor(),
                         unit: lgui_core::core::WheelUnit::Pixels,
                         phase,
+                        modifiers: key_modifiers(self.modifiers),
                     },
                 };
                 self.dispatch_input(InputEvent::Wheel { point, delta });

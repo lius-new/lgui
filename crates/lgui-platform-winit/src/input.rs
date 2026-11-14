@@ -96,19 +96,7 @@ pub(super) fn keyboard_event(
         WinitKeyLocation::Right => KeyLocation::Right,
         WinitKeyLocation::Numpad => KeyLocation::Numpad,
     };
-    let mut translated = KeyModifiers::empty();
-    if modifiers.alt_key() {
-        translated |= KeyModifiers::ALT;
-    }
-    if modifiers.control_key() {
-        translated |= KeyModifiers::CONTROL;
-    }
-    if modifiers.shift_key() {
-        translated |= KeyModifiers::SHIFT;
-    }
-    if modifiers.super_key() {
-        translated |= KeyModifiers::META;
-    }
+    let translated = key_modifiers(modifiers);
     KeyboardEvent {
         state: match event.state {
             ElementState::Pressed => KeyState::Down,
@@ -194,4 +182,21 @@ mod tests {
             None
         );
     }
+}
+
+pub(super) fn key_modifiers(modifiers: ModifiersState) -> KeyModifiers {
+    let mut translated = KeyModifiers::empty();
+    if modifiers.alt_key() {
+        translated |= KeyModifiers::ALT;
+    }
+    if modifiers.control_key() {
+        translated |= KeyModifiers::CONTROL;
+    }
+    if modifiers.shift_key() {
+        translated |= KeyModifiers::SHIFT;
+    }
+    if modifiers.super_key() {
+        translated |= KeyModifiers::META;
+    }
+    translated
 }
