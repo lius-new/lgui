@@ -217,6 +217,9 @@ pub struct TextInput {
     read_only: bool,
     password: bool,
     placeholder: String,
+    placeholder_style: Option<TextStyle>,
+    caret_color: Option<Color>,
+    selection_color: Option<Color>,
     clipboard: TextClipboard,
     changed: Option<Changed>,
     selected: Option<Selected>,
@@ -240,6 +243,9 @@ pub fn text_input(rect: UiRect, model: impl Into<WidgetValue<TextInputModel>>) -
         read_only: false,
         password: false,
         placeholder: String::new(),
+        placeholder_style: None,
+        caret_color: None,
+        selection_color: None,
         clipboard: TextClipboard::default(),
         changed: None,
         selected: None,
@@ -290,6 +296,21 @@ impl TextInput {
     }
     pub fn placeholder(mut self, v: impl Into<String>) -> Self {
         self.placeholder = v.into();
+        self
+    }
+    /// Style of the placeholder, which otherwise reuses the text style.
+    pub fn placeholder_style(mut self, v: TextStyle) -> Self {
+        self.placeholder_style = Some(v);
+        self
+    }
+    /// Caret color, which otherwise follows the theme accent.
+    pub fn caret_color(mut self, v: Color) -> Self {
+        self.caret_color = Some(v);
+        self
+    }
+    /// Selection highlight color, which otherwise follows the theme accent.
+    pub fn selection_color(mut self, v: Color) -> Self {
+        self.selection_color = Some(v);
         self
     }
     pub fn clipboard(mut self, v: TextClipboard) -> Self {
@@ -499,6 +520,9 @@ impl From<TextInput> for Element {
             read_only,
             password,
             placeholder,
+            placeholder_style,
+            caret_color,
+            selection_color,
             clipboard,
             changed,
             selected,
@@ -646,7 +670,8 @@ impl From<TextInput> for Element {
                     content = content.child(UiElement::panel(
                         cx.auto_id(),
                         area,
-                        VisualStyle::filled(tokens.colors.accent).alpha(80),
+                        VisualStyle::filled(selection_color.unwrap_or(tokens.colors.accent))
+                            .alpha(80),
                     ));
                 }
                 if !m.preedit.is_empty() {
@@ -665,13 +690,29 @@ impl From<TextInput> for Element {
                     }
                 }
             }
-            let value = if value.is_empty() {
-                placeholder.clone()
+            let showing_placeholder = value.is_empty();
+            let (value, shown_style) = if showing_placeholder {
+                let mut style = placeholder_style.unwrap_or(text_style);
+                if multiline {
+                    style = style
+                        .wrap(TextWrap::Words)
+                        .vertical_align(lgui_core::text::TextVerticalAlign::Top);
+                }
+                (placeholder.clone(), style)
             } else {
-                value
+                (value, text_style)
             };
+            // The drawn text must span every wrapped row the layout measures; a
+            // scrolled `bounds` would otherwise cut off the last rows while the
+            // caret is still placed on them.
             let text_bounds = if multiline {
-                bounds
+                let rows = measured.as_ref().map_or(0.0, |l| l.height);
+                UiRect::new(
+                    bounds.left,
+                    bounds.top,
+                    bounds.right,
+                    bounds.top + rows.max(inner.height()),
+                )
             } else {
                 UiRect::new(
                     bounds.left,
@@ -681,16 +722,24 @@ impl From<TextInput> for Element {
                 )
             };
             content = content.child(
-                UiElement::text(cx.auto_id(), text_bounds, value, text_style).paint_bounds(inner),
+                UiElement::text(cx.auto_id(), text_bounds, value, shown_style).paint_bounds(inner),
             );
             if m.focused {
                 let index = display_cursor(&m, password);
-                if let Some(caret) = measured.as_ref().and_then(|l| l.caret_rect(index)) {
+                // An empty layout has no glyph to place a caret on, so measure the
+                // start of a one-character line to get the line's caret rect.
+                let caret = measured
+                    .as_ref()
+                    .and_then(|l| l.caret_rect(index))
+                    .or_else(|| {
+                        layout("M", bounds, text_style, multiline).and_then(|l| l.caret_rect(0))
+                    });
+                if let Some(caret) = caret {
                     root = root.ime_cursor_rect(caret);
                     content = content.child(UiElement::panel(
                         cx.auto_id(),
                         UiRect::new(caret.left, caret.top, caret.left + 1.0, caret.bottom),
-                        VisualStyle::filled(tokens.colors.accent),
+                        VisualStyle::filled(caret_color.unwrap_or(tokens.colors.accent)),
                     ));
                 }
             }
