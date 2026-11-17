@@ -33,6 +33,10 @@ impl SkiaSoftwareSurface {
         }
     }
 
+    pub fn is_opaque(&self) -> bool {
+        self.opaque
+    }
+
     pub fn set_text_rendering(&mut self, options: TextRenderingOptions) {
         self.text_rendering = options;
     }
@@ -47,7 +51,6 @@ impl SkiaSoftwareSurface {
         if self.size != size {
             self.size = size;
             self.last_text_props = None;
-            self.pixels.resize(size.0 as usize * size.1 as usize * 4, 0);
             self.cache.trim(MemoryPressure::Critical);
         }
     }
@@ -55,6 +58,45 @@ impl SkiaSoftwareSurface {
     pub fn draw(&mut self, scene: &Scene, frame: &FrameInfo<'_>) -> Result<(), String> {
         let viewport = frame.viewport();
         self.ensure_surface(viewport.width(), viewport.height());
+        let mut pixels = std::mem::take(&mut self.pixels);
+        let required = self.size.0 as usize * self.size.1 as usize * 4;
+        if pixels.len() != required {
+            pixels.resize(required, 0);
+            self.last_text_props = None;
+        }
+        let result = self.draw_pixels(scene, frame, &mut pixels);
+        self.pixels = pixels;
+        result
+    }
+
+    /// Paint directly into an opaque BGRA destination owned by the presenter.
+    /// The caller must request a full redraw if this buffer does not contain
+    /// the previous frame (for example, after allocation or buffer rotation).
+    /// Offscreen callers retain their original owned pixels through `draw`.
+    pub fn draw_into_bgra(
+        &mut self,
+        scene: &Scene,
+        frame: &FrameInfo<'_>,
+        pixels: &mut [u8],
+    ) -> Result<(), String> {
+        if !self.opaque {
+            return Err("External presentation requires an opaque surface".into());
+        }
+        let viewport = frame.viewport();
+        self.ensure_surface(viewport.width(), viewport.height());
+        if pixels.len() != self.size.0 as usize * self.size.1 as usize * 4 {
+            return Err("External BGRA buffer size does not match the viewport".into());
+        }
+        self.draw_pixels(scene, frame, pixels)
+    }
+
+    fn draw_pixels(
+        &mut self,
+        scene: &Scene,
+        frame: &FrameInfo<'_>,
+        pixels: &mut [u8],
+    ) -> Result<(), String> {
+        let viewport = frame.viewport();
         // softbuffer presents RGB and discards alpha. Describe that actual opaque
         // destination to Skia; transparent offscreen layers remain premultiplied.
         let alpha = if self.opaque {
@@ -84,13 +126,9 @@ impl SkiaSoftwareSurface {
             frame.is_full_redraw() || self.last_text_props != Some(text_props),
         )
         .with_text_rendering(self.text_rendering);
-        let mut surface = surfaces::wrap_pixels(
-            &info,
-            self.pixels.as_mut_slice(),
-            self.size.0 as usize * 4,
-            Some(&props),
-        )
-        .ok_or_else(|| "Skia could not wrap the retained software surface".to_owned())?;
+        let mut surface =
+            surfaces::wrap_pixels(&info, pixels, self.size.0 as usize * 4, Some(&props))
+                .ok_or_else(|| "Skia could not wrap the retained software surface".to_owned())?;
         paint_scene_damage(surface.canvas(), &mut self.cache, scene, &refresh)?;
         self.last_text_props = Some(text_props);
         self.painted_full_frame = refresh.is_full_redraw();

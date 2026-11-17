@@ -37,6 +37,7 @@ accesskit = { version = "0.24", optional = true }
 accesskit_winit = { version = "0.33", optional = true, default-features = false, features = ["accesskit_unix", "async-io", "rwh_06"] }
 ash = { version = "0.38", optional = true, default-features = false, features = ["loaded", "std"] }
 ash-window = { version = "0.13", optional = true }
+bytemuck = "1"
 glutin = { version = "0.32", optional = true }
 lgui-assets = { version = "0.2.2", path = "../lgui-assets", optional = true, default-features = false }
 lgui-core = { version = "0.2.2", path = "../lgui-core", default-features = false }

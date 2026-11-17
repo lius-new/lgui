@@ -12,11 +12,21 @@ pub struct WinitWindowOptions {
     pub(crate) window_icon: Option<Icon>,
     #[cfg(target_os = "windows")]
     pub(crate) taskbar_icon: Option<Icon>,
+    #[cfg(target_os = "windows")]
+    pub(crate) drag_and_drop: Option<bool>,
 }
 
 impl WinitWindowOptions {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Enables Winit's OLE file-drop target on Windows. The default is unchanged.
+    /// Disable this when the application installs its own native drop handler.
+    #[cfg(target_os = "windows")]
+    pub fn drag_and_drop(mut self, enabled: bool) -> Self {
+        self.drag_and_drop = Some(enabled);
+        self
     }
 
     /// Sets the regular window icon (`ICON_SMALL` on Windows).
