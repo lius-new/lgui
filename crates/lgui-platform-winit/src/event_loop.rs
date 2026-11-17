@@ -247,6 +247,9 @@ impl WinitHost {
             #[cfg(target_os = "windows")]
             {
                 attributes = attributes.with_taskbar_icon(winit_options.taskbar_icon.clone());
+                if let Some(enabled) = winit_options.drag_and_drop {
+                    attributes = attributes.with_drag_and_drop(enabled);
+                }
             }
         }
         #[cfg(target_os = "windows")]

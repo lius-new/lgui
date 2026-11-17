@@ -191,27 +191,33 @@ impl WinitSkiaRenderer {
             Self::Software {
                 surface, renderer, ..
             } => {
-                let draw_started = Instant::now();
                 renderer.set_text_rendering(_frame.text_rendering());
-                renderer.draw(_scene, _frame).map_err(|error| {
-                    WinitRenderError::new(
-                        lgui_render_api::RenderErrorStage::Draw,
-                        "skia_software_draw",
-                        error,
-                    )
-                })?;
-                let draw_ms = draw_started.elapsed().as_secs_f32() * 1_000.0;
+                let direct = cfg!(target_os = "windows") && renderer.is_opaque();
+                let draw_started = Instant::now();
+                if !direct {
+                    renderer.draw(_scene, _frame).map_err(|error| {
+                        WinitRenderError::new(
+                            lgui_render_api::RenderErrorStage::Draw,
+                            "skia_software_draw",
+                            error,
+                        )
+                    })?;
+                }
+                let mut draw_ms = draw_started.elapsed().as_secs_f32() * 1_000.0;
                 let acquire_started = Instant::now();
-                let (width, height) = renderer.size();
-                let width_nz = NonZeroU32::new(width.max(1) as u32).unwrap();
-                let height_nz = NonZeroU32::new(height.max(1) as u32).unwrap();
-                surface.resize(width_nz, height_nz).map_err(|error| {
-                    WinitRenderError::new(
-                        lgui_render_api::RenderErrorStage::Prepare,
-                        "softbuffer_resize",
-                        error.to_string(),
+                let (width, height) = (_frame.viewport().width(), _frame.viewport().height());
+                surface
+                    .resize(
+                        NonZeroU32::new(width.max(1) as u32).unwrap(),
+                        NonZeroU32::new(height.max(1) as u32).unwrap(),
                     )
-                })?;
+                    .map_err(|error| {
+                        WinitRenderError::new(
+                            lgui_render_api::RenderErrorStage::Prepare,
+                            "softbuffer_resize",
+                            error.to_string(),
+                        )
+                    })?;
                 let mut buffer = surface.buffer_mut().map_err(|error| {
                     WinitRenderError::new(
                         lgui_render_api::RenderErrorStage::Prepare,
@@ -220,11 +226,42 @@ impl WinitSkiaRenderer {
                     )
                 })?;
                 let acquire_ms = acquire_started.elapsed().as_secs_f32() * 1_000.0;
-                for (destination, source) in
-                    buffer.iter_mut().zip(renderer.pixels().chunks_exact(4))
-                {
-                    *destination =
-                        ((source[2] as u32) << 16) | ((source[1] as u32) << 8) | source[0] as u32;
+                if direct {
+                    // Windows' retained DIB uses little-endian BGRA bytes.
+                    // A new buffer needs full coverage, even for partial damage.
+                    let draw_started = Instant::now();
+                    let frame = FrameInfo::new(
+                        _frame.viewport(),
+                        _frame.damage(),
+                        _frame.scale(),
+                        _frame.reason(),
+                        _frame.is_full_redraw() || buffer.age() != 1,
+                    )
+                    .with_text_rendering(_frame.text_rendering());
+                    renderer
+                        .draw_into_bgra(_scene, &frame, bytemuck::cast_slice_mut(&mut buffer))
+                        .map_err(|error| {
+                            WinitRenderError::new(
+                                lgui_render_api::RenderErrorStage::Draw,
+                                "skia_software_draw",
+                                error,
+                            )
+                        })?;
+                    // Softbuffer requires a zero high byte; opaque Skia ignores it.
+                    for pixel in buffer.iter_mut() {
+                        *pixel &= 0x00ff_ffff;
+                    }
+                    draw_ms = draw_started.elapsed().as_secs_f32() * 1_000.0;
+                } else {
+                    // Transparent targets retain premultiplied alpha in their
+                    // owned surface. Other platforms keep their existing path.
+                    for (destination, source) in
+                        buffer.iter_mut().zip(renderer.pixels().chunks_exact(4))
+                    {
+                        *destination = ((source[2] as u32) << 16)
+                            | ((source[1] as u32) << 8)
+                            | source[0] as u32;
+                    }
                 }
                 let full_damage = [_frame.viewport()];
                 let effective_damage = if renderer.painted_full_frame() {

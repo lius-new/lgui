@@ -511,7 +511,7 @@ impl SkiaPainter<'_> {
 }
 
 fn rasterize_svg_icon(svg: &str, width: i32, height: i32, key: &str) -> Result<Image, String> {
-    let mut dom = skia_safe::svg::Dom::from_bytes(svg.as_bytes(), FontMgr::default())
+    let mut dom = skia_safe::svg::Dom::from_bytes(svg.as_bytes(), system_font_manager())
         .map_err(|_| format!("Skia could not parse SVG icon {key}"))?;
     let mut surface = layer_surface_with_options(width as f32, height as f32, Default::default())?;
     surface.canvas().clear(SkColor::TRANSPARENT);

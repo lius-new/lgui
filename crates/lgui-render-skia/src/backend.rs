@@ -67,3 +67,7 @@ mod rasterization_tests;
 #[path = "backend/sampling_test.rs"]
 #[cfg(test)]
 mod sampling_tests;
+
+#[path = "backend/direct_bgra_test.rs"]
+#[cfg(test)]
+mod direct_bgra_tests;

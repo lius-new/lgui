@@ -3,6 +3,9 @@ use super::*;
 pub(super) struct SkiaTextSystem;
 
 thread_local! {
+    static SYSTEM_FONT_MANAGER: FontMgr = FontMgr::default();
+    // Measurement and painting use the same system typeface cache on this thread.
+    static SYSTEM_FONT_COLLECTION: FontCollection = make_font_collection(&[]);
     pub(super) static SKIA_TEXT_FONTS: RefCell<FontCollection> = RefCell::new(skia_font_collection());
 }
 
@@ -42,12 +45,24 @@ pub fn skia_text_system_handle() -> lgui_core::text::TextSystemHandle {
     lgui_core::text::TextSystemHandle::new(SkiaTextSystem)
 }
 
+pub(super) fn system_font_manager() -> FontMgr {
+    SYSTEM_FONT_MANAGER.with(Clone::clone)
+}
+
 pub(super) fn skia_font_collection() -> FontCollection {
-    let mut collection = FontCollection::new();
-    collection.set_default_font_manager(FontMgr::default(), None);
     let assets = lgui_core::backend::font_assets();
+    if assets.is_empty() {
+        SYSTEM_FONT_COLLECTION.with(Clone::clone)
+    } else {
+        make_font_collection(&assets)
+    }
+}
+
+fn make_font_collection(assets: &[lgui_core::text::FontAsset]) -> FontCollection {
+    let mut collection = FontCollection::new();
+    collection.set_default_font_manager(system_font_manager(), None);
     if !assets.is_empty() {
-        let system = FontMgr::default();
+        let system = system_font_manager();
         let mut provider = TypefaceFontProvider::new();
         for asset in assets.iter() {
             if let Some(typeface) =
