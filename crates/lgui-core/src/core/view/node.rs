@@ -278,12 +278,12 @@ pub struct UiNode {
     pub ime_cursor_rect: Option<UiRect>,
     pub interaction: InteractionRole,
     pub cursor: CursorIcon,
-    pub semantics: Option<Semantics>,
+    pub semantics: Option<Box<Semantics>>,
     pub click_capture_handler: Option<UiEventHandler>,
     pub click_handler: Option<UiEventHandler>,
     pub input_event_handlers: Vec<UiInputEventBinding>,
-    pub click_action: Option<UiAction>,
-    pub wheel_action: Option<UiAction>,
+    pub click_action: Option<Box<UiAction>>,
+    pub wheel_action: Option<Box<UiAction>>,
     pub action_target: Option<UiId>,
     pub action_handlers: Vec<UiActionBinding>,
     pub event_policy: EventPolicy,
@@ -309,20 +309,20 @@ pub struct UiNode {
     pub style: VisualStyle,
     pub path: Option<UiPath>,
     pub path_style: PathStyle,
-    pub image_request: Option<ImageRequest>,
+    pub image_request: Option<Box<ImageRequest>>,
     pub image_fit: ImageFit,
-    pub image_blur: Option<BlurStyle>,
+    pub image_blur: Option<Box<BlurStyle>>,
     pub icon_key: Option<Arc<str>>,
     pub icon_style: IconStyle,
     pub glow: Option<(Color, u8)>,
-    pub backdrop_blur_style: Option<BlurStyle>,
-    pub content_blur_style: Option<BlurStyle>,
-    pub overlay_style: Option<OverlayStyle>,
+    pub backdrop_blur_style: Option<Box<BlurStyle>>,
+    pub content_blur_style: Option<Box<BlurStyle>>,
+    pub overlay_style: Option<Box<OverlayStyle>>,
     pub custom_style: Option<CustomPaintStyle>,
     pub compositing_layer: Option<CompositingLayerSpec>,
     pub shadow: Option<super::ShadowStyle>,
-    pub static_layer: Option<StaticLayerSpec>,
-    pub scroll_raster: Option<ScrollRasterSpec>,
+    pub static_layer: Option<Box<StaticLayerSpec>>,
+    pub scroll_raster: Option<Box<ScrollRasterSpec>>,
     pub clip_rect: Option<UiRect>,
     pub content_offset: (f32, f32),
     pub text: Option<Cow<'static, str>>,
@@ -529,8 +529,14 @@ impl UiNode {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn component_owner(mut self, owner: ComponentId) -> Self {
+        self.component_owner = Some(owner);
+        self
+    }
+
     pub fn semantics(mut self, semantics: Semantics) -> Self {
-        self.semantics = Some(semantics);
+        self.semantics = Some(Box::new(semantics));
         self
     }
 
@@ -543,11 +549,6 @@ impl UiNode {
 
     pub fn on_click_handler(mut self, handler: UiEventHandler) -> Self {
         self.click_handler = Some(handler);
-        self
-    }
-
-    pub(crate) fn component_owner(mut self, owner: ComponentId) -> Self {
-        self.component_owner = Some(owner);
         self
     }
 
@@ -615,12 +616,12 @@ impl UiNode {
     }
 
     pub fn wheel_action(mut self, action: UiAction) -> Self {
-        self.wheel_action = Some(action);
+        self.wheel_action = Some(Box::new(action));
         self
     }
 
     pub fn click_action(mut self, action: UiAction) -> Self {
-        self.click_action = Some(action);
+        self.click_action = Some(Box::new(action));
         self
     }
 
@@ -756,19 +757,19 @@ impl UiNode {
     }
 
     pub fn image(mut self, source: impl Into<UiImageSource>, fit: ImageFit) -> Self {
-        self.image_request = Some(ImageRequest::new(source));
+        self.image_request = Some(Box::new(ImageRequest::new(source)));
         self.image_fit = fit;
         self
     }
 
     pub fn image_request(mut self, request: impl Into<ImageRequest>, fit: ImageFit) -> Self {
-        self.image_request = Some(request.into());
+        self.image_request = Some(Box::new(request.into()));
         self.image_fit = fit;
         self
     }
 
     pub fn image_blur(mut self, blur: BlurStyle) -> Self {
-        self.image_blur = Some(blur);
+        self.image_blur = Some(Box::new(blur));
         self
     }
 
@@ -788,17 +789,17 @@ impl UiNode {
     }
 
     pub fn overlay(mut self, style: OverlayStyle) -> Self {
-        self.overlay_style = Some(style);
+        self.overlay_style = Some(Box::new(style));
         self
     }
 
     pub fn backdrop_blur(mut self, style: BlurStyle) -> Self {
-        self.backdrop_blur_style = Some(style);
+        self.backdrop_blur_style = Some(Box::new(style));
         self
     }
 
     pub fn content_blur(mut self, style: BlurStyle) -> Self {
-        self.content_blur_style = Some(style);
+        self.content_blur_style = Some(Box::new(style));
         self
     }
 
@@ -808,7 +809,7 @@ impl UiNode {
     }
 
     pub fn static_layer(mut self, spec: StaticLayerSpec) -> Self {
-        self.static_layer = Some(spec);
+        self.static_layer = Some(Box::new(spec));
         self
     }
 
@@ -825,7 +826,7 @@ impl UiNode {
     pub fn scroll_raster(mut self, spec: ScrollRasterSpec) -> Self {
         self.clip_rect = Some(self.layout_rect);
         self.content_offset = (0.0, -spec.scroll_y);
-        self.scroll_raster = Some(spec);
+        self.scroll_raster = Some(Box::new(spec));
         self
     }
 

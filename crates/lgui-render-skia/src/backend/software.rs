@@ -9,6 +9,8 @@ pub struct SkiaSoftwareSurface {
     text_rendering: TextRenderingOptions,
     last_text_props: Option<(skia_safe::PixelGeometry, u32, u32, TextRenderingOptions)>,
     painted_full_frame: bool,
+    /// Reusable pixels for banded painting.
+    band: Vec<u8>,
 }
 
 impl SkiaSoftwareSurface {
@@ -21,6 +23,7 @@ impl SkiaSoftwareSurface {
             text_rendering: TextRenderingOptions::default(),
             last_text_props: None,
             painted_full_frame: false,
+            band: Vec::new(),
         }
     }
 
@@ -88,6 +91,89 @@ impl SkiaSoftwareSurface {
             return Err("External BGRA buffer size does not match the viewport".into());
         }
         self.draw_pixels(scene, frame, pixels)
+    }
+
+    /// Paints the frame in horizontal bands through one small reusable buffer
+    /// instead of a window-sized one, handing each finished band to the caller. The target is
+    /// opaque, and every repainted rectangle is redrawn from the scene, so nothing is retained.
+    pub fn draw_banded(
+        &mut self,
+        scene: &Scene,
+        frame: &FrameInfo<'_>,
+        band_rows: i32,
+        mut present: impl FnMut(PhysicalRect, &[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if !self.opaque {
+            return Err("Banded presentation requires an opaque surface".into());
+        }
+        let viewport = frame.viewport();
+        self.ensure_surface(viewport.width(), viewport.height());
+        let props = TextRasterization::system().surface_props_with_options(self.text_rendering);
+        let text_props = (
+            props.pixel_geometry(),
+            props.text_gamma().to_bits(),
+            props.text_contrast().to_bits(),
+            self.text_rendering,
+        );
+        let rendering_changed = self.cache.set_text_rendering(frame.text_rendering());
+        let full =
+            frame.is_full_redraw() || rendering_changed || self.last_text_props != Some(text_props);
+        self.cache.begin_frame();
+        let clips: Vec<PhysicalRect> = if full {
+            vec![viewport]
+        } else {
+            frame.damage().to_vec()
+        };
+        let mut band = std::mem::take(&mut self.band);
+        let result = (|| {
+            let mut painter = SkiaPainter {
+                cache: &mut self.cache,
+            };
+            for clip in clips {
+                let Some(clip) = clip.intersect(viewport) else {
+                    continue;
+                };
+                let width = clip.width();
+                let mut top = clip.top;
+                while top < clip.bottom {
+                    let rows = band_rows.max(1).min(clip.bottom - top);
+                    let rect = PhysicalRect::new(clip.left, top, clip.right, top + rows);
+                    let needed = (width * rows * 4) as usize;
+                    if band.len() < needed {
+                        band.resize(needed, 0);
+                    }
+                    let info =
+                        ImageInfo::new((width, rows), ColorType::BGRA8888, AlphaType::Opaque, None);
+                    let mut surface = surfaces::wrap_pixels(
+                        &info,
+                        &mut band[..needed],
+                        (width * 4) as usize,
+                        Some(&props),
+                    )
+                    .ok_or_else(|| "Skia could not wrap the band surface".to_owned())?;
+                    let canvas = surface.canvas();
+                    canvas.translate((-(clip.left as f32), -(top as f32)));
+                    canvas.save();
+                    canvas.clip_rect(physical_rect(rect), None, false);
+                    canvas.clear(SkColor::BLACK);
+                    painter.draw_commands(
+                        canvas,
+                        scene.commands(),
+                        Some(ui_rect_from_physical(rect)),
+                    )?;
+                    canvas.restore();
+                    drop(surface);
+                    present(rect, &band[..needed])?;
+                    top += rows;
+                }
+            }
+            painter.cache.end_frame();
+            Ok(())
+        })();
+        self.band = band;
+        self.last_text_props = Some(text_props);
+        self.painted_full_frame = full;
+        result
     }
 
     fn draw_pixels(
@@ -202,6 +288,77 @@ mod startup_tests {
     use super::*;
     use lgui_core::core::{RenderPhase, UiId, UiScale};
     use lgui_render_api::FrameReason;
+
+    fn copy_band(
+        window: &mut [u8],
+        width: usize,
+        rect: PhysicalRect,
+        bytes: &[u8],
+    ) -> Result<(), String> {
+        let row = rect.width() as usize * 4;
+        for line in 0..rect.height() as usize {
+            let destination = ((rect.top as usize + line) * width + rect.left as usize) * 4;
+            window[destination..destination + row]
+                .copy_from_slice(&bytes[line * row..(line + 1) * row]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn banded_painting_matches_the_retained_full_buffer() {
+        let scale = UiScale::new(1.25);
+        let bounds = UiRect::new(0.0, 0.0, 240.0, 100.0);
+        let viewport = scale.physical_rect(bounds);
+        let mut scene = Scene::new();
+        scene.push(ScenePrimitive::Rect {
+            id: UiId::new("band-bg"),
+            rect: bounds,
+            style: VisualStyle::filled(Color(0x14161b)),
+            phase: RenderPhase::Content,
+        });
+        scene.push(ScenePrimitive::Rect {
+            id: UiId::new("band-box"),
+            rect: UiRect::new(20.0, 10.0, 200.0, 60.0),
+            style: VisualStyle::filled(Color(0x2a78d6)),
+            phase: RenderPhase::Content,
+        });
+        scene.push(ScenePrimitive::Text {
+            id: UiId::new("band-text"),
+            rect: UiRect::new(24.0, 30.0, 236.0, 70.0),
+            text: "Banded text 中文 0689".into(),
+            style: TextStyle::new(Color::WHITE, 14.0, 400),
+            phase: RenderPhase::Content,
+        });
+        let physical = scene.project_to_physical(scale);
+        let (width, height) = (viewport.width() as usize, viewport.height() as usize);
+        let full = FrameInfo::new(viewport, &[], scale, FrameReason::SceneChange, true);
+
+        let mut retained = SkiaSoftwareSurface::new_opaque(1024 * 1024);
+        retained.draw(&physical, &full).unwrap();
+        let mut banded = SkiaSoftwareSurface::new_opaque(1024 * 1024);
+        let mut window = vec![0u8; width * height * 4];
+        // Bands of 7 rows do not divide the height, so the last band is shorter.
+        banded
+            .draw_banded(&physical, &full, 7, |rect, bytes| {
+                copy_band(&mut window, width, rect, bytes)
+            })
+            .unwrap();
+        assert_eq!(window, retained.pixels());
+
+        // A partial frame repaints only the damaged rectangles of the window.
+        let damage = [
+            PhysicalRect::new(30, 12, 90, 40),
+            PhysicalRect::new(100, 50, 180, 90),
+        ];
+        let partial = FrameInfo::new(viewport, &damage, scale, FrameReason::SceneChange, false);
+        retained.draw(&physical, &partial).unwrap();
+        banded
+            .draw_banded(&physical, &partial, 7, |rect, bytes| {
+                copy_band(&mut window, width, rect, bytes)
+            })
+            .unwrap();
+        assert_eq!(window, retained.pixels());
+    }
 
     #[test]
     fn grayscale_profile_changes_refresh_retained_pixels_on_partial_frames() {

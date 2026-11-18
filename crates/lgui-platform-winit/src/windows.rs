@@ -624,3 +624,108 @@ pub(crate) fn flush_gdi() {
 #[cfg(test)]
 #[path = "windows_test.rs"]
 mod tests;
+
+/// Draws finished bands of an opaque frame straight to the window's device context,
+/// so no window-sized pixel buffer has to exist.
+pub(crate) struct StripTarget {
+    hwnd: isize,
+    hdc: isize,
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetDC(hwnd: isize) -> isize;
+    fn ReleaseDC(hwnd: isize, hdc: isize) -> i32;
+}
+
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    fn SetDIBitsToDevice(
+        hdc: isize,
+        x_dest: i32,
+        y_dest: i32,
+        width: u32,
+        height: u32,
+        x_src: i32,
+        y_src: i32,
+        start_scan: u32,
+        scan_lines: u32,
+        bits: *const u8,
+        info: *const BitmapInfoHeader,
+        usage: u32,
+    ) -> i32;
+}
+
+#[repr(C)]
+struct BitmapInfoHeader {
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bit_count: u16,
+    compression: u32,
+    size_image: u32,
+    x_pels_per_meter: i32,
+    y_pels_per_meter: i32,
+    colors_used: u32,
+    colors_important: u32,
+}
+
+impl StripTarget {
+    pub(crate) fn begin(window: &Window) -> Option<Self> {
+        let RawWindowHandle::Win32(handle) = window.window_handle().ok()?.as_raw() else {
+            return None;
+        };
+        let hwnd = handle.hwnd.get();
+        // SAFETY: `hwnd` is the live window this call was made for.
+        let hdc = unsafe { GetDC(hwnd) };
+        (hdc != 0).then_some(Self { hwnd, hdc })
+    }
+
+    /// Draws top-down BGRA `bytes` of `width` x `height` pixels at (`left`, `top`).
+    pub(crate) fn blit(&self, left: i32, top: i32, width: i32, height: i32, bytes: &[u8]) -> bool {
+        if width <= 0 || height <= 0 || bytes.len() < width as usize * height as usize * 4 {
+            return false;
+        }
+        let header = BitmapInfoHeader {
+            size: size_of::<BitmapInfoHeader>() as u32,
+            width,
+            height: -height,
+            planes: 1,
+            bit_count: 32,
+            compression: 0,
+            size_image: 0,
+            x_pels_per_meter: 0,
+            y_pels_per_meter: 0,
+            colors_used: 0,
+            colors_important: 0,
+        };
+        // SAFETY: `bytes` holds `width * height` 32-bit pixels, checked above, and `header`
+        // describes exactly that layout.
+        unsafe {
+            SetDIBitsToDevice(
+                self.hdc,
+                left,
+                top,
+                width as u32,
+                height as u32,
+                0,
+                0,
+                0,
+                height as u32,
+                bytes.as_ptr(),
+                &header,
+                0,
+            ) != 0
+        }
+    }
+}
+
+impl Drop for StripTarget {
+    fn drop(&mut self) {
+        // SAFETY: releases the device context obtained in `begin`.
+        unsafe {
+            ReleaseDC(self.hwnd, self.hdc);
+        }
+    }
+}

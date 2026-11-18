@@ -192,6 +192,10 @@ impl WinitSkiaRenderer {
                 surface, renderer, ..
             } => {
                 renderer.set_text_rendering(_frame.text_rendering());
+                #[cfg(target_os = "windows")]
+                if renderer.is_opaque() && strip_presenting() {
+                    return strip_present(surface.window(), renderer, _scene, _frame);
+                }
                 let direct = cfg!(target_os = "windows") && renderer.is_opaque();
                 let draw_started = Instant::now();
                 if !direct {
@@ -592,4 +596,52 @@ pub(super) fn create_renderer(
     Err(WinitApplicationError(
         "the winit backend requires a renderer-skia feature".to_owned(),
     ))
+}
+
+/// Whether opaque Windows frames are painted in bands instead of through a window-sized buffer.
+/// On by default; `LGUI_STRIP_PRESENT=0` goes back to the retained softbuffer buffer.
+#[cfg(all(feature = "renderer-skia", target_os = "windows"))]
+fn strip_presenting() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LGUI_STRIP_PRESENT").is_none_or(|value| value != "0"))
+}
+
+#[cfg(all(feature = "renderer-skia", target_os = "windows"))]
+fn strip_present(
+    window: &Arc<Window>,
+    renderer: &mut SkiaSoftwareSurface,
+    scene: &lgui_core::core::Scene,
+    frame: &FrameInfo<'_>,
+) -> Result<WinitFrameTimings, WinitRenderError> {
+    let error = |message: String| {
+        WinitRenderError::new(
+            lgui_render_api::RenderErrorStage::Draw,
+            "strip_present",
+            message,
+        )
+    };
+    let target = super::winit_windows::StripTarget::begin(window)
+        .ok_or_else(|| error("no device context for the window".to_owned()))?;
+    let width = frame.viewport().width().max(1);
+    // About 256 KB per band.
+    let rows = (256 * 1024 / (width * 4)).clamp(16, 256);
+    let started = Instant::now();
+    renderer
+        .draw_banded(scene, frame, rows, |rect, bytes| {
+            if target.blit(rect.left, rect.top, rect.width(), rect.height(), bytes) {
+                Ok(())
+            } else {
+                Err("SetDIBitsToDevice failed".to_owned())
+            }
+        })
+        .map_err(error)?;
+    drop(target);
+    super::winit_windows::flush_gdi();
+    let draw_ms = started.elapsed().as_secs_f32() * 1_000.0;
+    Ok(WinitFrameTimings {
+        acquire_ms: 0.0,
+        draw_ms,
+        flush_ms: 0.0,
+        present_ms: 0.0,
+    })
 }

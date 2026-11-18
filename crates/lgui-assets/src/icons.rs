@@ -6,6 +6,9 @@ use std::{borrow::Cow, cell::RefCell, collections::HashMap, sync::Arc};
 pub enum SvgIconSource {
     Text(Cow<'static, str>),
     Bytes(Cow<'static, [u8]>),
+    /// Converted to SVG text when first resolved, so registering a large icon set costs nothing
+    /// until the icons are drawn.
+    Icon(icondata::Icon),
 }
 
 impl SvgIconSource {
@@ -15,6 +18,7 @@ impl SvgIconSource {
             Self::Bytes(bytes) => std::str::from_utf8(bytes)
                 .ok()
                 .map(|svg| Cow::Owned(svg.to_owned())),
+            Self::Icon(icon) => Some(Cow::Owned(icondata_to_svg(*icon))),
         }
     }
 }
@@ -69,7 +73,7 @@ impl From<&'static [u8]> for SvgIconSource {
 
 impl From<icondata::Icon> for SvgIconSource {
     fn from(value: icondata::Icon) -> Self {
-        Self::Text(Cow::Owned(icondata_to_svg(value)))
+        Self::Icon(value)
     }
 }
 

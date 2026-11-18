@@ -48,7 +48,7 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
                     phase: node.render_phase,
                 });
             }
-            if let Some(spec) = node.static_layer.clone() {
+            if let Some(spec) = node.static_layer.as_deref().cloned() {
                 let commands =
                     compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
                 let child_signature = command_signature(&commands);
@@ -61,7 +61,7 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
                     phase: node.render_phase,
                 });
             }
-            if let Some(spec) = node.scroll_raster.clone() {
+            if let Some(spec) = node.scroll_raster.as_deref().cloned() {
                 let (commands, child_signature) = compile_scroll_raster_commands(
                     tree,
                     node,
@@ -105,7 +105,7 @@ pub fn compile_scene(tree: &HostTree) -> Scene {
                 }
             }
             if let UiNodeKind::ContentBlur = node.kind {
-                if let Some(style) = node.content_blur_style {
+                if let Some(style) = node.content_blur_style.as_deref().copied() {
                     let commands =
                         compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
                     let child_signature = command_signature(&commands);
@@ -216,7 +216,7 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
                 phase: node.render_phase,
             });
         }
-        if let Some(spec) = node.static_layer.clone() {
+        if let Some(spec) = node.static_layer.as_deref().cloned() {
             let commands =
                 compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
             let child_signature = command_signature(&commands);
@@ -229,7 +229,7 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
                 phase: node.render_phase,
             });
         }
-        if let Some(spec) = node.scroll_raster.clone() {
+        if let Some(spec) = node.scroll_raster.as_deref().cloned() {
             let (commands, child_signature) =
                 compile_scroll_raster_commands(tree, node, &spec, &mut skip, include_popup_subtree);
             list.push(ScenePrimitive::ScrollRaster {
@@ -267,7 +267,7 @@ pub fn compile_scene_root(tree: &HostTree, id: &UiId) -> Scene {
             }
         }
         if let UiNodeKind::ContentBlur = node.kind {
-            if let Some(style) = node.content_blur_style {
+            if let Some(style) = node.content_blur_style.as_deref().copied() {
                 let commands =
                     compile_static_layer_commands(tree, node, &mut skip, include_popup_subtree);
                 let child_signature = command_signature(&commands);
@@ -542,7 +542,7 @@ fn push_node_and_children(
         return;
     }
     if let UiNodeKind::StaticLayer = node.kind {
-        if let Some(spec) = node.static_layer.clone() {
+        if let Some(spec) = node.static_layer.as_deref().cloned() {
             let layer_commands =
                 compile_static_layer_commands(tree, node, skip, include_popup_subtree);
             let child_signature = command_signature(&layer_commands);
@@ -558,7 +558,7 @@ fn push_node_and_children(
         return;
     }
     if let UiNodeKind::ScrollRaster = node.kind {
-        if let Some(spec) = node.scroll_raster.clone() {
+        if let Some(spec) = node.scroll_raster.as_deref().cloned() {
             let (raster_commands, child_signature) =
                 compile_scroll_raster_commands(tree, node, &spec, skip, include_popup_subtree);
             commands.push(ScenePrimitive::ScrollRaster {
@@ -573,7 +573,7 @@ fn push_node_and_children(
         return;
     }
     if let UiNodeKind::ContentBlur = node.kind {
-        if let Some(style) = node.content_blur_style {
+        if let Some(style) = node.content_blur_style.as_deref().copied() {
             let layer_commands =
                 compile_static_layer_commands(tree, node, skip, include_popup_subtree);
             let child_signature = command_signature(&layer_commands);
@@ -690,9 +690,9 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
                 id: node.id.clone(),
                 rect: node.layout_rect,
                 source: request.source().clone(),
-                request: request.clone(),
+                request: ImageRequest::clone(request),
                 fit: node.image_fit,
-                blur: node.image_blur,
+                blur: node.image_blur.as_deref().copied(),
                 phase: node.render_phase,
             });
         }
@@ -720,7 +720,7 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
         }
     }
     if let UiNodeKind::BackdropBlur = node.kind {
-        if let Some(style) = node.backdrop_blur_style {
+        if let Some(style) = node.backdrop_blur_style.as_deref().copied() {
             push(ScenePrimitive::BackdropBlur {
                 id: node.id.clone(),
                 rect: node.layout_rect,
@@ -730,7 +730,10 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
         }
     }
     if let UiNodeKind::BackdropBlurPath = node.kind {
-        if let (Some(style), Some(path)) = (node.backdrop_blur_style, node.path.clone()) {
+        if let (Some(style), Some(path)) = (
+            node.backdrop_blur_style.as_deref().copied(),
+            node.path.clone(),
+        ) {
             push(ScenePrimitive::BackdropBlurPath {
                 id: node.id.clone(),
                 rect: node.layout_rect,
@@ -741,7 +744,7 @@ fn push_node_commands_into(mut push: impl FnMut(ScenePrimitive), node: &UiNode) 
         }
     }
     if let UiNodeKind::Overlay = node.kind {
-        if let Some(style) = node.overlay_style.clone() {
+        if let Some(style) = node.overlay_style.as_deref().cloned() {
             push(ScenePrimitive::Overlay {
                 id: node.id.clone(),
                 rect: node.layout_rect,

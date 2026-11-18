@@ -64,7 +64,7 @@ impl NodeProperties {
         n.text = self.text.clone().map(Cow::Owned);
         n.text_style = self.text_style;
         n.icon_key = self.icon.clone();
-        n.semantics = self.semantics.clone();
+        n.semantics = self.semantics.clone().map(Box::new);
         n
     }
 }

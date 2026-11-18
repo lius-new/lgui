@@ -527,17 +527,28 @@ impl UiElement {
     }
 
     pub(crate) fn claim_component_owner(mut self, owner: ComponentId) -> Self {
-        if self.node.component_owner.is_none() {
-            self.node = self.node.component_owner(owner);
+        // Most subtrees already belong to their component; leave those untouched instead of
+        // rebuilding every node (and the whole child vectors) just to find nothing to change.
+        if self.has_unclaimed_node() {
+            self.claim_unclaimed_in_place(owner);
         }
-        self.children = Arc::new(
-            self.children
-                .iter()
-                .cloned()
-                .map(|child| child.claim_component_owner(owner))
-                .collect(),
-        );
         self
+    }
+
+    fn has_unclaimed_node(&self) -> bool {
+        self.node.component_owner.is_none() || self.children.iter().any(Self::has_unclaimed_node)
+    }
+
+    fn claim_unclaimed_in_place(&mut self, owner: ComponentId) {
+        if self.node.component_owner.is_none() {
+            self.node.component_owner = Some(owner);
+        }
+        if self.children.iter().any(Self::has_unclaimed_node) {
+            // Copies the child vector only when another element tree still shares it.
+            for child in Arc::make_mut(&mut self.children) {
+                child.claim_unclaimed_in_place(owner);
+            }
+        }
     }
 
     pub(crate) fn component_boundary(mut self, id: ComponentId) -> Self {

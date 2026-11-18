@@ -25,7 +25,7 @@ impl HostTree {
                     )
                 })
         })?;
-        Some(self.hit_for_node(node, node.click_action.clone()))
+        Some(self.hit_for_node(node, node.click_action.as_deref().cloned()))
     }
 
     /// Window-space hit rect of the element marked as the maximize button.
@@ -46,7 +46,7 @@ impl HostTree {
                     .iter()
                     .any(|binding| binding.kind == UiEventKind::Wheel)
         })?;
-        let mut hit = self.hit_for_node(node, node.wheel_action.clone());
+        let mut hit = self.hit_for_node(node, node.wheel_action.as_deref().cloned());
         hit.click_handler = None;
         hit.capture_handlers.clear();
         hit.bubble_handlers.clear();

@@ -157,7 +157,8 @@ impl SemanticNode {
     pub(crate) fn from_ui_node(node: &UiNode) -> Self {
         let mut semantics = node
             .semantics
-            .clone()
+            .as_deref()
+            .cloned()
             .unwrap_or_else(|| inferred_semantics(node));
         semantics.state.hidden |=
             node.visibility != crate::core::Visibility::Visible || node.overflow_hidden;
