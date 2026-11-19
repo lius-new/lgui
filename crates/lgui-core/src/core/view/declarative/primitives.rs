@@ -203,7 +203,7 @@ where
             .component_boundary(component_id);
         cx.context
             .component_tree()
-            .commit_output(component_id, props, output.clone());
+            .commit_output(component_id, props, output.retained_root());
         output
     })
 }

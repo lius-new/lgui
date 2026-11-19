@@ -561,6 +561,19 @@ impl UiElement {
         self
     }
 
+    /// The element a reused component hands back: its root node without the subtree.
+    ///
+    /// A reused output is always mounted as a retained boundary, which keeps the children already
+    /// in the host tree and never reads the element's own. Keeping the compiled subtree as well
+    /// held a second full copy of every component's nodes for as long as the component lived.
+    pub(crate) fn retained_root(&self) -> Self {
+        Self {
+            node: self.node.clone(),
+            children: Arc::new(Vec::new()),
+            component_boundary: self.component_boundary,
+        }
+    }
+
     pub(crate) fn into_retained_boundary(mut self, id: ComponentId) -> Self {
         self.component_boundary = Some(ComponentBoundary {
             id,
