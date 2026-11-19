@@ -54,8 +54,17 @@ impl HostRuntime {
                     new_bounds,
                     ..
                 } => {
-                    dirty.add(*old_bounds);
-                    dirty.add(*new_bounds);
+                    // Hover, press and focus flags are interaction state only. The scene
+                    // compiler never reads them, so a node's pixels are the same before
+                    // and after the flag changes. Damaging the node's whole paint bounds
+                    // repainted every large hover target (a page-sized container) each
+                    // time the pointer crossed it. Visual changes caused by interaction
+                    // reach the host as Paint or Layout updates, which still damage.
+                    let paints = !matches!(kind, HostUpdateKind::Interaction);
+                    if paints {
+                        dirty.add(*old_bounds);
+                        dirty.add(*new_bounds);
+                    }
                     let reason = match kind {
                         HostUpdateKind::Layout => DamageReason::Layout,
                         HostUpdateKind::Paint => DamageReason::Paint,
@@ -67,7 +76,11 @@ impl HostRuntime {
                         node_id: Some(source.clone()),
                         old_bounds: Some(*old_bounds),
                         new_bounds: Some(*new_bounds),
-                        rects: vec![*old_bounds, *new_bounds],
+                        rects: if paints {
+                            vec![*old_bounds, *new_bounds]
+                        } else {
+                            Vec::new()
+                        },
                     });
                 }
                 HostMutation::ReorderChildren { source, bounds, .. } => {

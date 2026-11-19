@@ -200,6 +200,31 @@ fn semantics_only_updates_do_not_damage_visual_content() {
 }
 
 #[test]
+fn hover_flag_changes_do_not_damage_the_nodes_pixels() {
+    let mut host = HostRuntime::new();
+    let viewport = UiRect::new(0.0, 0.0, 200.0, 100.0);
+    let id = UiId::owned("page-sized-hover-target");
+    let mut tree = HostTree::new();
+    tree.push(
+        UiNode::new(id.clone(), UiNodeKind::Group, viewport)
+            .style(VisualStyle::filled(crate::core::Color::WHITE)),
+    );
+    host.commit(
+        &tree,
+        &UiInteractionState::default(),
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    let hovered = UiInteractionState {
+        hovered: Some(id),
+        ..UiInteractionState::default()
+    };
+    let commit = host.commit(&tree, &hovered, viewport, &mut InvalidationSet::new());
+
+    assert!(commit.damage.dirty.is_empty());
+}
+
+#[test]
 fn moving_a_node_damages_old_and_new_bounds_without_a_frame_snapshot() {
     let mut host = HostRuntime::new();
     let interaction = UiInteractionState::default();
