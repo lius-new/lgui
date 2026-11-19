@@ -237,7 +237,7 @@ impl HostTree {
         self.nodes.get_mut(index).map(Arc::make_mut)
     }
 
-    pub(crate) fn changed_nodes(&self, changed: &HashSet<UiId>) -> Vec<&UiNode> {
+    pub(crate) fn changed_nodes(&self, changed: &HashSet<UiId>) -> Vec<&Arc<UiNode>> {
         let mut indices = changed
             .iter()
             .filter_map(|id| self.node_indices.get(id).copied())
@@ -245,7 +245,7 @@ impl HostTree {
         indices.sort_unstable();
         indices
             .into_iter()
-            .filter_map(|index| self.nodes.get(index).map(Arc::as_ref))
+            .filter_map(|index| self.nodes.get(index))
             .collect()
     }
 

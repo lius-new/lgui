@@ -141,7 +141,7 @@ impl HostRuntime {
 
         let initializing = !self.initialized;
         let changed_nodes = if initializing {
-            tree.nodes().iter().map(|node| node.as_ref()).collect()
+            tree.nodes().iter().collect()
         } else {
             tree.changed_nodes(&changes.changed)
         };
@@ -268,7 +268,7 @@ impl HostRuntime {
             current.layout_bounds = node.layout_rect;
             current.paint_bounds = next_paint;
             current.interaction = flags;
-            current.node = (*node).clone();
+            current.node = std::sync::Arc::clone(node);
         }
         #[cfg(feature = "diagnostics-timing")]
         let node_patch_ms = elapsed_ms(node_patch_started);

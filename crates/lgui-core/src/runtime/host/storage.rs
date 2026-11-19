@@ -20,7 +20,11 @@ impl HostRuntime {
             layout_bounds: UiRect::new(0.0, 0.0, 0.0, 0.0),
             paint_bounds: UiRect::new(0.0, 0.0, 0.0, 0.0),
             interaction: InteractionFlags::default(),
-            node: UiNode::new(source, UiNodeKind::Root, UiRect::new(0.0, 0.0, 0.0, 0.0)),
+            node: std::sync::Arc::new(UiNode::new(
+                source,
+                UiNodeKind::Root,
+                UiRect::new(0.0, 0.0, 0.0, 0.0),
+            )),
         });
         id
     }

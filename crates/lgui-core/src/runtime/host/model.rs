@@ -127,7 +127,8 @@ pub(super) struct HostNode {
     pub(super) layout_bounds: UiRect,
     pub(super) paint_bounds: UiRect,
     pub(super) interaction: InteractionFlags,
-    pub(super) node: UiNode,
+    /// Shares the tree's node instead of copying it: the retained previous state is the old Arc.
+    pub(super) node: std::sync::Arc<UiNode>,
 }
 
 pub(super) struct HostSlot {

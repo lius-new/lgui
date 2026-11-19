@@ -16,6 +16,9 @@ impl HostRuntime {
             tree.nodes().iter().map(|node| node.as_ref()).collect()
         } else {
             tree.changed_nodes(&changed)
+                .into_iter()
+                .map(|node| node.as_ref())
+                .collect()
         };
         let mut nodes = Vec::new();
         for node in candidates {
