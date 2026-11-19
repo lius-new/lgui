@@ -129,11 +129,18 @@ impl SkiaCache {
         } else {
             style.font_families
         };
+        // The shaped paragraph does not depend on the text colour, so it is keyed without it and
+        // the colour is applied when the glyph runs are drawn. A hover or focus colour change then
+        // reuses the existing paragraph instead of shaping and keeping another copy.
+        let paint_color = sk_color(style.color, style.alpha);
         let key = ParagraphCacheKey {
             text: text.to_owned(),
             width: rect.width().to_bits(),
             height: rect.height().to_bits(),
-            style,
+            style: TextStyle {
+                color: Color(0),
+                ..style
+            },
             families: families.to_vec(),
             rasterization,
             hinting: if rasterization == TextRasterization::Grayscale {
@@ -145,7 +152,13 @@ impl SkiaCache {
         if let Some(entry) = self.paragraphs.get_mut(&key) {
             self.text_hits = self.text_hits.saturating_add(1);
             entry.used = self.generation;
-            paint_cached_paragraph(canvas, rect, &entry.paragraph, style.vertical_align);
+            paint_recolored_paragraph(
+                canvas,
+                rect,
+                &mut entry.paragraph,
+                style.vertical_align,
+                paint_color,
+            );
             return;
         }
         self.text_misses = self.text_misses.saturating_add(1);
@@ -153,12 +166,12 @@ impl SkiaCache {
         let mut paragraph = build_skia_paragraph_with_options(
             &request,
             self.fonts.clone(),
-            Some(sk_color(style.color, style.alpha)),
+            Some(sk_color(Color(0), style.alpha)),
             rasterization,
             self.text_rendering,
         );
         paragraph.layout(rect.width().max(1.0));
-        paint_cached_paragraph(canvas, rect, &paragraph, style.vertical_align);
+        paint_recolored_paragraph(canvas, rect, &mut paragraph, style.vertical_align, paint_color);
         let bytes = paragraph_cache_entry_bytes(text, &paragraph);
         self.resident_bytes = self.resident_bytes.saturating_add(bytes);
         let id = self.allocate_id();
@@ -478,6 +491,37 @@ pub(super) fn scene_text_layout_request<'a>(
     lgui_core::text::TextLayoutRequest::for_style(text, rect, &style)
 }
 
+/// Draws a cached paragraph's glyph runs in `color`, at the same place `Paragraph::paint` would.
+pub(super) fn paint_recolored_paragraph(
+    canvas: &Canvas,
+    rect: UiRect,
+    paragraph: &mut Paragraph,
+    vertical_align: lgui_core::text::TextVerticalAlign,
+    color: SkColor,
+) {
+    let y = rect.top + vertical_align_offset(paragraph, rect, vertical_align);
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(color);
+    canvas.save();
+    canvas.clip_rect(sk_rect(rect), None, true);
+    paragraph.visit(|_line, info| {
+        let Some(info) = info else {
+            return;
+        };
+        let origin = info.origin();
+        canvas.draw_glyphs_at(
+            info.glyphs(),
+            info.positions(),
+            (rect.left + origin.x, y + origin.y),
+            info.font(),
+            &paint,
+        );
+    });
+    canvas.restore();
+}
+
+#[allow(dead_code)]
 pub(super) fn paint_cached_paragraph(
     canvas: &Canvas,
     rect: UiRect,
