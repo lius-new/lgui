@@ -642,9 +642,17 @@ impl WinitWindow {
             self.session.invalidate_all();
             self.full_redraw = true;
         } else if !updates.dirty_ids.is_empty() {
-            if let Some(bounds) = self.session.tree().paint_bounds(updates.dirty_ids) {
-                self.session.invalidations_mut().invalidate_rect(bounds);
-            } else {
+            // A state update re-renders its component on the next frame, and the host commit
+            // damages exactly the nodes whose projection changed. Invalidating the owner's whole
+            // bounds on top repainted the entire component (a page, or the whole window for the
+            // application root) for every hover or caret change. Only ids that are not in the
+            // tree (so their bounds are unknown) still fall back to a full redraw.
+            if self
+                .session
+                .tree()
+                .paint_bounds(updates.dirty_ids)
+                .is_none()
+            {
                 self.session.invalidate_all();
                 self.full_redraw = true;
             }
