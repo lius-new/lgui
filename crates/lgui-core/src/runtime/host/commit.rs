@@ -270,6 +270,17 @@ impl HostRuntime {
             current.interaction = flags;
             current.node = std::sync::Arc::clone(node);
         }
+        // A node that did not change keeps the `Arc` of the frame it last changed in, while the tree
+        // replaced it with an equal node every frame. Pointing the runtime at the tree's copy frees
+        // the older one, so each node is held once instead of twice.
+        for node in tree.nodes() {
+            if let Some(&id) = self.sources.get(&node.id) {
+                let slot = self.node_mut(id);
+                if !std::sync::Arc::ptr_eq(&slot.node, node) {
+                    slot.node = std::sync::Arc::clone(node);
+                }
+            }
+        }
         #[cfg(feature = "diagnostics-timing")]
         let node_patch_ms = elapsed_ms(node_patch_started);
         #[cfg(feature = "diagnostics-timing")]
