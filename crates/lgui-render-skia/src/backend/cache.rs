@@ -25,7 +25,7 @@ pub(super) struct ParagraphCacheKey {
 
 pub(super) struct CachedParagraph {
     id: EntryId,
-    paragraph: Paragraph,
+    shaped: ShapedText,
     bytes: usize,
     used: u64,
     retention: lgui_core::memory::RetentionClass,
@@ -152,13 +152,7 @@ impl SkiaCache {
         if let Some(entry) = self.paragraphs.get_mut(&key) {
             self.text_hits = self.text_hits.saturating_add(1);
             entry.used = self.generation;
-            paint_recolored_paragraph(
-                canvas,
-                rect,
-                &mut entry.paragraph,
-                style.vertical_align,
-                paint_color,
-            );
+            entry.shaped.paint(canvas, rect, paint_color);
             return;
         }
         self.text_misses = self.text_misses.saturating_add(1);
@@ -171,8 +165,10 @@ impl SkiaCache {
             self.text_rendering,
         );
         paragraph.layout(rect.width().max(1.0));
-        paint_recolored_paragraph(canvas, rect, &mut paragraph, style.vertical_align, paint_color);
-        let bytes = paragraph_cache_entry_bytes(text, &paragraph);
+        let shaped = ShapedText::from_paragraph(&mut paragraph, rect, style.vertical_align);
+        drop(paragraph);
+        shaped.paint(canvas, rect, paint_color);
+        let bytes = shaped.estimated_bytes().saturating_add(text.len());
         self.resident_bytes = self.resident_bytes.saturating_add(bytes);
         let id = self.allocate_id();
         self.slots.insert(id, Slot::Paragraph(key.clone()));
@@ -180,7 +176,7 @@ impl SkiaCache {
             key,
             CachedParagraph {
                 id,
-                paragraph,
+                shaped,
                 bytes,
                 used: self.generation,
                 retention: lgui_core::memory::RetentionClass::Session,
@@ -491,36 +487,6 @@ pub(super) fn scene_text_layout_request<'a>(
     lgui_core::text::TextLayoutRequest::for_style(text, rect, &style)
 }
 
-/// Draws a cached paragraph's glyph runs in `color`, at the same place `Paragraph::paint` would.
-pub(super) fn paint_recolored_paragraph(
-    canvas: &Canvas,
-    rect: UiRect,
-    paragraph: &mut Paragraph,
-    vertical_align: lgui_core::text::TextVerticalAlign,
-    color: SkColor,
-) {
-    let y = rect.top + vertical_align_offset(paragraph, rect, vertical_align);
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(color);
-    canvas.save();
-    canvas.clip_rect(sk_rect(rect), None, true);
-    paragraph.visit(|_line, info| {
-        let Some(info) = info else {
-            return;
-        };
-        let origin = info.origin();
-        canvas.draw_glyphs_at(
-            info.glyphs(),
-            info.positions(),
-            (rect.left + origin.x, y + origin.y),
-            info.font(),
-            &paint,
-        );
-    });
-    canvas.restore();
-}
-
 #[allow(dead_code)]
 pub(super) fn paint_cached_paragraph(
     canvas: &Canvas,
@@ -535,13 +501,77 @@ pub(super) fn paint_cached_paragraph(
     canvas.restore();
 }
 
-/// Estimated heap size of a shaped paragraph. A Skia paragraph keeps its shaped
-/// runs, glyph data and font references alive, which measured at roughly 8 KiB
-/// per short label in a running application (the previous 2 KiB base counted a
-/// quarter of that, so budgets and observers saw a cache far smaller than it
-/// was).
-pub(super) fn paragraph_cache_entry_bytes(text: &str, paragraph: &Paragraph) -> usize {
-    8192usize
-        .saturating_add(text.len())
-        .saturating_add(paragraph.line_number().saturating_mul(256))
+/// One run of positioned glyphs of a shaped label.
+pub(super) struct ShapedRun {
+    glyphs: Vec<u16>,
+    positions: Vec<skia_safe::Point>,
+    font: skia_safe::Font,
+    origin: skia_safe::Point,
+}
+
+/// What painting a label needs from its shaped paragraph. A Skia `Paragraph` keeps its whole
+/// layout alive (tens of KB for a short label); the glyph runs are a few hundred bytes, so only
+/// they are cached and the paragraph is dropped right after it is first painted.
+pub(super) struct ShapedText {
+    /// Vertical offset from the top of the text rect, resolved once for the cached rect and align.
+    y_offset: f32,
+    runs: Vec<ShapedRun>,
+}
+
+impl ShapedText {
+    fn from_paragraph(
+        paragraph: &mut Paragraph,
+        rect: UiRect,
+        vertical_align: lgui_core::text::TextVerticalAlign,
+    ) -> Self {
+        let y_offset = vertical_align_offset(paragraph, rect, vertical_align);
+        let mut runs = Vec::new();
+        paragraph.visit(|_line, info| {
+            let Some(info) = info else {
+                return;
+            };
+            runs.push(ShapedRun {
+                glyphs: info.glyphs().to_vec(),
+                positions: info.positions().to_vec(),
+                font: info.font().clone(),
+                origin: info.origin(),
+            });
+        });
+        Self { y_offset, runs }
+    }
+
+    fn estimated_bytes(&self) -> usize {
+        self.runs.iter().fold(256, |bytes, run| {
+            bytes
+                .saturating_add(run.glyphs.len().saturating_mul(2))
+                .saturating_add(
+                    run.positions
+                        .len()
+                        .saturating_mul(std::mem::size_of::<skia_safe::Point>()),
+                )
+                .saturating_add(128)
+        })
+    }
+
+    /// Draws the glyph runs in `color`, at the same place `Paragraph::paint` would.
+    fn paint(&self, canvas: &Canvas, rect: UiRect, color: SkColor) {
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_color(color);
+        canvas.save();
+        canvas.clip_rect(sk_rect(rect), None, true);
+        for run in &self.runs {
+            canvas.draw_glyphs_at(
+                &run.glyphs,
+                run.positions.as_slice(),
+                (
+                    rect.left + run.origin.x,
+                    rect.top + self.y_offset + run.origin.y,
+                ),
+                &run.font,
+                &paint,
+            );
+        }
+        canvas.restore();
+    }
 }
