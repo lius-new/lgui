@@ -623,8 +623,8 @@ fn strip_present(
     let target = super::winit_windows::StripTarget::begin(window)
         .ok_or_else(|| error("no device context for the window".to_owned()))?;
     let width = frame.viewport().width().max(1);
-    // About 256 KB per band.
-    let rows = (256 * 1024 / (width * 4)).clamp(16, 256);
+    // About 64 KB per band: a band buffer is held for the life of the window.
+    let rows = (64 * 1024 / (width * 4)).clamp(8, 256);
     let started = Instant::now();
     renderer
         .draw_banded(scene, frame, rows, |rect, bytes| {
