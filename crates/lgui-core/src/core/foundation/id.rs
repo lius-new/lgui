@@ -1,18 +1,27 @@
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StaticUiId(&'static str);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct UiId(Cow<'static, str>);
+/// A node identity. Ids are long path-like strings that every layer keys its tables by and
+/// stores in parent and child lists, so cloning one must not copy the text: an owned id is
+/// shared behind an `Arc`.
+#[derive(Clone)]
+pub struct UiId(IdText);
+
+#[derive(Clone)]
+enum IdText {
+    Static(&'static str),
+    Shared(Arc<str>),
+}
 
 impl UiId {
     pub fn new(value: &'static str) -> Self {
-        Self(Cow::Borrowed(value))
+        Self(IdText::Static(value))
     }
 
     pub fn owned(value: impl Into<String>) -> Self {
-        Self(Cow::Owned(value.into()))
+        Self(IdText::Shared(Arc::from(value.into())))
     }
 
     pub fn from_parts(parts: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
@@ -31,7 +40,10 @@ impl UiId {
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        match &self.0 {
+            IdText::Static(text) => text,
+            IdText::Shared(text) => text,
+        }
     }
 }
 
@@ -83,5 +95,28 @@ impl UiIdPath {
             .collect();
         parts.push(leaf.as_ref());
         UiId::from_parts(parts)
+    }
+}
+
+impl fmt::Debug for UiId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("UiId").field(&self.as_str()).finish()
+    }
+}
+
+impl PartialEq for UiId {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (IdText::Shared(a), IdText::Shared(b)) if Arc::ptr_eq(a, b) => true,
+            _ => self.as_str() == other.as_str(),
+        }
+    }
+}
+
+impl Eq for UiId {}
+
+impl std::hash::Hash for UiId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
     }
 }
