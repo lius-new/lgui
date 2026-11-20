@@ -18,7 +18,7 @@ pub(super) struct ParagraphCacheKey {
     width: u32,
     height: u32,
     style: TextStyle,
-    families: Vec<&'static str>,
+    families: &'static [&'static str],
     rasterization: TextRasterization,
     hinting: lgui_core::text::TextHinting,
 }
@@ -144,7 +144,7 @@ impl SkiaCache {
                 color: Color(0),
                 ..style
             },
-            families: families.to_vec(),
+            families,
             rasterization,
             hinting: if rasterization == TextRasterization::Grayscale {
                 self.text_rendering.grayscale_hinting()
