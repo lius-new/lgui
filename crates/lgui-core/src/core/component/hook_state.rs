@@ -119,6 +119,7 @@ pub struct UiUpdateQueue {
     pending: Mutex<Vec<QueuedHookUpdate>>,
     focus_request: Mutex<Option<UiId>>,
     frame_requested: AtomicBool,
+    signals: Mutex<HashSet<usize>>,
     wake: RwLock<Option<UiWake>>,
 }
 
@@ -224,6 +225,11 @@ impl UiUpdateQueue {
                 .expect("hook focus request lock poisoned")
                 .is_none()
             && !self.frame_requested.load(Ordering::Acquire)
+            && self
+                .signals
+                .lock()
+                .expect("signal queue poisoned")
+                .is_empty()
     }
 
     pub fn clear(&self) {
@@ -236,6 +242,7 @@ impl UiUpdateQueue {
             .expect("hook focus request lock poisoned")
             .take();
         self.frame_requested.store(false, Ordering::Release);
+        self.signals.lock().expect("signal queue poisoned").clear();
     }
 
     fn wake(&self) {
@@ -254,3 +261,18 @@ impl UiUpdateQueue {
 #[cfg(test)]
 #[path = "hook_state_test.rs"]
 mod tests;
+
+impl UiUpdateQueue {
+    /// Records that the signal with this key changed and wakes the loop.
+    pub fn signal_changed(&self, key: usize) {
+        self.signals
+            .lock()
+            .expect("signal queue poisoned")
+            .insert(key);
+        self.wake();
+    }
+
+    pub(crate) fn take_signals(&self) -> HashSet<usize> {
+        std::mem::take(&mut *self.signals.lock().expect("signal queue poisoned"))
+    }
+}

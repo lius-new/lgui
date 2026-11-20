@@ -382,3 +382,79 @@ fn click(session: &mut UiSession, point: Point) {
         }
     }
 }
+
+#[test]
+fn signal_binding_patches_its_node_without_running_any_component() {
+    use crate::core::{Signal, ellipse};
+    let executions = Arc::new(AtomicUsize::new(0));
+    let handle = Arc::new(Mutex::new(None::<Signal<bool>>));
+    let view: AppView = Arc::new({
+        let executions = Arc::clone(&executions);
+        let handle = Arc::clone(&handle);
+        move |_cx| {
+            component((), {
+                let executions = Arc::clone(&executions);
+                let handle = Arc::clone(&handle);
+                move |cx, _| {
+                    executions.fetch_add(1, Ordering::SeqCst);
+                    let hot = cx.signal(false);
+                    *handle.lock().expect("handle poisoned") = Some(hot.clone());
+                    group(UiRect::new(0.0, 0.0, 400.0, 300.0)).content((
+                        text(
+                            UiRect::new(20.0, 20.0, 180.0, 60.0),
+                            "unchanged",
+                            TextStyle::new(Color::WHITE, 18.0, 400),
+                        ),
+                        ellipse(
+                            UiRect::new(20.0, 80.0, 60.0, 120.0),
+                            VisualStyle::filled(Color::BLACK),
+                        )
+                        .public_id("dot")
+                        .bind(&hot, |hot, node| {
+                            node.style = VisualStyle::filled(if *hot {
+                                Color::WHITE
+                            } else {
+                                Color::BLACK
+                            });
+                        }),
+                    ))
+                }
+            })
+        }
+    });
+    let viewport = UiRect::new(0.0, 0.0, 400.0, 300.0);
+    let mut session = UiSession::new();
+    session.render_view(&view, viewport, UiScale::ONE);
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+
+    handle
+        .lock()
+        .expect("handle poisoned")
+        .as_ref()
+        .expect("signal missing")
+        .set(true);
+    let pending = session.apply_pending_updates();
+    assert!(pending.dirty_ids.len() == 1);
+    let commit = session.render_view(&view, viewport, UiScale::ONE);
+
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    assert!(commit.metrics.visited_host_nodes <= 2);
+    assert!(!commit.damage.dirty.is_full());
+    assert!(commit.damage.dirty.dirty_area() < commit.damage.dirty.viewport_area() / 4.0);
+    let dot = session
+        .tree()
+        .nodes()
+        .iter()
+        .find(|node| node.style.fill == Some(Color::WHITE))
+        .expect("bound node was not patched");
+    assert_eq!(dot.layout_rect, UiRect::new(20.0, 80.0, 60.0, 120.0));
+
+    // Setting an equal value changes nothing.
+    handle
+        .lock()
+        .expect("handle poisoned")
+        .as_ref()
+        .expect("signal missing")
+        .set(true);
+    assert!(session.apply_pending_updates().dirty_ids.is_empty());
+}

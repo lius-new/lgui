@@ -25,6 +25,7 @@ pub struct HostTreeBuilder {
     seen_by_owner: HashMap<super::ComponentId, HashSet<UiId>>,
     structure_changed: bool,
     projection_metrics: HostProjectionMetrics,
+    bindings: Vec<(UiId, usize, crate::core::NodeBinding)>,
 }
 
 struct RenderTransaction<'a> {
@@ -65,6 +66,7 @@ impl HostTreeBuilder {
             seen_by_owner: HashMap::new(),
             structure_changed: false,
             projection_metrics: HostProjectionMetrics::default(),
+            bindings: Vec::new(),
         }
     }
 
@@ -77,6 +79,7 @@ impl HostTreeBuilder {
             seen_by_owner: HashMap::new(),
             structure_changed: false,
             projection_metrics: HostProjectionMetrics::default(),
+            bindings: Vec::new(),
         }
     }
 
@@ -94,6 +97,8 @@ impl HostTreeBuilder {
 
     pub(crate) fn mount_element(&mut self, element: UiElement) -> UiId {
         self.projection_metrics.visited_nodes += 1;
+        let mut element = element;
+        let bindings = element.take_bindings();
         let (mut node, children, boundary) = element.into_parts();
         if node.parent.is_none() {
             node.parent = self.parent_stack.last().cloned();
@@ -102,6 +107,9 @@ impl HostTreeBuilder {
             node.placement_source = node.parent.clone();
         }
         let id = node.id.clone();
+        for (slot, binding) in bindings.into_iter().enumerate() {
+            self.bindings.push((id.clone(), slot, binding));
+        }
         let previous_children = self
             .tree
             .node(&id)
@@ -275,6 +283,10 @@ impl HostTreeBuilder {
         effects.end_frame(component_tree);
         transaction.commit();
         root
+    }
+
+    pub(crate) fn take_bindings(&mut self) -> Vec<(UiId, usize, crate::core::NodeBinding)> {
+        std::mem::take(&mut self.bindings)
     }
 
     pub fn finish(self) -> HostTree {

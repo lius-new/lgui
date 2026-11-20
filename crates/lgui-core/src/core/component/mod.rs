@@ -19,6 +19,7 @@ mod observable;
 mod reactor;
 mod runtime;
 mod scope;
+mod signal;
 
 pub use component_state::{
     ComponentActionOutcome, ComponentState, ComponentStateStore, CompositingLayerAnimation,
@@ -35,3 +36,4 @@ pub use observable::{Observable, ObservableListener};
 pub use reactor::{RenderCx, State, StateSetter, UiFocusHandle};
 pub use runtime::{PendingUpdateOutput, RuntimeOutput, UiDefaultAction, UiRuntime};
 pub use scope::UiScope;
+pub use signal::{NodeBinding, NodePatch, Signal, SignalBindings};

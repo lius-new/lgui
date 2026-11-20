@@ -34,6 +34,7 @@ pub struct UiRuntime {
     pub(super) contexts: ContextRegistry,
     pub(super) hook_states: HookStateStore,
     pub(super) hook_updates: Arc<UiUpdateQueue>,
+    pub(super) signal_bindings: crate::core::SignalBindings,
     pub(super) task_spawner: Option<UiTaskSpawner>,
     pub(super) effects: EffectRegistry,
     pub(super) dirty: DirtyTracker,
@@ -135,6 +136,31 @@ impl UiRuntime {
         }
     }
 
+    pub(crate) fn register_signal_binding(
+        &self,
+        node: UiId,
+        slot: usize,
+        binding: &crate::core::NodeBinding,
+    ) {
+        self.signal_bindings.register(node, slot, binding);
+    }
+
+    /// Patches the nodes bound to signals that changed since the last call, in place, and marks
+    /// them changed. No component runs and no element is rebuilt.
+    pub(crate) fn apply_signal_patches(&mut self, tree: &mut HostTree) -> Vec<UiId> {
+        let changed = self.hook_updates.take_signals();
+        if changed.is_empty() {
+            return Vec::new();
+        }
+        let mut patched = Vec::new();
+        for (id, apply) in self.signal_bindings.patches(changed, tree) {
+            if tree.patch_node(&id, |node| apply(node)) {
+                patched.push(id);
+            }
+        }
+        patched
+    }
+
     pub fn effects(&self) -> &EffectRegistry {
         &self.effects
     }
@@ -162,6 +188,7 @@ impl UiRuntime {
     }
 
     pub fn clear_hook_state(&mut self) {
+        self.signal_bindings.clear();
         self.hook_updates.clear();
         self.hook_states.clear();
     }

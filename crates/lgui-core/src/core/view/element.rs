@@ -14,6 +14,7 @@ pub struct UiElement {
     node: UiNode,
     children: Arc<Vec<UiElement>>,
     component_boundary: Option<ComponentBoundary>,
+    bindings: Vec<crate::core::NodeBinding>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +39,7 @@ impl UiElement {
             node,
             children: Arc::new(Vec::new()),
             component_boundary: None,
+            bindings: Vec::new(),
         }
     }
     pub fn new(id: UiId, kind: UiNodeKind, rect: UiRect) -> Self {
@@ -45,6 +47,7 @@ impl UiElement {
             node: UiNode::new(id, kind, rect),
             children: Arc::new(Vec::new()),
             component_boundary: None,
+            bindings: Vec::new(),
         }
     }
 
@@ -571,6 +574,7 @@ impl UiElement {
             node: self.node.clone(),
             children: Arc::new(Vec::new()),
             component_boundary: self.component_boundary,
+            bindings: Vec::new(),
         }
     }
 
@@ -580,6 +584,14 @@ impl UiElement {
             retain_children: true,
         });
         self
+    }
+
+    pub(crate) fn push_binding(&mut self, binding: crate::core::NodeBinding) {
+        self.bindings.push(binding);
+    }
+
+    pub(crate) fn take_bindings(&mut self) -> Vec<crate::core::NodeBinding> {
+        std::mem::take(&mut self.bindings)
     }
 
     pub(crate) fn into_parts(self) -> (UiNode, Arc<Vec<UiElement>>, Option<ComponentBoundary>) {

@@ -38,6 +38,7 @@ pub struct Element {
     shadow: Option<crate::core::ShadowStyle>,
     focus_scope: bool,
     defer_children: bool,
+    bindings: Vec<crate::core::NodeBinding>,
     children: Vec<Element>,
 }
 
@@ -122,8 +123,24 @@ impl Element {
             shadow: None,
             focus_scope: false,
             defer_children: false,
+            bindings: Vec::new(),
             children: Vec::new(),
         }
+    }
+
+    /// Keeps a node property following `signal` without re-rendering any component: when the
+    /// signal changes, `patch` rewrites this element's node in place.
+    pub fn bind<T>(
+        mut self,
+        signal: &crate::core::Signal<T>,
+        patch: impl Fn(&T, &mut crate::core::UiNode) + Send + Sync + 'static,
+    ) -> Self
+    where
+        T: Clone + Send + 'static,
+    {
+        self.bindings
+            .push(crate::core::NodeBinding::new(signal, patch));
+        self
     }
 
     pub fn child(mut self, child: impl Into<Element>) -> Self {
@@ -301,6 +318,9 @@ impl Element {
         }
         if let Some(shadow) = self.shadow {
             element = element.shadow(shadow);
+        }
+        for binding in self.bindings {
+            element.push_binding(binding);
         }
         element
     }

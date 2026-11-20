@@ -237,6 +237,24 @@ impl HostTree {
         self.nodes.get_mut(index).map(Arc::make_mut)
     }
 
+    /// Rewrites a node in place and records it as changed when the rewrite changed what it
+    /// projects.
+    pub(crate) fn patch_node(&mut self, id: &UiId, patch: impl FnOnce(&mut UiNode)) -> bool {
+        let Some(index) = self.node_indices.get(id).copied() else {
+            return false;
+        };
+        let mut next = (*self.nodes[index]).clone();
+        patch(&mut next);
+        if self.nodes[index].projection_eq(&next) {
+            return false;
+        }
+        let previous = Arc::clone(&self.nodes[index]);
+        self.mark_runtime_sync_for_update(&previous, &next);
+        self.projection_changes.changed.insert(id.clone());
+        self.nodes[index] = Arc::new(next);
+        true
+    }
+
     pub(crate) fn changed_nodes(&self, changed: &HashSet<UiId>) -> Vec<&Arc<UiNode>> {
         let mut indices = changed
             .iter()

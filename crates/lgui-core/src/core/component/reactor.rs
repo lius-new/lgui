@@ -269,6 +269,19 @@ impl<'a, 'ctx> RenderCx<'a, 'ctx> {
         self.create_state_hook(self.scope.node_id(), initial)
     }
 
+    /// A value that bound nodes follow without re-rendering this component. See
+    /// [`Signal`](super::Signal).
+    pub fn signal<T>(&mut self, initial: T) -> super::Signal<T>
+    where
+        T: Clone + Send + 'static,
+    {
+        let id = self.next_hook(HookKind::State);
+        let value = self
+            .context
+            .hook_state(id, || Arc::new(Mutex::new(initial)));
+        super::Signal::new(value, self.context.hook_updates())
+    }
+
     pub fn use_component_state<T, R>(&mut self, update: impl FnOnce(&mut T) -> R) -> R
     where
         T: ComponentState + Clone + Default + 'static,

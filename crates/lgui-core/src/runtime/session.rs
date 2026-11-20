@@ -259,11 +259,17 @@ impl UiSession {
             scale,
         );
         let metrics = builder.projection_metrics();
+        for (node, slot, binding) in builder.take_bindings() {
+            self.runtime.register_signal_binding(node, slot, &binding);
+        }
         (builder.finish(), metrics)
     }
 
     pub fn apply_pending_updates(&mut self) -> crate::core::PendingUpdateOutput {
-        let updates = self.runtime.apply_pending_updates(&self.tree);
+        let mut updates = self.runtime.apply_pending_updates(&self.tree);
+        updates
+            .dirty_ids
+            .extend(self.runtime.apply_signal_patches(&mut self.tree));
         if updates.focus_changed {
             self.invalidate_all();
         }
