@@ -121,11 +121,7 @@ impl SignalBindings {
     }
 
     /// The patches to apply for the signals that changed, for nodes still in `tree`.
-    pub(crate) fn patches(
-        &self,
-        changed: HashSet<usize>,
-        tree: &HostTree,
-    ) -> Vec<(UiId, Apply)> {
+    pub(crate) fn patches(&self, changed: HashSet<usize>, tree: &HostTree) -> Vec<(UiId, Apply)> {
         let mut by_signal = self.by_signal.borrow_mut();
         let mut patches = Vec::new();
         for key in changed {

@@ -1,12 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use super::SizeConstraints;
-use super::measure::{
-    IntrinsicInput, MeasurementCache, content_rect, desired_size, intrinsic_input, rect_size,
-};
+use super::measure::{MeasurementCache, content_rect, desired_size, intrinsic_input, rect_size};
 #[cfg(test)]
-use super::{EdgeInsets, Size};
-use super::{HostTree, LayoutSpec, UiId, UiRect};
+use super::{EdgeInsets, LayoutSpec, Size, SizeConstraints};
+use super::{HostTree, UiId, UiRect};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Axis {
@@ -45,21 +42,35 @@ pub enum LayoutInvalidation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LayoutInput {
     parent: Option<UiId>,
-    children: Vec<UiId>,
-    spec: LayoutSpec,
-    sizing: Option<SizeConstraints>,
-    item: super::LayoutItem,
-    position: super::Position,
-    visibility: super::Visibility,
-    overflow: super::Overflow,
-    public_id: Option<std::sync::Arc<str>>,
-    z_index: i32,
+    /// Hash of the child ids. The ids themselves live on the node.
+    children: u64,
+    /// Hash of every other input that is read from the node: spec, sizing, item, position,
+    /// visibility, overflow, public id, z-index, content offset and intrinsic size. Only change
+    /// detection needs the previous value, so a fingerprint is kept instead of a second copy of
+    /// the node's layout data. Two inputs that differ have different fingerprints unless two
+    /// 64-bit hashes collide.
+    fingerprint: u64,
     clip: Option<UiRect>,
-    offset: crate::core::Point,
-    intrinsic: Option<IntrinsicInput>,
     rect: UiRect,
     hit_rect: UiRect,
     paint_bounds: UiRect,
+}
+
+/// Hashes the `Debug` form of values without building a string.
+struct DebugHasher(std::collections::hash_map::DefaultHasher);
+
+impl std::fmt::Write for DebugHasher {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        std::hash::Hasher::write(&mut self.0, text.as_bytes());
+        Ok(())
+    }
+}
+
+fn debug_fingerprint(value: &impl std::fmt::Debug) -> u64 {
+    use std::fmt::Write;
+    let mut hasher = DebugHasher(std::collections::hash_map::DefaultHasher::new());
+    let _ = write!(hasher, "{value:?}");
+    std::hash::Hasher::finish(&hasher.0)
 }
 
 #[derive(Clone)]
@@ -131,23 +142,22 @@ impl LayoutRuntime {
                     id.clone(),
                     LayoutInput {
                         parent: node.parent.clone(),
-                        children: node.children.clone(),
-                        spec: node.layout.clone(),
-                        sizing: node.size_constraints,
-                        item: node.layout_item,
-                        position: node.position.clone(),
-                        visibility: node.visibility,
-                        overflow: node.overflow,
-                        public_id: node.public_id.clone(),
-                        z_index: node.z_index,
+                        children: debug_fingerprint(&node.children),
+                        fingerprint: debug_fingerprint(&(
+                            &node.layout,
+                            node.size_constraints,
+                            node.layout_item,
+                            &node.position,
+                            node.visibility,
+                            node.overflow,
+                            &node.public_id,
+                            node.z_index,
+                            node.content_offset,
+                            intrinsic_input(node),
+                        )),
                         clip: retained
                             .filter(|(_, output)| node.clip_rect == output.clip)
                             .map_or(node.clip_rect, |(input, _)| input.clip),
-                        offset: crate::core::Point::new(
-                            node.content_offset.0,
-                            node.content_offset.1,
-                        ),
-                        intrinsic: intrinsic_input(node),
                         rect: retained
                             .filter(|(_, output)| node.layout_rect == output.layout_rect)
                             .map_or(node.layout_rect, |(input, _)| input.rect),

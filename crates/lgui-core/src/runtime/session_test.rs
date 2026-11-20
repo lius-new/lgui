@@ -411,11 +411,8 @@ fn signal_binding_patches_its_node_without_running_any_component() {
                         )
                         .public_id("dot")
                         .bind(&hot, |hot, node| {
-                            node.style = VisualStyle::filled(if *hot {
-                                Color::WHITE
-                            } else {
-                                Color::BLACK
-                            });
+                            node.style =
+                                VisualStyle::filled(if *hot { Color::WHITE } else { Color::BLACK });
                         }),
                     ))
                 }
