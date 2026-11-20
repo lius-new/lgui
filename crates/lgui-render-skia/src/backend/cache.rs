@@ -23,6 +23,9 @@ pub(super) struct ParagraphCacheKey {
     hinting: lgui_core::text::TextHinting,
 }
 
+/// Most shaped labels kept at once.
+const TEXT_ENTRY_LIMIT: usize = 448;
+
 pub(super) struct CachedParagraph {
     id: EntryId,
     shaped: ShapedText,
@@ -35,13 +38,13 @@ pub(super) struct CachedParagraph {
 /// Where an [`EntryId`] lives, so an entry can be evicted without a scan.
 pub(super) enum Slot {
     Image(String),
-    Paragraph(ParagraphCacheKey),
+    Paragraph(Arc<ParagraphCacheKey>),
 }
 
 pub struct SkiaCache {
     pub(super) text_rendering: lgui_core::text::TextRenderingOptions,
     pub(super) entries: HashMap<String, CachedImage>,
-    pub(super) paragraphs: HashMap<ParagraphCacheKey, CachedParagraph>,
+    pub(super) paragraphs: HashMap<Arc<ParagraphCacheKey>, CachedParagraph>,
     pub(super) slots: HashMap<EntryId, Slot>,
     next_entry_id: u64,
     hooks: Option<CacheHooks>,
@@ -171,7 +174,8 @@ impl SkiaCache {
         let bytes = shaped.estimated_bytes().saturating_add(text.len());
         self.resident_bytes = self.resident_bytes.saturating_add(bytes);
         let id = self.allocate_id();
-        self.slots.insert(id, Slot::Paragraph(key.clone()));
+        let key = Arc::new(key);
+        self.slots.insert(id, Slot::Paragraph(Arc::clone(&key)));
         self.paragraphs.insert(
             key,
             CachedParagraph {
@@ -184,7 +188,33 @@ impl SkiaCache {
             },
         );
         self.evict_to_budget();
+        self.trim_text_entries();
         self.notify(CacheEvent::Inserted(id));
+    }
+
+    /// Keeps the shaped-text cache to a bounded number of entries. Scrolling a long list shapes
+    /// thousands of distinct labels, but only the ones near the viewport are drawn again, so the
+    /// least recently used are dropped in batches (never one drawn this frame).
+    fn trim_text_entries(&mut self) {
+        if self.paragraphs.len() <= TEXT_ENTRY_LIMIT {
+            return;
+        }
+        let keep = TEXT_ENTRY_LIMIT * 3 / 4;
+        let mut used: Vec<u64> = self.paragraphs.values().map(|entry| entry.used).collect();
+        let drop = used.len() - keep;
+        let cutoff = *used.select_nth_unstable(drop).1;
+        let current = self.generation;
+        let stale: Vec<Arc<ParagraphCacheKey>> = self
+            .paragraphs
+            .iter()
+            .filter(|(_, entry)| entry.used < cutoff && entry.used < current)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in stale {
+            if self.remove_paragraph(&key).is_some() {
+                self.text_evictions = self.text_evictions.saturating_add(1);
+            }
+        }
     }
 
     pub(super) fn get(&mut self, key: &str) -> Option<Image> {
@@ -450,7 +480,7 @@ impl CacheView for SkiaCache {
                         self.evictions = self.evictions.saturating_add(1);
                     }
                 }
-                let paragraphs: Vec<ParagraphCacheKey> = self
+                let paragraphs: Vec<Arc<ParagraphCacheKey>> = self
                     .paragraphs
                     .iter()
                     .filter(|(_, entry)| stale(entry.used))
