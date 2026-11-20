@@ -148,3 +148,10 @@ impl SignalBindings {
         self.by_signal.borrow_mut().clear();
     }
 }
+
+/// Two handles are equal when they are the same signal, so one can be a component prop.
+impl<T> PartialEq for Signal<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.value, &other.value)
+    }
+}
