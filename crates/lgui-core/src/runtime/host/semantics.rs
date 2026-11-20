@@ -26,10 +26,13 @@ impl HostRuntime {
             semantic.semantics.state.hidden |= !tree.is_visible(&node.id);
             semantic.semantics.state.disabled |=
                 tree.is_visible(&node.id) && !tree.is_interactive(&node.id);
-            if full || self.semantics.get(&node.id) != Some(&semantic) {
-                nodes.push(semantic.clone());
+            // Only the change test needs the previous value, so a fingerprint is kept instead of
+            // a second copy of every node's semantics.
+            let fingerprint = fingerprint(&semantic);
+            if full || self.semantics.get(&node.id) != Some(&fingerprint) {
+                nodes.push(semantic);
             }
-            self.semantics.insert(node.id.clone(), semantic);
+            self.semantics.insert(node.id.clone(), fingerprint);
         }
         SemanticUpdate {
             nodes,
@@ -38,4 +41,13 @@ impl HostRuntime {
             full,
         }
     }
+}
+
+/// A 64-bit fingerprint of a semantic node: equal nodes have equal fingerprints, and a different
+/// node differs unless two 64-bit hashes collide.
+fn fingerprint(node: &SemanticNode) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{node:?}").hash(&mut hasher);
+    hasher.finish()
 }

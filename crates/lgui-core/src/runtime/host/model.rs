@@ -152,7 +152,8 @@ pub struct HostRuntime {
     pub(super) scene_order: Vec<HostNodeId>,
     pub(super) scene_ranges: HashMap<HostNodeId, (usize, usize)>,
     pub(super) composed_scene: Scene,
-    pub(super) semantics: HashMap<UiId, SemanticNode>,
+    /// Fingerprints of the last semantic node sent for each id.
+    pub(super) semantics: HashMap<UiId, u64>,
     pub(super) initialized: bool,
 }
 
