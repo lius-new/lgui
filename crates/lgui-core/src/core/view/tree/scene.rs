@@ -26,7 +26,8 @@ impl HostTree {
         ids.into_iter()
             .filter_map(|id| {
                 let node = self.node(&id)?;
-                let mut bounds = node_dirty_bounds(node);
+                let (dx, dy) = self.ancestor_content_offset(node);
+                let mut bounds = node_dirty_bounds(node).translate(dx, dy);
                 if let Some(root) = self.shadow_root(&id) {
                     for command in crate::core::compile_scene_root(self, &root.id).commands() {
                         bounds = bounds.union(command.paint_bounds());

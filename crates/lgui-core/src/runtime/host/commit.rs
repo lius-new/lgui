@@ -182,11 +182,15 @@ impl HostRuntime {
             let existing = self.node(id);
             let was_mounted = existing.mounted;
             let old_layout = existing.layout_bounds;
-            let old_paint = existing.paint_bounds;
+            // Paint bounds are stored in layout space. Damage is in window space, so a node
+            // inside a scrolled container is shifted by the offsets of its ancestors.
+            let (offset_x, offset_y) = tree.ancestor_content_offset(node);
+            let old_paint = existing.paint_bounds.translate(offset_x, offset_y);
+            let layout_paint = effective_node_paint_bounds(node);
             let old_parent = existing.parent;
             let old_children = existing.children.clone();
             let old_interaction = existing.interaction;
-            let next_paint = effective_node_paint_bounds(node);
+            let next_paint = layout_paint.translate(offset_x, offset_y);
             let compositing_only = was_mounted
                 && !visibility_sources.contains(&node.id)
                 && compositing_spec_only_changed(&existing.node, node)
@@ -266,7 +270,7 @@ impl HostRuntime {
             current.children = children;
             current.kind = node.kind.clone();
             current.layout_bounds = node.layout_rect;
-            current.paint_bounds = next_paint;
+            current.paint_bounds = layout_paint;
             current.interaction = flags;
             current.node = std::sync::Arc::clone(node);
         }

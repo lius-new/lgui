@@ -805,3 +805,49 @@ fn render_phase_change_rebuilds_retained_scene_root_order() {
         Some(&popup_id)
     );
 }
+
+#[test]
+fn paint_change_inside_a_scrolled_clip_damages_its_position_on_screen() {
+    let mut host = HostRuntime::new();
+    let interaction = UiInteractionState::default();
+    let viewport = UiRect::new(0.0, 0.0, 100.0, 100.0);
+    let clip_id = UiId::owned("scrolled-clip");
+    let row_id = UiId::owned("scrolled-row");
+    let make_tree = |fill| {
+        let mut tree = HostTree::new();
+        tree.push(
+            UiNode::new(clip_id.clone(), UiNodeKind::Clip, viewport).clip(viewport, 0.0, -300.0),
+        );
+        tree.push(
+            UiNode::new(
+                row_id.clone(),
+                UiNodeKind::Panel,
+                UiRect::new(0.0, 320.0, 100.0, 340.0),
+            )
+            .parent(clip_id.clone())
+            .style(VisualStyle::filled(fill)),
+        );
+        tree
+    };
+    host.commit(
+        &make_tree(crate::core::Color::BLACK),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+    let commit = host.commit(
+        &make_tree(crate::core::Color::WHITE),
+        &interaction,
+        viewport,
+        &mut InvalidationSet::new(),
+    );
+
+    let on_screen = UiRect::new(0.0, 20.0, 100.0, 40.0);
+    let covers = |rect: &UiRect| {
+        rect.left <= on_screen.left
+            && rect.top <= on_screen.top
+            && rect.right >= on_screen.right
+            && rect.bottom >= on_screen.bottom
+    };
+    assert!(commit.damage.dirty.effective_rects().iter().any(covers));
+}
