@@ -327,8 +327,8 @@ impl SkiaPainter<'_> {
         let (device, _) = matrix.map_rect(sk_rect(rect));
         let width = device.width().round().max(1.0) as i32;
         let height = device.height().round().max(1.0) as i32;
-        let left = device.left.round();
-        let top = device.top.round();
+        let left = snap_device(device.left);
+        let top = snap_device(device.top);
         let Some(image) = self.icon(key, width, height, style)? else {
             return Ok(());
         };
@@ -533,6 +533,16 @@ fn rasterize_svg_icon(svg: &str, width: i32, height: i32, key: &str) -> Result<I
     Ok(surface.image_snapshot())
 }
 
+/// Rounds a device coordinate to the nearest pixel, a half going up. Banded
+/// painting translates the canvas by whole pixels, so the result must move by
+/// exactly that much: `f32::round` sends halves away from zero, which put an
+/// icon whose top lay on a half pixel one row higher in a band where its
+/// coordinate was negative than in the band above, and the two halves of the
+/// icon no longer met.
+fn snap_device(value: f32) -> f32 {
+    (value + 0.5).floor()
+}
+
 #[cfg(test)]
 mod icon_tests {
     use super::*;
@@ -592,4 +602,22 @@ fn scaled_by_alpha(filter: skia_safe::ImageFilter, opacity: f32) -> skia_safe::I
     ];
     let alpha = skia_safe::color_filters::matrix_row_major(&matrix, None);
     skia_safe::image_filters::color_filter(alpha, filter.clone(), None).unwrap_or(filter)
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::snap_device;
+
+    #[test]
+    fn snapping_is_unchanged_by_whole_pixel_translation() {
+        for value in [46.5_f32, 6.5, -1.5, 0.5, -0.5, 12.25, -3.75, 99.5] {
+            for shift in [-48.0_f32, -8.0, 0.0, 8.0, 48.0] {
+                assert_eq!(
+                    snap_device(value + shift),
+                    snap_device(value) + shift,
+                    "{value} shifted by {shift}"
+                );
+            }
+        }
+    }
 }
