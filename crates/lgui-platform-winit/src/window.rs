@@ -167,6 +167,9 @@ impl WinitWindow {
                     if std::mem::take(&mut self.leave_deferred) {
                         let point = self.cursor.take().unwrap_or_default();
                         self.dispatch_input(InputEvent::PointerLeave(PointerData::mouse(point)));
+                        self.context.emit(lgui_core::window::WindowPointerLeft {
+                            window_id: self.id.clone(),
+                        });
                     }
                 }
                 self.context.emit(lgui_core::window::WindowFocusChanged {
@@ -225,6 +228,9 @@ impl WinitWindow {
                 }
                 let point = self.cursor.unwrap_or_default();
                 self.dispatch_input(InputEvent::PointerLeave(PointerData::mouse(point)));
+                self.context.emit(lgui_core::window::WindowPointerLeft {
+                    window_id: self.id.clone(),
+                });
                 self.cursor = None;
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -292,6 +298,9 @@ impl WinitWindow {
                     self.leave_deferred = false;
                     let point = self.cursor.unwrap_or_default();
                     self.dispatch_input(InputEvent::PointerLeave(PointerData::mouse(point)));
+                    self.context.emit(lgui_core::window::WindowPointerLeft {
+                        window_id: self.id.clone(),
+                    });
                     self.cursor = None;
                 }
             }

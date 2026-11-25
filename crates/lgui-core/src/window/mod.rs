@@ -22,6 +22,16 @@ pub struct WindowFocusChanged {
 impl crate::events::Event for WindowFocusChanged {
     const NAME: &'static str = "window.focus_changed";
 }
+
+/// The pointer left the window's client area, so nothing in it is hovered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowPointerLeft {
+    pub window_id: WindowId,
+}
+
+impl crate::events::Event for WindowPointerLeft {
+    const NAME: &'static str = "window.pointer_left";
+}
 pub use manager::{WindowHandle, WindowManager};
 pub use options::{
     ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowMode, WindowOptions, WindowPosition,

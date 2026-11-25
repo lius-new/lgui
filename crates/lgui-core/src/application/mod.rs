@@ -10,7 +10,7 @@ mod view;
 
 pub use crate::window::{
     ClosePolicy, WindowCloseHandler, WindowDragExclusion, WindowFocusChanged, WindowHandle,
-    WindowId, WindowManager, WindowMode, WindowOptions, WindowPosition,
+    WindowId, WindowManager, WindowMode, WindowOptions, WindowPointerLeft, WindowPosition,
 };
 pub use backend::ApplicationBackend;
 pub use builder::Application;
